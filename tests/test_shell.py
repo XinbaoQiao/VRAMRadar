@@ -869,6 +869,28 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(profile.servers[0].ssh_config_file, str(ssh_config.resolve()))
         self.assertEqual(service.snapshot()["notices"][0]["code"], "server_catalog_sync_recovered")
 
+    def test_runtime_notice_can_be_dismissed_without_persisting_profile(self):
+        service = Mock()
+        service.snapshot.return_value = {"notices": []}
+        store = Mock()
+        api = AppApi(Profile.empty("local"), store=store, paths=Mock(), service=service)
+
+        result = api.dismiss_notice("server_catalog_sync_recovered")
+
+        self.assertTrue(result["ok"])
+        service.clear_notice.assert_called_once_with("server_catalog_sync_recovered")
+        store.save.assert_not_called()
+
+    def test_runtime_notice_rejects_unbounded_or_invalid_code(self):
+        service = Mock()
+        api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=service)
+
+        result = api.dismiss_notice("../server_catalog_sync_recovered")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "invalid_notice_code")
+        service.clear_notice.assert_not_called()
+
     def test_profile_save_requires_the_current_revision(self):
         api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=Mock())
 

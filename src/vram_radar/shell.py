@@ -952,6 +952,15 @@ class AppApi:
 
         return self.service.snapshot()
 
+    def dismiss_notice(self, code: str) -> dict[str, Any]:
+        """Dismiss one bounded runtime notice without changing saved configuration."""
+
+        normalized = code.strip() if isinstance(code, str) else ""
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", normalized):
+            return {"ok": False, "error": "提示标识无效", "code": "invalid_notice_code"}
+        self.service.clear_notice(normalized)
+        return {"ok": True, "notices": self.service.snapshot().get("notices", [])}
+
     def request_background_refresh(self) -> dict[str, Any]:
         """Keep collection active while the WebView is hidden without sending its payload."""
 

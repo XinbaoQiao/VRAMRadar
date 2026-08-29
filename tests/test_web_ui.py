@@ -1080,7 +1080,7 @@ class WebUiContractTests(unittest.TestCase):
             refresh,
         )
 
-    def test_startup_notice_has_priority_and_only_renders_its_message(self):
+    def test_startup_notice_has_priority_and_is_dismissible(self):
         render = self.javascript[
             self.javascript.index("function render(snapshot)"):
             self.javascript.index("function showToast")
@@ -1092,8 +1092,12 @@ class WebUiContractTests(unittest.TestCase):
         self.assertLess(notice_branch, unavailable_branch)
         self.assertIn("escapeHtml(String(startupNotice.message).trim())", render)
         startup_branch = render[notice_branch:unavailable_branch]
-        self.assertNotIn("startupNotice.code", startup_branch)
+        self.assertIn("startupNotice.code", startup_branch)
+        self.assertIn("dismiss-notice", startup_branch)
+        self.assertIn(">关闭</button>", startup_branch)
         self.assertNotIn("startupNotice.details", startup_branch)
+        self.assertIn("const result = await api.dismiss_notice(code)", self.javascript)
+        self.assertIn("void dismissNotice(dismissNoticeButton.dataset.noticeCode)", self.javascript)
 
     def test_removed_companion_has_no_live_web_surface(self):
         combined = self.javascript + self.markup + self.styles

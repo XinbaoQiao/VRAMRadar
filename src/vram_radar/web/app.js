@@ -1780,7 +1780,7 @@ function render(snapshot) {
   ));
   if (startupNotice) {
     ui.notice.hidden = false;
-    ui.notice.innerHTML = `<div><div class="notice-title">${escapeHtml(String(startupNotice.message).trim())}</div></div>`;
+    ui.notice.innerHTML = `<div><div class="notice-title">${escapeHtml(String(startupNotice.message).trim())}</div></div><button class="button dismiss-notice" type="button" data-notice-code="${escapeHtml(String(startupNotice.code || ''))}">关闭</button>`;
   } else if (unavailable > 0 && monitoredCount > 0 && !inFlight) {
     ui.notice.hidden = false;
     ui.notice.innerHTML = `<div><div class="notice-title">${unavailable === summary.total_servers ? '所有服务器尚未监控就绪' : `${unavailable} 台服务器尚未监控就绪`}</div><div class="notice-copy">每台卡片会区分网络、认证、配置和资源读取错误；旧快照不会计入实时容量。</div></div><button class="button retry-all" type="button">全部重新验证</button>`;
@@ -1962,6 +1962,17 @@ async function refresh(force = false, serverId = null) {
     ui.notice.innerHTML = `<div><div class="notice-title">本地应用服务异常</div><div class="notice-copy">${escapeHtml(error.message || String(error))}</div></div>`;
   } finally {
     if (generation === refreshPollGeneration) ui.refresh.disabled = false;
+  }
+}
+
+async function dismissNotice(code) {
+  if (!api?.dismiss_notice || !code) return;
+  try {
+    const result = await api.dismiss_notice(code);
+    if (!result?.ok) throw new Error(result?.error || '无法关闭提示');
+    if (api?.get_snapshot) render(await api.get_snapshot());
+  } catch (error) {
+    showToast(error.message || String(error));
   }
 }
 
@@ -2926,6 +2937,8 @@ document.addEventListener('click', event => {
   if (resetDirectory) void resetDefaultDirectory(resetDirectory.dataset.serverId);
   const expandDirectories = event.target.closest('.expand-loaded-directories');
   if (expandDirectories) expandLoadedDirectories(expandDirectories.dataset.serverId);
+  const dismissNoticeButton = event.target.closest('.dismiss-notice');
+  if (dismissNoticeButton) void dismissNotice(dismissNoticeButton.dataset.noticeCode);
   if (event.target.closest('.retry-all')) refresh(true);
 });
 document.addEventListener('focusin', event => {
