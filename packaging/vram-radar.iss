@@ -1,6 +1,6 @@
 #define MyAppName "VRAM Radar"
 #ifndef MyAppVersion
-#define MyAppVersion "0.6.1"
+#define MyAppVersion "0.7.0"
 #endif
 #define MyAppPublisher "VRAM Radar"
 #define MyAppExeName "VRAMRadar.exe"
@@ -31,9 +31,11 @@ RestartApplications=yes
 Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\VRAMRadar.exe"
 Type: files; Name: "{app}\VRAMRadarAskPass.exe"
+Type: files; Name: "{app}\VRAMRadarUpdater.exe"
 
 [Files]
 Source: "..\dist\VRAMRadar\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "installed-marker.txt"; DestDir: "{app}"; DestName: ".vram-radar-installed"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "VRAMRadar.Desktop"

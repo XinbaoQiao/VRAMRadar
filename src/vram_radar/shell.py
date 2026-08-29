@@ -79,6 +79,7 @@ from .tray import (
     restore_window,
 )
 from .updates import check_latest_release
+from .updater import download_verified_asset, schedule_windows_update, windows_update_capability
 from .window_state import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WindowGeometry, WindowStateController
 
 
@@ -671,6 +672,7 @@ class AppApi:
         secret_store: object | None = None,
         *,
         automatic_import_enabled: bool = True,
+        restart_arguments: list[str] | None = None,
     ) -> None:
         self.profile = profile
         self.store = store
@@ -678,11 +680,13 @@ class AppApi:
         self.service = service
         self.secret_store = secret_store if secret_store is not None else (getattr(service, "secret_store", None) or SecretStore())
         self.latest_release_url: str | None = None
+        self._latest_release: dict[str, Any] | None = None
         self._notification_callback: Callable[[str, str], bool] | None = None
         self._key_setup_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
         self._profile_revision = 0
         self._automatic_import_enabled = bool(automatic_import_enabled)
+        self._restart_arguments = list(restart_arguments or ["--profile", profile.id])
 
     def get_profile(self) -> dict[str, Any]:
         with self._profile_mutation_lock:
@@ -2370,7 +2374,68 @@ class AppApi:
             if result.get("ok") and result.get("update_available") and result.get("release_url")
             else None
         )
+        self._latest_release = dict(result) if result.get("ok") and result.get("update_available") else None
+        asset = result.get("asset")
+        if not isinstance(asset, dict):
+            result["update_action"] = "browser"
+        elif sys.platform == "win32":
+            capable, reason = windows_update_capability()
+            result["update_action"] = "one_click" if capable else "browser"
+            if reason:
+                result["update_action_reason"] = reason
+        elif sys.platform == "darwin":
+            result["update_action"] = "verified_download"
+        else:
+            result["update_action"] = "browser"
         return result
+
+    def install_latest_update(self) -> dict[str, Any]:
+        # Re-read authoritative GitHub metadata at the action boundary. The UI
+        # cache is presentation state and must never authorize code execution.
+        result = check_latest_release()
+        if not result.get("ok") or not result.get("update_available"):
+            return {"ok": False, "error": result.get("error") or "当前没有可安装的新版本"}
+        asset = result.get("asset")
+        release_url = result.get("release_url")
+        if not isinstance(asset, dict):
+            if isinstance(release_url, str):
+                try:
+                    webbrowser.open(release_url)
+                except (OSError, webbrowser.Error):
+                    pass
+            return {"ok": False, "error": "Release 缺少可验证的安装资产，已打开下载页面"}
+        try:
+            installer = download_verified_asset(asset, Path(self.paths.cache) / "updates")
+            if sys.platform == "win32":
+                capable, reason = windows_update_capability()
+                if not capable:
+                    if isinstance(release_url, str):
+                        webbrowser.open(release_url)
+                    return {"ok": False, "error": reason or "当前版本不支持一键更新"}
+                schedule_windows_update(
+                    installer,
+                    sha256=str(asset["sha256"]),
+                    version=str(result["latest_version"]),
+                    activation_path=Path(self.paths.runtime) / f"{self.profile.id}.activation.json",
+                    restart_arguments=self._restart_arguments,
+                )
+                return {"ok": True, "scheduled": True, "message": "更新已校验，应用即将关闭并自动重启"}
+            if sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", "-R", str(installer)],
+                    close_fds=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return {
+                    "ok": True,
+                    "scheduled": False,
+                    "message": "更新包已通过 SHA-256 校验，并已在 Finder 中显示",
+                }
+            return {"ok": False, "error": "当前平台暂不支持应用内安装"}
+        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+            logging.getLogger("vram_radar").warning("safe update failed: %s", exc)
+            return {"ok": False, "error": str(exc) or "更新失败，当前版本未被修改"}
 
     def open_latest_release(self) -> dict[str, Any]:
         if self.latest_release_url is None:
@@ -2646,6 +2711,12 @@ def main(argv: list[str] | None = None) -> int:
         paths,
         service,
         automatic_import_enabled=not args.no_auto_import,
+        restart_arguments=[
+            "--profile",
+            profile.id,
+            *(["--home", str(args.home.resolve())] if args.home is not None else []),
+            *(["--no-auto-import"] if args.no_auto_import else []),
+        ],
     )
     index_path = resource_path("web/index.html")
     icon_path = resource_path("assets/app-icon.png")

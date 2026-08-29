@@ -136,20 +136,29 @@ Server states are evidence-based: **discovered** means a local entry was parsed,
 
 ### Windows
 
-Download `VRAMRadar-Setup-0.6.1.exe`. This is the recommended download. The installer uses a stable per-user application path, so the normal installation does not request administrator permission and in-place upgrades preserve the Start-menu or desktop shortcut. A custom drive is supported through a user-writable folder such as `D:\Apps\VRAM Radar`; use administrator mode only for protected locations such as `Program Files`. The public Release no longer offers a Windows portable ZIP.
+Download `VRAMRadar-Setup-0.7.0.exe`. This is the recommended download. The installer uses a stable per-user application path, so the normal installation does not request administrator permission and in-place upgrades preserve the Start-menu or desktop shortcut. A custom drive is supported through a user-writable folder such as `D:\Apps\VRAM Radar`; use administrator mode only for protected locations such as `Program Files`. The public Release no longer offers a Windows portable ZIP.
 
 The current package has no Authenticode publisher certificate. If Windows shows SmartScreen, first confirm that the file came from this repository's Latest Release, then choose **More info → Run anyway**. A managed PC may block unsigned software without an override; in that case, ask its administrator rather than weakening system protection.
 
 ### macOS
 
-Download `VRAMRadar-0.6.1-macos.zip`:
+Download `VRAMRadar-0.7.0-macos.zip`:
 
 - `VRAM Radar (Apple Silicon).app` supports M1, M2, M3, and M4 Macs, with a current validation boundary of macOS 14 or newer.
 - `VRAM Radar (Intel).app` supports Intel x86_64 Macs, with a current validation boundary of macOS 15 or newer.
 
 This release is not signed with an Apple Developer ID and is not notarized because no Apple distribution credentials are configured for the project. After extracting the archive, use Finder's right-click **Open** action on the matching `.app`, then confirm **Open** once. Do not disable Gatekeeper globally.
 
-> The current public stable release is `v0.6.1`. Update checks now start independently of server refresh, retry visibly after a network failure, and repeat while the app remains open. It also includes the v0.6.0 window, directory-cache, terminal-guidance, server-import, authentication, UI, and performance work. GitHub exposes only the two files users need to download: the Windows installer and the combined macOS archive.
+> The current public stable release is `v0.7.0`. Update checks start independently of server refresh, retry visibly after a network failure, and repeat while the app remains open. Windows installer copies now support a confirmed, SHA-256-verified update with rollback and automatic restart. GitHub exposes only the two files users need to download: the Windows installer and the combined macOS archive.
+
+This installer-enabled release adds a confirmed one-click Windows update path:
+it accepts only the exact official Release asset, verifies GitHub's
+SHA-256 digest, preserves the previous installation for rollback, and restarts
+the same executable path after success. Because `v0.6.1` does not yet contain
+the independent updater, installing that first updater-enabled version is a
+one-time manual bootstrap. On macOS, the app downloads and verifies the archive
+but asks the user to replace the `.app` manually until Developer ID signing and
+notarization are available.
 
 ## Automatic configuration coverage
 
@@ -199,7 +208,7 @@ If no source is found, follow the [Windows and macOS SSH configuration discovery
 | Stable download | x64 installer | One ZIP containing native Apple Silicon and Intel `.app` bundles |
 | Credential store | Windows Credential Manager | macOS Keychain |
 | Desktop runtime | WebView2 / native window | Cocoa / WebKit |
-| Shortcut after update | Stable install path; upgrade in place | Replace the `.app` manually |
+| Shortcut after update | Stable install path; verified one-click upgrade after the bootstrap release | Replace the `.app` manually |
 | Current signing claim | Unsigned; per-user install avoids UAC | Unsigned and unnotarized; one Finder confirmation required |
 | Update behavior | Check and notify; never auto-install | Check and notify; never auto-install |
 
@@ -207,7 +216,7 @@ More detail:
 
 - [Windows installation, notification area, and shortcut updates](docs/windows-install-and-update.md)
 - [macOS builds, architectures, and validation boundary](docs/macos-desktop.md)
-- [v0.6.1 release notes](docs/release-notes-v0.6.1.md)
+- [v0.7.0 release notes](docs/release-notes-v0.7.0.md)
 
 ## Frequently asked questions
 

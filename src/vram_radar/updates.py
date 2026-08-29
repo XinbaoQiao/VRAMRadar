@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -13,11 +14,13 @@ from .build_info import current_release_tag
 LATEST_RELEASE_API = "https://api.github.com/repositories/1347320362/releases/latest"
 RELEASES_API = "https://api.github.com/repositories/1347320362/releases?per_page=20"
 _RELEASE_PAGE_PATTERN = re.compile(
-    r"https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/"
-    r"VRAMRadar/releases/tag/(v?\d+\.\d+\.\d+(?:-macos-beta\.\d+)?)/?"
+    r"(https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/VRAMRadar)"
+    r"/releases/tag/(v?\d+\.\d+\.\d+(?:-macos-beta\.\d+)?)/?"
 )
 _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-macos-beta\.(\d+))?$")
 _MAX_RESPONSE_BYTES = 1_000_000
+_MAX_ASSET_BYTES = 250 * 1024 * 1024
+_SHA256_PATTERN = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
 
 
 def _version_tuple(value: str) -> tuple[int, int, int, int, int]:
@@ -52,9 +55,51 @@ def _trusted_release(payload: Any) -> tuple[str, str, tuple[int, int, int, int, 
     if bool(payload.get("prerelease")) != is_beta:
         return None
     release_page = _RELEASE_PAGE_PATTERN.fullmatch(release_url)
-    if release_page is None or release_page.group(1) != tag_name:
+    if release_page is None or release_page.group(2) != tag_name:
         return None
     return tag_name, release_url, version
+
+
+def _trusted_asset(payload: Any, tag_name: str, *, platform_name: str) -> dict[str, Any] | None:
+    if platform_name == "win32":
+        name = f"VRAMRadar-Setup-{tag_name.removeprefix('v')}.exe"
+    elif platform_name == "darwin":
+        name = f"VRAMRadar-{tag_name.removeprefix('v')}-macos.zip"
+    else:
+        return None
+    assets = payload.get("assets") if isinstance(payload, dict) else None
+    if not isinstance(assets, list):
+        return None
+    matches = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == name]
+    if len(matches) != 1:
+        return None
+    asset = matches[0]
+    release_url = payload.get("html_url")
+    release_page = (
+        _RELEASE_PAGE_PATTERN.fullmatch(release_url)
+        if isinstance(release_url, str)
+        else None
+    )
+    if release_page is None or release_page.group(2) != tag_name:
+        return None
+    expected_url = f"{release_page.group(1)}/releases/download/{tag_name}/{name}"
+    digest = asset.get("digest")
+    size = asset.get("size")
+    digest_match = _SHA256_PATTERN.fullmatch(digest) if isinstance(digest, str) else None
+    if (
+        asset.get("browser_download_url") != expected_url
+        or digest_match is None
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or not 1 <= size <= _MAX_ASSET_BYTES
+    ):
+        return None
+    return {
+        "name": name,
+        "url": expected_url,
+        "sha256": digest_match.group(1).lower(),
+        "size": size,
+    }
 
 
 def check_latest_release(
@@ -63,6 +108,7 @@ def check_latest_release(
     current_tag: str | None = None,
     timeout_seconds: float = 4.0,
     opener: Callable[..., Any] = urlopen,
+    platform_name: str = sys.platform,
 ) -> dict[str, Any]:
     """Check stable updates, plus newer macOS betas for a packaged beta build."""
 
@@ -110,6 +156,20 @@ def check_latest_release(
             "latest_version": tag_name.removeprefix("v"),
             "release_url": release_url,
             "published_at": published_at,
+            "asset": _trusted_asset(
+                next(
+                    (
+                        item
+                        for item in payload
+                        if isinstance(item, dict) and item.get("tag_name") == tag_name
+                    ),
+                    {},
+                )
+                if beta_channel
+                else payload,
+                tag_name,
+                platform_name=platform_name,
+            ),
         }
     except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, json.JSONDecodeError):
         return {

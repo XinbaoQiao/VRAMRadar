@@ -89,6 +89,8 @@ jobs:
           .\Build-VramRadar-Installer.ps1 -SkipBundle -Version $version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $installer = "dist-installer\VRAMRadar-Setup-$version.exe"
+          .\.venv\Scripts\python.exe tools\validate_packaged_update.py $installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item -LiteralPath $installer -Destination (Split-Path -Leaf $installer)
           foreach ($asset in @((Split-Path -Leaf $installer))) {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash.ToLowerInvariant()

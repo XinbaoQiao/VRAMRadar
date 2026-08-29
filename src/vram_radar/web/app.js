@@ -82,6 +82,7 @@ let toastTimer = null;
 let updateCheckTimer = null;
 let updateCheckInFlight = false;
 let updateAvailableShown = false;
+let latestUpdateAction = 'browser';
 let lastUpdateCheckAt = 0;
 let api = null;
 let settingsMode = 'settings';
@@ -2794,8 +2795,17 @@ async function checkForUpdates({interactive = false} = {}) {
       return;
     }
     updateAvailableShown = true;
+    latestUpdateAction = result.update_action || 'browser';
     ui.updateNotice.classList.remove('update-check-failed');
-    ui.updateNotice.innerHTML = `<div><div class="notice-title">发现 VRAM Radar ${escapeHtml(result.latest_version)}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。如使用 Windows 安装版，直接运行新安装包即可保留原快捷方式。</div></div><button class="button primary open-latest-release" type="button">下载更新</button>`;
+    const actionLabel = latestUpdateAction === 'one_click'
+      ? '安全一键更新'
+      : latestUpdateAction === 'verified_download' ? '下载并校验' : '下载更新';
+    const actionCopy = latestUpdateAction === 'one_click'
+      ? '确认后将下载官方安装包、校验 SHA-256，安装成功后自动重启。'
+      : latestUpdateAction === 'verified_download'
+        ? '更新包会先校验 SHA-256，再在 Finder 中显示。'
+        : '当前版本需要从 GitHub Release 手动安装。';
+    ui.updateNotice.innerHTML = `<div><div class="notice-title">发现 VRAM Radar ${escapeHtml(result.latest_version)}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。${actionCopy}</div></div><button class="button primary install-latest-update" type="button">${actionLabel}</button>`;
     ui.updateNotice.hidden = false;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {
@@ -2803,6 +2813,30 @@ async function checkForUpdates({interactive = false} = {}) {
     scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
   } finally {
     updateCheckInFlight = false;
+  }
+}
+
+async function installLatestUpdate(button) {
+  if (latestUpdateAction === 'browser') {
+    await api.open_latest_release();
+    return;
+  }
+  const explanation = latestUpdateAction === 'one_click'
+    ? '将从官方 GitHub Release 下载并校验安装包。校验成功后应用会关闭、安装并自动重启；失败时保留当前版本。是否继续？'
+    : '将从官方 GitHub Release 下载并校验更新包。校验成功后会在 Finder 中显示，仍需你手动替换应用。是否继续？';
+  if (!window.confirm(explanation)) return;
+  button.disabled = true;
+  const previousLabel = button.textContent;
+  button.textContent = '正在下载并校验…';
+  try {
+    const result = await api.install_latest_update();
+    showToast(result?.message || result?.error || '更新操作未完成');
+    if (!result?.ok) button.disabled = false;
+  } catch (error) {
+    showToast(error?.message || '更新失败，当前版本未被修改');
+    button.disabled = false;
+  } finally {
+    if (!button.disabled) button.textContent = previousLabel;
   }
 }
 
@@ -2869,7 +2903,8 @@ document.addEventListener('click', event => {
   const deleteView = event.target.closest('[data-delete-saved-view]');
   if (deleteView) void deleteSavedView(deleteView.dataset.deleteSavedView);
   if (event.target.closest('.open-settings')) openSettings({onboarding: !currentProfile?.servers?.length});
-  if (event.target.closest('.open-latest-release')) void api.open_latest_release();
+  const installUpdate = event.target.closest('.install-latest-update');
+  if (installUpdate) void installLatestUpdate(installUpdate);
   if (event.target.closest('.retry-update-check')) void checkForUpdates({interactive: true});
   const retry = event.target.closest('.retry-server');
   if (retry) refresh(true, retry.dataset.serverId);

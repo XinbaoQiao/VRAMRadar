@@ -1158,10 +1158,12 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("未能检查更新", self.javascript)
         self.assertIn("retry-update-check", self.javascript)
         self.assertIn("checkForUpdates({interactive: true})", self.javascript)
-        self.assertIn("api.open_latest_release()", self.javascript)
+        self.assertIn("async function installLatestUpdate", self.javascript)
+        self.assertIn("api.install_latest_update()", self.javascript)
+        self.assertIn("window.confirm(explanation)", self.javascript)
         self.assertIn(".update-notice", self.styles)
         self.assertIn(".update-notice.update-check-failed", self.styles)
-        self.assertIn("直接运行新安装包即可保留原快捷方式", self.javascript)
+        self.assertIn("下载官方安装包、校验 SHA-256", self.javascript)
 
 
 if __name__ == "__main__":

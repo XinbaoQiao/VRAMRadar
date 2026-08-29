@@ -37,12 +37,15 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn('Name: "{app}\\_internal"', self.manifest)
         self.assertIn('Name: "{app}\\VRAMRadar.exe"', self.manifest)
         self.assertIn('Name: "{app}\\VRAMRadarAskPass.exe"', self.manifest)
+        self.assertIn('Name: "{app}\\VRAMRadarUpdater.exe"', self.manifest)
         self.assertNotIn('Name: "{app}\\*"', self.manifest)
         self.assertIn("CloseApplications=yes", self.manifest)
         self.assertIn("RestartApplications=yes", self.manifest)
         self.assertIn("function PrepareToInstall", self.manifest)
         self.assertIn("--quit-existing", self.manifest)
         self.assertIn("ewWaitUntilTerminated", self.manifest)
+        self.assertIn("installed-marker.txt", self.manifest)
+        self.assertIn(".vram-radar-installed", self.manifest)
 
     def test_installer_preflights_custom_directory_permissions(self) -> None:
         self.assertIn("function VerifyInstallDirectory", self.manifest)
@@ -90,7 +93,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.assertIn(text, readme_flat)
         guide_flat = " ".join(self.guide.split())
         self.assertIn("The shortcut therefore does not contain a release number", guide_flat)
-        self.assertIn("It does not download, execute, or install code in the background", guide_flat)
+        self.assertIn("SHA-256", guide_flat)
+        self.assertIn("automatically restarts", guide_flat)
         self.assertIn("D:\\Apps\\VRAM Radar", guide_flat)
         self.assertIn("Program Files", guide_flat)
 

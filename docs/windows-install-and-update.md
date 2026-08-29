@@ -53,18 +53,26 @@ do not create a second monitor process.
 
 ## What the in-app update notice does
 
-The desktop app checks the public GitHub Release feed after startup. It only
-shows that a newer package exists and opens the trusted Release page after the
-user clicks the download action. It does not download, execute, or install code
-in the background.
+The desktop app checks the public GitHub Release feed after startup. It never
+installs in the background: the user must select **安全一键更新** and confirm the
+operation. The updater then accepts only the exact official VRAMRadar Release
+asset name and URL, limits the download size,
+and verifies the SHA-256 digest published by GitHub before executing anything.
+If metadata, size, redirect destination, or digest does not match, the update
+stops and the current installation is left unchanged.
 
-To update an installed copy:
+For an installer-managed copy with the update executor:
 
-1. Open the download action in VRAM Radar.
-2. Download the newer `VRAMRadar-Setup-<version>.exe`.
-3. Run it normally. Keep the suggested destination unless intentionally moving
-   the application.
-4. Launch VRAM Radar from the original shortcut.
+1. Select **安全一键更新** and review the confirmation.
+2. VRAM Radar downloads and verifies the official installer.
+3. The independent updater closes the current process, preserves the old
+   installation as a rollback copy, runs the verified installer, and
+   automatically restarts VRAM Radar from the same shortcut target.
+4. If installation fails, it restores and relaunches the previous version.
+
+`v0.6.1` predates the update executor. Upgrading from that version to the first
+updater-enabled release therefore requires one normal manual installer run.
+Later installer-managed releases can use the one-click path.
 
 Profiles, credentials, caches, logs, and locks live outside the install folder,
 so replacing the application bundle does not replace local user state.

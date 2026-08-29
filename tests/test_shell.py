@@ -2366,6 +2366,79 @@ class ShellApiTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         open_browser.assert_called_once_with(release_url)
 
+    def test_windows_one_click_update_rechecks_downloads_verifies_and_schedules(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            api = AppApi(Profile.empty("local"), store=None, paths=paths, service=None)  # type: ignore[arg-type]
+            asset = {
+                "name": "VRAMRadar-Setup-0.7.0.exe",
+                "url": "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe",
+                "sha256": "ab" * 32,
+                "size": 10,
+            }
+            installer = Path(temporary) / asset["name"]
+            with patch(
+                "vram_radar.shell.check_latest_release",
+                return_value={
+                    "ok": True,
+                    "update_available": True,
+                    "latest_version": "0.7.0",
+                    "release_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.7.0",
+                    "asset": asset,
+                },
+            ), patch("vram_radar.shell.sys.platform", "win32"), patch(
+                "vram_radar.shell.download_verified_asset", return_value=installer
+            ) as download, patch(
+                "vram_radar.shell.windows_update_capability", return_value=(True, None)
+            ), patch("vram_radar.shell.schedule_windows_update") as schedule:
+                result = api.install_latest_update()
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["scheduled"])
+            download.assert_called_once_with(asset, paths.cache / "updates")
+            schedule.assert_called_once_with(
+                installer,
+                sha256="ab" * 32,
+                version="0.7.0",
+                activation_path=paths.runtime / "local.activation.json",
+                restart_arguments=["--profile", "local"],
+            )
+
+    def test_macos_update_download_is_verified_before_finder_reveal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            api = AppApi(Profile.empty("local"), store=None, paths=paths, service=None)  # type: ignore[arg-type]
+            asset = {
+                "name": "VRAMRadar-0.7.0-macos.zip",
+                "url": "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-0.7.0-macos.zip",
+                "sha256": "ab" * 32,
+                "size": 10,
+            }
+            archive = Path(temporary) / asset["name"]
+            with patch(
+                "vram_radar.shell.check_latest_release",
+                return_value={
+                    "ok": True,
+                    "update_available": True,
+                    "latest_version": "0.7.0",
+                    "release_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.7.0",
+                    "asset": asset,
+                },
+            ), patch("vram_radar.shell.sys.platform", "darwin"), patch(
+                "vram_radar.shell.download_verified_asset", return_value=archive
+            ) as download, patch("vram_radar.shell.subprocess.Popen") as reveal:
+                result = api.install_latest_update()
+
+            self.assertTrue(result["ok"])
+            self.assertFalse(result["scheduled"])
+            download.assert_called_once_with(asset, paths.cache / "updates")
+            reveal.assert_called_once_with(
+                ["open", "-R", str(archive)],
+                close_fds=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
     def test_show_release_exits_without_building_runtime(self):
         with patch("vram_radar.shell.current_release_tag", return_value="v0.4.0-macos-beta.3"), patch(
             "vram_radar.shell.build_runtime"

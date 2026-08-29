@@ -110,6 +110,42 @@ askpass_exe = EXE(
     entitlements_file=None,
 )
 
+updater_collect = []
+updater_binaries = []
+if not is_macos:
+    updater_a = Analysis(
+        [str(project_root / "run_vram_radar_updater.py")],
+        pathex=[str(source_root)],
+        binaries=[],
+        datas=[],
+        hiddenimports=[],
+        hookspath=[],
+        hooksconfig={},
+        runtime_hooks=[],
+        excludes=excluded_gui_packages,
+        noarchive=False,
+        optimize=1,
+    )
+    updater_pyz = PYZ(updater_a.pure)
+    updater_exe = EXE(
+        updater_pyz,
+        updater_a.scripts,
+        updater_a.binaries,
+        updater_a.datas,
+        [],
+        exclude_binaries=False,
+        name="VRAMRadarUpdater",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=True,
+        argv_emulation=False,
+    )
+    updater_collect = [updater_exe]
+    updater_binaries = []
+
 exe_options = {}
 if not is_macos:
     exe_options["version"] = str(project_root / "packaging" / "version_info.txt")
@@ -137,8 +173,10 @@ exe = EXE(
 coll = COLLECT(
     exe,
     askpass_exe,
+    *updater_collect,
     a.binaries,
     askpass_a.binaries,
+    updater_binaries,
     a.datas,
     strip=False,
     upx=False,
