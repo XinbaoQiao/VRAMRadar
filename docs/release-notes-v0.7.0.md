@@ -22,9 +22,9 @@ existing stable installation and shortcut identity.
 - If installation or the launch probe fails, the updater restores and relaunches
   the previous version. Profiles, credentials, caches, and logs remain outside
   the replaceable installation directory.
-- macOS downloads are also SHA-256 verified and revealed in Finder. Replacing
-  the `.app` remains manual until Developer ID signing and notarization are
-  configured.
+- macOS downloads are also SHA-256 verified and revealed in Finder. Both native
+  applications are Developer ID signed, notarized, stapled, and independently
+  accepted by Gatekeeper before the combined archive can be published.
 
 ### First updater bootstrap
 
@@ -34,11 +34,11 @@ the one-click path.
 
 ### Platform security boundary
 
-The Windows installer is not Authenticode signed. The macOS apps are not
-Developer ID signed or notarized because distribution credentials are not
-configured for this project. Verify that the package came from this repository's
-Latest Release and follow the scoped first-launch instructions in the README;
-do not disable platform security globally.
+The Windows installer is not Authenticode signed. The macOS apps are Developer
+ID signed, notarized, and stapled. The release workflow fails closed unless both
+Apple Silicon and Intel packages pass signature, notarization-ticket, and
+Gatekeeper verification. Always verify that the package came from this
+repository's Latest Release; do not disable platform security globally.
 
 ---
 
@@ -62,8 +62,8 @@ do not disable platform security globally.
   是否能启动，并使用同一份本地 Profile 自动重启。
 - 安装或启动探测失败时，自动恢复并重新启动旧版本。Profile、凭据、缓存和日志
   位于安装目录之外，不参与替换。
-- macOS 更新包同样会校验 SHA-256 并在 Finder 中定位；在配置 Developer ID 签名
-  和公证之前，替换 `.app` 仍需用户手动完成。
+- macOS 更新包同样会校验 SHA-256 并在 Finder 中定位；两种原生架构应用均经过
+  Developer ID 签名、Apple 公证和票据装订，并在合包发布前分别通过 Gatekeeper 验证。
 
 ### 首次启用更新器
 
@@ -72,6 +72,7 @@ do not disable platform security globally.
 
 ### 平台安全边界
 
-Windows 安装器尚未使用 Authenticode 签名；macOS 应用也尚未使用 Developer ID
-签名或公证，因为项目没有配置发行凭据。请确认安装包来自本仓库 Latest Release，
-再按 README 的最短首次启动步骤操作；不要全局关闭系统安全保护。
+Windows 安装器尚未使用 Authenticode 签名；macOS 应用已经过 Developer ID 签名、
+Apple 公证和票据装订。发布流程只有在 Apple Silicon 与 Intel 应用均通过签名、
+公证票据和 Gatekeeper 验证后才会继续。请确认安装包来自本仓库 Latest Release；
+不要全局关闭系统安全保护。
