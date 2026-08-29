@@ -378,7 +378,7 @@ class TrayControllerTests(unittest.TestCase):
         window = Mock()
         geometry = WindowGeometry(1040, 720)
         native_order = []
-        with patch(
+        with patch("vram_radar.tray.sys.platform", "win32"), patch(
             "vram_radar.tray.recover_offscreen_windows_window",
             side_effect=lambda *_args: (native_order.append("recover") or True),
         ) as recover, patch(
@@ -402,7 +402,11 @@ class TrayControllerTests(unittest.TestCase):
         )
         with patch("vram_radar.tray.sys.platform", "win32"), patch(
             "vram_radar.tray._native_window_handle", return_value=321
-        ), patch("vram_radar.tray.ctypes.windll", SimpleNamespace(user32=user32)):
+        ), patch(
+            "vram_radar.tray.ctypes.windll",
+            SimpleNamespace(user32=user32),
+            create=True,
+        ):
             self.assertTrue(tray.refresh_windows_window_surface(Mock()))
 
         self.assertEqual(len(calls), 1)
@@ -479,7 +483,11 @@ class TrayControllerTests(unittest.TestCase):
         )
         with patch("vram_radar.tray.sys.platform", "win32"), patch(
             "vram_radar.tray._native_window_handle", return_value=321
-        ), patch("vram_radar.tray.ctypes.windll", SimpleNamespace(user32=user32)):
+        ), patch(
+            "vram_radar.tray.ctypes.windll",
+            SimpleNamespace(user32=user32),
+            create=True,
+        ):
             self.assertTrue(tray.native_window_is_normal(Mock()))
             state["iconic"] = 1
             self.assertFalse(tray.native_window_is_normal(Mock()))
@@ -600,7 +608,7 @@ class TrayControllerTests(unittest.TestCase):
         fake_windll = SimpleNamespace(user32=user32)
         with patch("vram_radar.tray.sys.platform", "win32"), patch(
             "vram_radar.tray._native_window_handle", return_value=321
-        ), patch("vram_radar.tray.ctypes.windll", fake_windll), patch(
+        ), patch("vram_radar.tray.ctypes.windll", fake_windll, create=True), patch(
             "vram_radar.tray.time.sleep"
         ):
             recovered = tray.recover_offscreen_windows_window(

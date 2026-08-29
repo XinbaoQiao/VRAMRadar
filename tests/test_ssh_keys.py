@@ -44,6 +44,8 @@ class SshKeyTests(unittest.TestCase):
             public = root / "id_ed25519.pub"
             private.write_text("PRIVATE-CANARY", encoding="utf-8")
             public.write_text(PUBLIC_LINE + "\n", encoding="utf-8")
+            if os.name != "nt":
+                private.chmod(0o600)
 
             with patch("vram_radar.ssh_keys._derive_public_key", return_value=PUBLIC_LINE):
                 prepared = prepare_existing_key(str(private), str(public))
@@ -66,12 +68,16 @@ class SshKeyTests(unittest.TestCase):
             Path(f"{target}.pub").write_text(PUBLIC_LINE + " generated\n", encoding="utf-8")
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
+        def protect(path):
+            if os.name != "nt":
+                path.chmod(0o600)
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "keys"
             with (
                 patch("vram_radar.ssh_keys._ssh_keygen", return_value="ssh-keygen"),
                 patch("vram_radar.ssh_keys._run_keygen", side_effect=generate),
-                patch("vram_radar.ssh_keys.protect_private_key"),
+                patch("vram_radar.ssh_keys.protect_private_key", side_effect=protect),
             ):
                 first = prepare_generated_key(root, "local", "gpu")
             self.assertTrue(first.generated)

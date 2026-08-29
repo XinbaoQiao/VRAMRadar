@@ -697,7 +697,12 @@ class ConnectorTests(unittest.TestCase):
 
         argv = ssh_argv(server, "hostname")
 
-        self.assertEqual(argv[1:3], ["-F", str(Path("D:/ssh/editor-ssh.conf").resolve())])
+        expected_config = (
+            str(Path("D:/ssh/editor-ssh.conf").resolve())
+            if os.name == "nt"
+            else "D:/ssh/editor-ssh.conf"
+        )
+        self.assertEqual(argv[1:3], ["-F", expected_config])
         self.assertIn("editor-only-alias", argv)
 
     def test_key_auth_keeps_openssh_config_identity_and_agent_path(self):
