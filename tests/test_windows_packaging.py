@@ -19,6 +19,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertNotIn("MyAppVersion}", self.manifest.split("DefaultDirName=", 1)[1].splitlines()[0])
         self.assertIn("UsePreviousAppDir=yes", self.manifest)
         self.assertIn("UsePreviousTasks=yes", self.manifest)
+        self.assertIn("DisableDirPage=no", self.manifest)
 
     def test_shortcuts_keep_a_stable_executable_and_shell_identity(self) -> None:
         icon_lines = [
@@ -58,6 +59,15 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.manifest.index("VerifyInstallDirectory(Result)"),
             self.manifest.index("--quit-existing"),
         )
+
+    def test_packaged_update_validation_cannot_replace_user_install_registration(self) -> None:
+        validator = (ROOT / "tools" / "validate_packaged_update.py").read_text(encoding="utf-8")
+        helper = (ROOT / "src" / "vram_radar" / "update_helper.py").read_text(encoding="utf-8")
+        self.assertIn("Uninstallable=not IsValidationInstall", self.manifest)
+        self.assertIn("CreateUninstallRegKey=not IsValidationInstall", self.manifest)
+        self.assertIn("/VRAMRADARVALIDATION=1", validator)
+        self.assertIn('"validation_mode": True', validator)
+        self.assertIn('command.append("/VRAMRADARVALIDATION=1")', helper)
 
     def test_windows_bundle_contains_notification_area_lifecycle(self) -> None:
         tray_source = (ROOT / "src" / "vram_radar" / "tray.py").read_text(encoding="utf-8")

@@ -19,7 +19,9 @@ The shortcut therefore does not contain a release number and does not need to
 be created again.
 
 The default is a per-user installation and does not require administrator
-permission. A different drive is also supported: choose a directory owned by
+permission. Interactive Setup always shows **Select Destination Location** so
+the user can confirm or change the exact drive and folder before files are
+written. A different drive is also supported: choose a directory owned by
 your account, such as `D:\Apps\VRAM Radar` or `D:\VRAM Radar`. Windows protects
 locations such as `D:\Program Files`; to install there, close Setup and launch
 it explicitly with **Run as administrator**. Before replacing any files, Setup
@@ -87,6 +89,9 @@ Build the Windows bundle, then compile the installer:
 ```
 
 The packaging contract tests pin the stable application ID, directory,
-executable target, previous-install reuse, and scoped cleanup rules. A release
+executable target, visible destination picker, previous-install reuse, and
+scoped cleanup rules. Packaged update validation runs in a dedicated mode that
+cannot register its disposable install as the user's real installed copy or
+create shortcuts. A release
 must still install an older setup, create its shortcut, install the newer setup
 over it, and launch through that original shortcut before publication.

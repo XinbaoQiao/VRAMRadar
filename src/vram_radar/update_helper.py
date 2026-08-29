@@ -80,6 +80,7 @@ def run_update(plan_path: Path) -> int:
     version = str(plan["version"])
     pid = int(plan["pid"])
     restart_arguments = plan.get("restart_arguments")
+    validation_mode = plan.get("validation_mode", False)
     if (
         executable.parent != install_root
         or executable.name.lower() != "vramradar.exe"
@@ -89,6 +90,7 @@ def run_update(plan_path: Path) -> int:
         or not (install_root / INSTALL_MARKER).is_file()
         or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None
         or not isinstance(restart_arguments, list)
+        or not isinstance(validation_mode, bool)
         or len(restart_arguments) not in {2, 3, 4, 5}
         or restart_arguments[0] != "--profile"
         or not isinstance(restart_arguments[1], str)
@@ -96,6 +98,8 @@ def run_update(plan_path: Path) -> int:
     ):
         raise ValueError("unsafe update plan")
     tail = restart_arguments[2:]
+    if validation_mode and (len(tail) < 2 or tail[0] != "--home"):
+        raise ValueError("unsafe validation update plan")
     if tail not in ([], ["--no-auto-import"]):
         if (
             len(tail) not in {2, 3}
@@ -138,6 +142,8 @@ def run_update(plan_path: Path) -> int:
             "/NORESTART",
             f"/DIR={install_root}",
         ]
+        if validation_mode:
+            command.append("/VRAMRADARVALIDATION=1")
         completed = subprocess.run(command, check=False, timeout=180)
         _status(plan_path, f"installer-exit-{completed.returncode}")
         if completed.returncode != 0 or not executable.is_file() or not (install_root / INSTALL_MARKER).is_file():

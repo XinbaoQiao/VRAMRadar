@@ -385,6 +385,27 @@ def resolve_ssh_config_path(server: ServerProfile) -> str:
     return _expand_profile_path(server.ssh_config_file, default_directory=Path.home() / ".ssh")
 
 
+def _effective_ssh_config_path(server: ServerProfile) -> str:
+    """Return the explicit or default OpenSSH config used for alias connections.
+
+    OpenSSH normally discovers ``~/.ssh/config`` itself.  That implicit lookup
+    is not reliable for desktop children launched from every Windows shell and
+    trust context, especially when ``.ssh`` is a junction.  Supplying ``-F``
+    keeps monitoring, connection tests, and copied commands on the same config
+    file without changing any of OpenSSH's Host/Include/ProxyJump semantics.
+    """
+
+    if server.ssh_config_file:
+        return resolve_ssh_config_path(server)
+    if not server.ssh_alias:
+        return ""
+    default_config = Path.home() / ".ssh" / "config"
+    try:
+        return str(default_config) if default_config.is_file() else ""
+    except OSError:
+        return ""
+
+
 def resolve_identity_path(server: ServerProfile) -> str:
     return _expand_profile_path(server.identity_file, default_directory=Path.home() / ".ssh")
 
@@ -400,8 +421,9 @@ def ssh_login_argv(
         f"{server.username}@{server.host}" if server.username else server.host
     )
     options: list[str] = []
-    if server.ssh_config_file:
-        options.extend(["-F", resolve_ssh_config_path(server)])
+    config_path = _effective_ssh_config_path(server)
+    if config_path:
+        options.extend(["-F", config_path])
     if server.ssh_alias and server.host:
         options.extend(["-o", f"HostName={server.host}"])
     if server.ssh_alias and server.username:

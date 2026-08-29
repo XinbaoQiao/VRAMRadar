@@ -66,7 +66,15 @@ def validate(installer: Path) -> None:
         home = root / "home"
         profile = "packaged-update-test"
         subprocess.run(
-            [str(installer), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", f"/DIR={install_root}", "/TASKS="],
+            [
+                str(installer),
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                f"/DIR={install_root}",
+                "/TASKS=",
+                "/VRAMRADARVALIDATION=1",
+            ],
             check=True,
             timeout=180,
         )
@@ -101,6 +109,7 @@ def validate(installer: Path) -> None:
                 "restart_arguments": [
                     "--profile", profile, "--home", str(home), "--no-auto-import",
                 ],
+                "validation_mode": True,
             }
             plan_path = stage / "update-plan.json"
             plan_path.write_text(json.dumps(plan, separators=(",", ":")), encoding="utf-8")

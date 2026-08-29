@@ -2558,6 +2558,38 @@ def _server_sync_sources(primary: Path | None) -> list[Path]:
     ]
 
 
+def _recover_matching_openssh_source(
+    profile: Profile,
+    sources: list[Path],
+) -> tuple[Profile, list[str], Path] | None:
+    """Recover a legacy/broken catalog only when one SSH source covers it all."""
+
+    active_aliases = {
+        server.ssh_alias.casefold()
+        for server in profile.servers
+        if server.ssh_alias
+    }
+    if not active_aliases:
+        return None
+    for source in sources:
+        if source.suffix.casefold() == ".toml":
+            continue
+        try:
+            imported, _warnings = import_server_config(source)
+        except (ConfigError, OSError):
+            continue
+        imported_aliases = {
+            server.ssh_alias.casefold()
+            for server in imported
+            if server.ssh_alias
+        }
+        if not active_aliases.issubset(imported_aliases):
+            continue
+        synchronized, warnings = profile_from_server_config(profile, source)
+        return synchronized, warnings, source
+    return None
+
+
 def build_runtime(
     profile_id: str,
     home: Path | None,
@@ -2602,16 +2634,40 @@ def build_runtime(
         if explicit_source:
             raise
         logger.warning("server catalog auto-sync failed: %s", exc)
-        startup_notices.append(
-            {
-                "code": "server_catalog_sync_failed",
-                "severity": "error",
-                "message": (
-                    "服务器自动同步失败，当前列表未按本地配置更新："
-                    f"{exc}。请在设置中检查服务器配置文件路径和内容。"
-                ),
-            }
-        )
+        recovery_sources = sources
+        if not recovery_sources:
+            try:
+                recovery_sources = resolve_server_configs(include_openssh=True)
+            except (ConfigError, OSError):
+                recovery_sources = []
+        recovered = _recover_matching_openssh_source(profile, recovery_sources)
+        if recovered is not None:
+            synchronized, warnings, recovered_source = recovered
+            store.save(synchronized)
+            profile = synchronized
+            for warning in warnings:
+                logger.warning("server catalog recovery: %s", warning)
+            startup_notices.append(
+                {
+                    "code": "server_catalog_sync_recovered",
+                    "severity": "warning",
+                    "message": (
+                        "原服务器同步文件已失效；已自动改用能够覆盖当前全部服务器的 "
+                        f"OpenSSH 配置：{recovered_source}。"
+                    ),
+                }
+            )
+        else:
+            startup_notices.append(
+                {
+                    "code": "server_catalog_sync_failed",
+                    "severity": "error",
+                    "message": (
+                        "服务器自动同步失败，当前列表未按本地配置更新："
+                        f"{exc}。请在设置中检查服务器配置文件路径和内容。"
+                    ),
+                }
+            )
     secret_store = SecretStore()
     service = DashboardService(
         profile,

@@ -640,6 +640,24 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("-l") + 1], "alice")
         self.assertEqual(argv[argv.index("-p") + 1], "10022")
 
+    def test_alias_connection_explicitly_uses_existing_default_openssh_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            config = home / ".ssh" / "config"
+            config.parent.mkdir()
+            config.write_text("Host gpu-alias\n  HostName gpu.example\n", encoding="utf-8")
+            server = ServerProfile(
+                id="a",
+                display_name="A",
+                backend="direct_ssh",
+                ssh_alias="gpu-alias",
+            )
+            with patch("vram_radar.connectors.Path.home", return_value=home):
+                argv = ssh_login_argv(server)
+
+        self.assertEqual(argv[argv.index("-F") + 1], str(config))
+        self.assertEqual(argv[-2:], ["--", "gpu-alias"])
+
     def test_relative_identity_and_config_paths_share_the_ssh_directory_base(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

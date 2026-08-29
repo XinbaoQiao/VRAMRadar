@@ -32,6 +32,53 @@ class FakeDownload:
 
 
 class UpdateDownloadTests(unittest.TestCase):
+    def test_validation_update_keeps_installer_out_of_user_registration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install_root = root / "install"
+            install_root.mkdir()
+            executable = install_root / "VRAMRadar.exe"
+            executable.write_bytes(b"old application")
+            (install_root / ".vram-radar-installed").write_text("old marker", encoding="utf-8")
+            stage = root / "stage"
+            stage.mkdir()
+            installer = stage / "VRAMRadar-Setup-0.7.0.exe"
+            installer.write_bytes(b"verified installer")
+            plan = {
+                "schema_version": 1,
+                "pid": 123,
+                "app_executable": str(executable),
+                "install_root": str(install_root),
+                "installer": str(installer),
+                "sha256": hashlib.sha256(installer.read_bytes()).hexdigest(),
+                "version": "0.7.0",
+                "activation_path": str(root / "activation.json"),
+                "restart_arguments": ["--profile", "test", "--home", str(root / "home"), "--no-auto-import"],
+                "validation_mode": True,
+            }
+            plan_path = stage / "update-plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            completed = subprocess.CompletedProcess([], 0)
+
+            def run_command(command, **_kwargs):
+                if command[0] == str(installer.resolve()):
+                    install_root.mkdir()
+                    executable.write_bytes(b"updated application")
+                    (install_root / ".vram-radar-installed").write_text(
+                        "updated marker",
+                        encoding="utf-8",
+                    )
+                return completed
+
+            with patch("vram_radar.update_helper._wait_for_exit", return_value=True), patch(
+                "vram_radar.update_helper.subprocess.run",
+                side_effect=run_command,
+            ) as run, patch("vram_radar.update_helper.subprocess.Popen"):
+                run_update(plan_path)
+
+        installer_command = run.call_args_list[1].args[0]
+        self.assertIn("/VRAMRADARVALIDATION=1", installer_command)
+
     def test_verified_asset_is_committed_only_after_size_and_hash_match(self):
         data = b"official installer bytes"
         url = "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe"

@@ -864,10 +864,18 @@ def openssh_config_dependency_fingerprint(path: str | Path) -> str:
     the entry before its digest is reused.
     """
 
-    source = _resolved(path)
-    if not source.is_file():
+    try:
+        source = _resolved(path)
+        is_file = source.is_file()
+    except (OSError, RuntimeError):
+        # A cache fingerprint is an optimization, never a connection gate.
+        # Windows can reject canonicalization through an otherwise readable
+        # junction with ERROR_UNTRUSTED_MOUNT_POINT (448).  Treat that case as
+        # an unreadable dependency instead of invalidating every server cache.
+        return "unreadable"
+    if not is_file:
         return "missing"
-    cache_key = os.path.normcase(str(source.resolve()))
+    cache_key = os.path.normcase(str(source))
     with _OPENSSH_FINGERPRINT_CACHE_LOCK:
         cached = _OPENSSH_FINGERPRINT_CACHE.get(cache_key)
         if cached is not None:

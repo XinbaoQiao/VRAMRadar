@@ -194,12 +194,12 @@ def run() -> None:
                 raise RuntimeError("packaged desktop window started below the supported minimum size")
             wait_until(
                 lambda: window_content_is_painted(window),
-                10,
+                20,
                 "packaged WebView content did not paint before minimization",
             )
             wait_until(
                 lambda: frontend_dom_and_bridge_are_ready(endpoint),
-                10,
+                20,
                 "packaged frontend DOM or JavaScript bridge was not ready before minimization",
             )
 

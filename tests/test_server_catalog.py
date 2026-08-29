@@ -316,6 +316,16 @@ Host !blocked *.example.com exact-host
 
             self.assertNotEqual(before, after)
 
+    def test_openssh_fingerprint_canonicalization_failure_is_nonfatal(self):
+        with patch(
+            "vram_radar.server_catalog._resolved",
+            side_effect=OSError(448, "untrusted mount point"),
+        ):
+            self.assertEqual(
+                openssh_config_dependency_fingerprint("~/.ssh/config"),
+                "unreadable",
+            )
+
     def test_tilde_openssh_path_is_dispatched_without_toml_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)

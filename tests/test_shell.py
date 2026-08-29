@@ -776,6 +776,99 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(notices[0]["severity"], "error")
         self.assertIn("自动同步失败", notices[0]["message"])
 
+    def test_startup_recovers_invalid_catalog_when_one_openssh_source_covers_all_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "profile-home"
+            invalid_catalog = root / "servers.toml"
+            invalid_catalog.write_text("version = 1\n", encoding="utf-8")
+            ssh_config = root / "config"
+            ssh_config.write_text(
+                "Host gpu-a\n  HostName a.example\n"
+                "Host gpu-b\n  HostName b.example\n",
+                encoding="utf-8",
+            )
+            paths = storage_paths(home)
+            ProfileStore(paths).save(
+                Profile.from_dict(
+                    {
+                        "schema_version": 1,
+                        "id": "isolated",
+                        "display_name": "My GPUs",
+                        "server_config_path": str(invalid_catalog),
+                        "auto_sync_servers": True,
+                        "servers": [
+                            {
+                                "id": "first",
+                                "display_name": "First",
+                                "backend": "direct_ssh",
+                                "ssh_alias": "gpu-a",
+                            },
+                            {
+                                "id": "second",
+                                "display_name": "Second",
+                                "backend": "slurm_ssh",
+                                "ssh_alias": "gpu-b",
+                            },
+                        ],
+                    }
+                )
+            )
+            with patch(
+                "vram_radar.shell.resolve_server_configs",
+                return_value=[invalid_catalog.resolve(), ssh_config.resolve()],
+            ), patch("vram_radar.shell.configure_logging", return_value=Mock()):
+                _, store, profile, service = build_runtime("isolated", home)
+                persisted = store.load("isolated")
+
+        self.assertEqual(profile.server_config_path, str(ssh_config.resolve()))
+        self.assertTrue(profile.auto_sync_servers)
+        self.assertEqual(
+            [server.ssh_config_file for server in profile.servers],
+            [str(ssh_config.resolve()), str(ssh_config.resolve())],
+        )
+        self.assertEqual(profile.servers[1].backend, "slurm_ssh")
+        self.assertEqual(persisted, profile)
+        notices = service.snapshot()["notices"]
+        self.assertEqual(notices[0]["code"], "server_catalog_sync_recovered")
+
+    def test_startup_recovers_missing_catalog_when_discovered_openssh_covers_aliases(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "profile-home"
+            missing_catalog = root / "missing-servers.toml"
+            ssh_config = root / "config"
+            ssh_config.write_text("Host gpu-a\n  HostName a.example\n", encoding="utf-8")
+            paths = storage_paths(home)
+            ProfileStore(paths).save(
+                Profile.from_dict(
+                    {
+                        "schema_version": 1,
+                        "id": "isolated",
+                        "display_name": "My GPUs",
+                        "server_config_path": str(missing_catalog),
+                        "auto_sync_servers": True,
+                        "servers": [
+                            {
+                                "id": "first",
+                                "display_name": "First",
+                                "backend": "direct_ssh",
+                                "ssh_alias": "gpu-a",
+                            }
+                        ],
+                    }
+                )
+            )
+            with patch(
+                "vram_radar.shell.resolve_server_configs",
+                return_value=[ssh_config.resolve()],
+            ), patch("vram_radar.shell.configure_logging", return_value=Mock()):
+                _, _, profile, service = build_runtime("isolated", home)
+
+        self.assertEqual(profile.server_config_path, str(ssh_config.resolve()))
+        self.assertEqual(profile.servers[0].ssh_config_file, str(ssh_config.resolve()))
+        self.assertEqual(service.snapshot()["notices"][0]["code"], "server_catalog_sync_recovered")
+
     def test_profile_save_requires_the_current_revision(self):
         api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=Mock())
 
