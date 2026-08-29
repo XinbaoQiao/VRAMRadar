@@ -1148,8 +1148,19 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("async function checkForUpdates", self.javascript)
         self.assertNotIn("clientMode", self.javascript)
         self.assertIn("void checkForUpdates()", self.javascript)
+        initialize = self.javascript[self.javascript.index("async function initialize()") :]
+        self.assertLess(
+            initialize.index("void checkForUpdates()"),
+            initialize.index("await loadApplication()"),
+        )
+        self.assertIn("UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000", self.javascript)
+        self.assertIn("UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000", self.javascript)
+        self.assertIn("未能检查更新", self.javascript)
+        self.assertIn("retry-update-check", self.javascript)
+        self.assertIn("checkForUpdates({interactive: true})", self.javascript)
         self.assertIn("api.open_latest_release()", self.javascript)
         self.assertIn(".update-notice", self.styles)
+        self.assertIn(".update-notice.update-check-failed", self.styles)
         self.assertIn("直接运行新安装包即可保留原快捷方式", self.javascript)
 
 

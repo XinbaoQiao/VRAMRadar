@@ -136,20 +136,20 @@ Server states are evidence-based: **discovered** means a local entry was parsed,
 
 ### Windows
 
-Download `VRAMRadar-Setup-0.6.0.exe`. This is the recommended download. The installer uses a stable per-user application path, so the normal installation does not request administrator permission and in-place upgrades preserve the Start-menu or desktop shortcut. A custom drive is supported through a user-writable folder such as `D:\Apps\VRAM Radar`; use administrator mode only for protected locations such as `Program Files`. The public Release no longer offers a Windows portable ZIP.
+Download `VRAMRadar-Setup-0.6.1.exe`. This is the recommended download. The installer uses a stable per-user application path, so the normal installation does not request administrator permission and in-place upgrades preserve the Start-menu or desktop shortcut. A custom drive is supported through a user-writable folder such as `D:\Apps\VRAM Radar`; use administrator mode only for protected locations such as `Program Files`. The public Release no longer offers a Windows portable ZIP.
 
 The current package has no Authenticode publisher certificate. If Windows shows SmartScreen, first confirm that the file came from this repository's Latest Release, then choose **More info → Run anyway**. A managed PC may block unsigned software without an override; in that case, ask its administrator rather than weakening system protection.
 
 ### macOS
 
-Download `VRAMRadar-0.6.0-macos.zip`:
+Download `VRAMRadar-0.6.1-macos.zip`:
 
 - `VRAM Radar (Apple Silicon).app` supports M1, M2, M3, and M4 Macs, with a current validation boundary of macOS 14 or newer.
 - `VRAM Radar (Intel).app` supports Intel x86_64 Macs, with a current validation boundary of macOS 15 or newer.
 
 This release is not signed with an Apple Developer ID and is not notarized because no Apple distribution credentials are configured for the project. After extracting the archive, use Finder's right-click **Open** action on the matching `.app`, then confirm **Open** once. Do not disable Gatekeeper globally.
 
-> The current public stable release is `v0.6.0`, adding reliable window restore, bounded directory caching, one-click terminal guidance, safer server import/authentication, and the latest UI/performance work. GitHub exposes only the two files users need to download: the Windows installer and the combined macOS archive.
+> The current public stable release is `v0.6.1`. Update checks now start independently of server refresh, retry visibly after a network failure, and repeat while the app remains open. It also includes the v0.6.0 window, directory-cache, terminal-guidance, server-import, authentication, UI, and performance work. GitHub exposes only the two files users need to download: the Windows installer and the combined macOS archive.
 
 ## Automatic configuration coverage
 
@@ -207,7 +207,7 @@ More detail:
 
 - [Windows installation, notification area, and shortcut updates](docs/windows-install-and-update.md)
 - [macOS builds, architectures, and validation boundary](docs/macos-desktop.md)
-- [v0.6.0 release notes](docs/release-notes-v0.6.0.md)
+- [v0.6.1 release notes](docs/release-notes-v0.6.1.md)
 
 ## Frequently asked questions
 

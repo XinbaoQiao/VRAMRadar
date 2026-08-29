@@ -94,6 +94,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 30px 28px 54px; }
 .first-run-action { min-width: 180px; margin-top: 20px; }
 .global-notice { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 15px; margin-bottom: 14px; background: color-mix(in srgb, var(--amber) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--amber) 55%, var(--border)); border-left-width: 3px; border-radius: var(--radius-sm); }
 .update-notice { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 15px; margin-bottom: 14px; background: color-mix(in srgb, var(--cyan) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--cyan) 55%, var(--border)); border-left-width: 3px; border-radius: var(--radius-sm); }
+.update-notice.update-check-failed { background: color-mix(in srgb, var(--amber) 7%, var(--surface)); border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); }
 .notice-title { font-weight: 700; }
 .notice-copy { color: var(--muted); font-size: 13px; margin-top: 3px; }
 .dashboard-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 13px; }

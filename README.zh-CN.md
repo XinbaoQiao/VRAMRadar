@@ -136,25 +136,25 @@ VRAM Radar 不是对终端工具的重新包装，也不要求你放弃它们。
 
 ### Windows
 
-下载 `VRAMRadar-Setup-0.6.0.exe`。默认按当前用户安装，不需要管理员权限；安装器会创建稳定的开始菜单 / 桌面快捷方式，后续运行新版安装器会原位升级并保留用户 Profile。可以安装到 `D:\Apps\VRAM Radar` 等当前用户可写目录；只有选择 `Program Files` 等受保护目录时才需要管理员权限。
+下载 `VRAMRadar-Setup-0.6.1.exe`。默认按当前用户安装，不需要管理员权限；安装器会创建稳定的开始菜单 / 桌面快捷方式，后续运行新版安装器会原位升级并保留用户 Profile。可以安装到 `D:\Apps\VRAM Radar` 等当前用户可写目录；只有选择 `Program Files` 等受保护目录时才需要管理员权限。
 
 当前 Windows 包没有 Authenticode 发布者证书。如果 SmartScreen 弹出提示，请先确认文件来自本仓库的 Latest Release，再点击 **更多信息 → 仍要运行**。单位管理的电脑可能不允许绕过未签名软件，此时应联系管理员，不要关闭系统安全保护。
 
 ### macOS
 
-下载 `VRAMRadar-0.6.0-macos.zip`：
+下载 `VRAMRadar-0.6.1-macos.zip`：
 
 - `VRAM Radar (Apple Silicon).app`：M1 / M2 / M3 / M4，当前验证边界为 macOS 14 或更新版本。
 - `VRAM Radar (Intel).app`：Intel x86_64，当前验证边界为 macOS 15 或更新版本。
 
 当前项目没有配置 Apple 分发凭据，因此公开 Mac 包没有 Developer ID 签名和公证。解压后，在 Finder 中右击对应 `.app`，选择 **打开**，再确认一次 **打开**；不要全局关闭 Gatekeeper。
 
-> 当前公开稳定版为 `v0.6.0`，增加可靠的窗口恢复、有界目录缓存、一键打开命令窗口、更安全的服务器导入 / 认证，以及最新 UI 与性能优化。GitHub Release 只保留 Windows 安装器与合并后的 macOS 下载包。
+> 当前公开稳定版为 `v0.6.1`。更新检查现在不再等待服务器刷新；网络失败会显示重试入口，应用持续运行时也会定期复查。同时包含 v0.6.0 的窗口恢复、有界目录缓存、一键打开命令窗口、服务器导入 / 认证、UI 与性能优化。GitHub Release 只保留 Windows 安装器与合并后的 macOS 下载包。
 
 <details>
 <summary><strong>发布包边界</strong></summary>
 
-`VRAMRadar-Setup-0.6.0.exe` 是 Windows 推荐下载。原位升级会保留固定安装路径，因此开始菜单和桌面快捷方式仍然有效。公开 Release 不再提供 Windows 便携 ZIP，只保留用户实际需要的两个文件：Windows 安装器和合并后的 macOS 包。
+`VRAMRadar-Setup-0.6.1.exe` 是 Windows 推荐下载。原位升级会保留固定安装路径，因此开始菜单和桌面快捷方式仍然有效。公开 Release 不再提供 Windows 便携 ZIP，只保留用户实际需要的两个文件：Windows 安装器和合并后的 macOS 包。
 
 当前版本未使用 Apple Developer ID 签名，也未经过 Apple 公证。首次启动时，请在 Finder 中右击应用并选择 **打开**，并仅在信任本仓库时确认系统提示。
 
@@ -216,7 +216,7 @@ OpenSSH 本身无法告诉应用某个别名是 Direct SSH 还是 Slurm，所以
 
 - [Windows 安装、通知区域与快捷方式更新](docs/windows-install-and-update.md)
 - [macOS 构建、架构与验证边界](docs/macos-desktop.md)
-- [v0.6.0 发布说明](docs/release-notes-v0.6.0.md)
+- [v0.6.1 发布说明](docs/release-notes-v0.6.1.md)
 
 ## 常见问题
 

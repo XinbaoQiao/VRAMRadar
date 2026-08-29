@@ -79,6 +79,10 @@ let refreshPollTimer = null;
 let refreshPollGeneration = 0;
 let refreshDeferredWhileHidden = false;
 let toastTimer = null;
+let updateCheckTimer = null;
+let updateCheckInFlight = false;
+let updateAvailableShown = false;
+let lastUpdateCheckAt = 0;
 let api = null;
 let settingsMode = 'settings';
 let onboardingStep = 1;
@@ -88,6 +92,9 @@ let serverEditorSequence = 0;
 let settingsSaveInFlight = false;
 let pendingIgnoredSshAliases = new Set();
 let dashboardDisclosureMode = 'default';
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000;
+const UPDATE_CHECK_ON_FOCUS_AFTER_MS = 60 * 60 * 1000;
 let recommendationRequested = false;
 let activeServerId = '';
 let serverNavigationFrame = null;
@@ -2749,23 +2756,61 @@ async function loadApplication() {
   if (!hasServers) openSettings({onboarding: true});
 }
 
-async function checkForUpdates() {
+function scheduleUpdateCheck(delayMilliseconds) {
+  clearTimeout(updateCheckTimer);
+  updateCheckTimer = setTimeout(() => {
+    void checkForUpdates();
+  }, delayMilliseconds);
+}
+
+function showUpdateCheckFailure(message = '暂时无法连接 GitHub') {
+  if (updateAvailableShown) return;
+  ui.updateNotice.classList.add('update-check-failed');
+  ui.updateNotice.innerHTML = `<div><div class="notice-title">未能检查更新</div><div class="notice-copy">${escapeHtml(message)}，不会影响服务器监控。</div></div><button class="button retry-update-check" type="button">重试</button>`;
+  ui.updateNotice.hidden = false;
+}
+
+async function checkForUpdates({interactive = false} = {}) {
   if (!api?.check_for_updates) return;
+  if (updateCheckInFlight) {
+    if (interactive) showToast('正在检查更新');
+    return;
+  }
+  updateCheckInFlight = true;
+  lastUpdateCheckAt = Date.now();
   try {
     const result = await api.check_for_updates();
-    if (!result?.ok || !result.update_available) return;
+    if (!result?.ok) {
+      showUpdateCheckFailure(result?.error);
+      scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
+      return;
+    }
+    if (!result.update_available) {
+      updateAvailableShown = false;
+      ui.updateNotice.classList.remove('update-check-failed');
+      ui.updateNotice.hidden = true;
+      if (interactive) showToast(`当前已是最新版本 ${result.current_version}`);
+      scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
+      return;
+    }
+    updateAvailableShown = true;
+    ui.updateNotice.classList.remove('update-check-failed');
     ui.updateNotice.innerHTML = `<div><div class="notice-title">发现 VRAM Radar ${escapeHtml(result.latest_version)}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。如使用 Windows 安装版，直接运行新安装包即可保留原快捷方式。</div></div><button class="button primary open-latest-release" type="button">下载更新</button>`;
     ui.updateNotice.hidden = false;
-  } catch (_error) {
-    // Update checks are best-effort and must never interrupt local monitoring.
+    scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
+  } catch (error) {
+    showUpdateCheckFailure(error?.message);
+    scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
+  } finally {
+    updateCheckInFlight = false;
   }
 }
 
 async function initialize() {
   api = window.pywebview.api;
+  void checkForUpdates();
   try {
     await loadApplication();
-    void checkForUpdates();
   } catch (error) {
     ui.notice.hidden = false;
     ui.notice.textContent = `应用初始化失败：${error.message || String(error)}`;
@@ -2825,6 +2870,7 @@ document.addEventListener('click', event => {
   if (deleteView) void deleteSavedView(deleteView.dataset.deleteSavedView);
   if (event.target.closest('.open-settings')) openSettings({onboarding: !currentProfile?.servers?.length});
   if (event.target.closest('.open-latest-release')) void api.open_latest_release();
+  if (event.target.closest('.retry-update-check')) void checkForUpdates({interactive: true});
   const retry = event.target.closest('.retry-server');
   if (retry) refresh(true, retry.dataset.serverId);
   const retryDirectory = event.target.closest('.retry-directory');
@@ -2988,6 +3034,11 @@ document.addEventListener('visibilitychange', () => {
       refreshDeferredWhileHidden = false;
       void refresh(false);
     }
+  }
+});
+window.addEventListener('focus', () => {
+  if (Date.now() - lastUpdateCheckAt >= UPDATE_CHECK_ON_FOCUS_AFTER_MS) {
+    void checkForUpdates();
   }
 });
 window.addEventListener('pywebviewready', initialize, {once: true});
