@@ -144,9 +144,14 @@ class MacOSPackagingContractTests(unittest.TestCase):
             'git rev-parse "$RELEASE_TAG^{commit}"',
             'gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs"',
             'cleanup_failed_draft() (',
+            'restore_previous_release() (',
             'created_release_id=""',
             'repos/$GITHUB_REPOSITORY/releases/$created_release_id',
             'release_tags="$(gh api --paginate',
+            'REPLACE_EXISTING_RELEASE: ${{ inputs.replace_existing_release }}',
+            'gh release download "$RELEASE_TAG"',
+            'gh release delete "$RELEASE_TAG"',
+            'replacement_started="1"',
             'tag_lookup_status=$?',
             'case "$tag_lookup_status" in',
             'created_release_id="$(gh api --method POST',
@@ -162,9 +167,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         ):
             self.assertIn(contract, self.workflow)
         self.assertNotIn('if gh release view "$RELEASE_TAG"', self.workflow)
-        self.assertNotIn('gh release delete "$RELEASE_TAG"', self.workflow)
         self.assertNotIn('gh release upload "$RELEASE_TAG" release-assets/*', self.workflow)
-        self.assertNotIn('DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/', self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-windows", self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-macos", self.workflow)
         public_assets = self.workflow.split("public_assets=(", 1)[1].split(")", 1)[0]

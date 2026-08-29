@@ -12,6 +12,11 @@ on:
         description: Exact commit SHA to build and release
         required: true
         type: string
+      replace_existing_release:
+        description: Replace this exact stable tag only after every build and validation passes
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: stable-release-${{ inputs.release_tag }}
@@ -321,11 +326,12 @@ jobs:
           public_count="$(find "$public_dir" -maxdepth 1 -type f | wc -l | tr -d ' ')"
           [[ "$public_count" == "${#public_assets[@]}" ]] || { echo "Unexpected public download count: $public_count" >&2; exit 2; }
 
-      - name: Create immutable stable release
+      - name: Create or safely replace stable release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           TARGET_COMMIT: ${{ inputs.target_commit }}
+          REPLACE_EXISTING_RELEASE: ${{ inputs.replace_existing_release }}
         run: |
           set -euo pipefail
           [[ "$TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "target_commit must be a full 40-character lowercase commit SHA" >&2; exit 2; }
@@ -334,8 +340,38 @@ jobs:
           notes_file="docs/release-notes-${RELEASE_TAG}.md"
           [[ -f "$notes_file" ]] || { echo "Release notes are missing: $notes_file" >&2; exit 2; }
           created_release_id=""
+          replacement_started="0"
+          rollback_dir="$RUNNER_TEMP/vram-radar-release-rollback"
+          restore_previous_release() (
+            set +e
+            [[ "$replacement_started" == "1" ]] || exit 0
+            if [[ "$created_release_id" =~ ^[0-9]+$ ]]; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$created_release_id" >/dev/null 2>&1
+            fi
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null 2>&1
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$RELEASE_TAG" \
+              -f sha="$(cat "$rollback_dir/tag-commit")" >/dev/null || exit 1
+            rollback_release_id="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$RELEASE_TAG" \
+              -f target_commitish="$(cat "$rollback_dir/tag-commit")" \
+              -f name="$(jq -r '.name' "$rollback_dir/release.json")" \
+              -F body=@"$rollback_dir/body.md" \
+              -F draft=true \
+              -F prerelease="$(jq -r '.prerelease' "$rollback_dir/release.json")" \
+              --jq '.id')" || exit 1
+            gh release upload "$RELEASE_TAG" "$rollback_dir/assets"/* --repo "$GITHUB_REPOSITORY" || exit 1
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$rollback_release_id" \
+              -F draft=false \
+              -F prerelease="$(jq -r '.prerelease' "$rollback_dir/release.json")" \
+              -f make_latest=true >/dev/null
+          )
           cleanup_failed_draft() (
             set +e
+            if [[ "$replacement_started" == "1" ]]; then
+              restore_previous_release
+              exit $?
+            fi
             if [[ "$created_release_id" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$created_release_id"
             fi
@@ -344,8 +380,19 @@ jobs:
           trap 'cleanup_failed_draft; exit 130' INT TERM
           release_tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')"
           if grep -Fxq -- "$RELEASE_TAG" <<<"$release_tags"; then
-            echo "Release already exists; refusing to overwrite $RELEASE_TAG" >&2
-            exit 2
+            if [[ "$REPLACE_EXISTING_RELEASE" != "true" ]]; then
+              echo "Release already exists; set replace_existing_release only for an explicitly authorized same-tag replacement" >&2
+              exit 2
+            fi
+            mkdir -p "$rollback_dir/assets"
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > "$rollback_dir/release.json"
+            jq -r '.body // ""' "$rollback_dir/release.json" > "$rollback_dir/body.md"
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            git rev-parse "$RELEASE_TAG^{commit}" > "$rollback_dir/tag-commit"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$rollback_dir/assets"
+            [[ "$(find "$rollback_dir/assets" -maxdepth 1 -type f | wc -l | tr -d ' ')" -gt 0 ]] || { echo "Existing Release backup has no assets" >&2; exit 2; }
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            replacement_started="1"
           fi
           set +e
           git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1
@@ -385,8 +432,8 @@ jobs:
             diff -u <(printf '%s\n' "$expected_asset_names") <(printf '%s\n' "$uploaded_asset_names") || true
             false
           fi
-          trap - ERR INT TERM
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$created_release_id" \
             -F draft=false \
             -F prerelease=false \
             -f make_latest=true >/dev/null
+          trap - ERR INT TERM
