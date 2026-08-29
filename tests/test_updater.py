@@ -125,7 +125,10 @@ class UpdateDownloadTests(unittest.TestCase):
                 "old marker",
             )
             self.assertEqual(list(root.glob("install.update-backup-*")), [])
-            restart.assert_called_once_with([str(executable), "--profile", "test"], close_fds=True)
+            restart.assert_called_once_with(
+                [str(executable.resolve()), "--profile", "test"],
+                close_fds=True,
+            )
 
 
 if __name__ == "__main__":
