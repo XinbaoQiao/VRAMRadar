@@ -152,6 +152,9 @@ class MacOSPackagingContractTests(unittest.TestCase):
             'gh release download "$RELEASE_TAG"',
             'gh release delete "$RELEASE_TAG"',
             'replacement_started="1"',
+            'gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG"',
+            '-f sha="$TARGET_COMMIT"',
+            '-F force=true',
             'tag_lookup_status=$?',
             'case "$tag_lookup_status" in',
             'created_release_id="$(gh api --method POST',
@@ -167,6 +170,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         ):
             self.assertIn(contract, self.workflow)
         self.assertNotIn('if gh release view "$RELEASE_TAG"', self.workflow)
+        self.assertNotIn('--cleanup-tag', self.workflow)
         self.assertNotIn('gh release upload "$RELEASE_TAG" release-assets/*', self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-windows", self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-macos", self.workflow)

@@ -348,10 +348,9 @@ jobs:
             if [[ "$created_release_id" =~ ^[0-9]+$ ]]; then
               gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$created_release_id" >/dev/null 2>&1
             fi
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" >/dev/null 2>&1
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/tags/$RELEASE_TAG" \
-              -f sha="$(cat "$rollback_dir/tag-commit")" >/dev/null || exit 1
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+              -f sha="$(cat "$rollback_dir/tag-commit")" \
+              -F force=true >/dev/null || exit 1
             rollback_release_id="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$RELEASE_TAG" \
               -f target_commitish="$(cat "$rollback_dir/tag-commit")" \
@@ -391,8 +390,11 @@ jobs:
             git rev-parse "$RELEASE_TAG^{commit}" > "$rollback_dir/tag-commit"
             gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$rollback_dir/assets"
             [[ "$(find "$rollback_dir/assets" -maxdepth 1 -type f | wc -l | tr -d ' ')" -gt 0 ]] || { echo "Existing Release backup has no assets" >&2; exit 2; }
-            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+            gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes
             replacement_started="1"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$RELEASE_TAG" \
+              -f sha="$TARGET_COMMIT" \
+              -F force=true >/dev/null
           fi
           set +e
           git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1
