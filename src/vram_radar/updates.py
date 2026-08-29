@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Callable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from . import __version__
+from .build_info import current_release_tag
+
+
+LATEST_RELEASE_API = "https://api.github.com/repositories/1347320362/releases/latest"
+RELEASES_API = "https://api.github.com/repositories/1347320362/releases?per_page=20"
+_RELEASE_PAGE_PATTERN = re.compile(
+    r"https://github\.com/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/"
+    r"VRAMRadar/releases/tag/(v?\d+\.\d+\.\d+(?:-macos-beta\.\d+)?)/?"
+)
+_VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-macos-beta\.(\d+))?$")
+_MAX_RESPONSE_BYTES = 1_000_000
+
+
+def _version_tuple(value: str) -> tuple[int, int, int, int, int]:
+    match = _VERSION_PATTERN.fullmatch(value.strip())
+    if match is None:
+        raise ValueError("unsupported release version")
+    major, minor, patch, beta = match.groups()
+    # A stable release sorts after every macOS beta of the same base version.
+    return int(major), int(minor), int(patch), 1 if beta is None else 0, int(beta or 0)
+
+
+def _read_payload(request: Request, timeout_seconds: float, opener: Callable[..., Any]) -> Any:
+    with opener(request, timeout=max(0.5, float(timeout_seconds))) as response:
+        payload_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
+    if len(payload_bytes) > _MAX_RESPONSE_BYTES:
+        raise ValueError("release response is too large")
+    return json.loads(payload_bytes.decode("utf-8"))
+
+
+def _trusted_release(payload: Any) -> tuple[str, str, tuple[int, int, int, int, int]] | None:
+    if not isinstance(payload, dict) or payload.get("draft"):
+        return None
+    tag_name = payload.get("tag_name")
+    release_url = payload.get("html_url")
+    if not isinstance(tag_name, str) or not isinstance(release_url, str):
+        return None
+    try:
+        version = _version_tuple(tag_name)
+    except ValueError:
+        return None
+    is_beta = version[3] == 0
+    if bool(payload.get("prerelease")) != is_beta:
+        return None
+    release_page = _RELEASE_PAGE_PATTERN.fullmatch(release_url)
+    if release_page is None or release_page.group(1) != tag_name:
+        return None
+    return tag_name, release_url, version
+
+
+def check_latest_release(
+    current_version: str = __version__,
+    *,
+    current_tag: str | None = None,
+    timeout_seconds: float = 4.0,
+    opener: Callable[..., Any] = urlopen,
+) -> dict[str, Any]:
+    """Check stable updates, plus newer macOS betas for a packaged beta build."""
+
+    installed_tag = current_tag or current_release_tag()
+    installed = _version_tuple(installed_tag)
+    beta_channel = installed[3] == 0
+    request = Request(
+        RELEASES_API if beta_channel else LATEST_RELEASE_API,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": f"VRAMRadar/{current_version}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="GET",
+    )
+    try:
+        payload = _read_payload(request, timeout_seconds, opener)
+        if beta_channel:
+            if not isinstance(payload, list):
+                raise ValueError("unexpected release response")
+            releases = [release for item in payload if (release := _trusted_release(item)) is not None]
+            if not releases:
+                raise ValueError("release metadata is incomplete")
+            tag_name, release_url, latest = max(releases, key=lambda item: item[2])
+            published_at = next(
+                (
+                    item.get("published_at")
+                    for item in payload
+                    if isinstance(item, dict)
+                    and item.get("tag_name") == tag_name
+                    and isinstance(item.get("published_at"), str)
+                ),
+                None,
+            )
+        else:
+            release = _trusted_release(payload)
+            if release is None or release[2][3] == 0:
+                raise ValueError("unexpected release response")
+            tag_name, release_url, latest = release
+            published_at = payload.get("published_at") if isinstance(payload.get("published_at"), str) else None
+        return {
+            "ok": True,
+            "update_available": latest > installed,
+            "current_version": installed_tag.removeprefix("v"),
+            "latest_version": tag_name.removeprefix("v"),
+            "release_url": release_url,
+            "published_at": published_at,
+        }
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        return {
+            "ok": False,
+            "update_available": False,
+            "current_version": installed_tag.removeprefix("v"),
+            "error": "暂时无法检查 GitHub 最新版本",
+        }

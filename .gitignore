@@ -1,0 +1,42 @@
+# Python and test artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Build outputs and generated packaging inputs
+build/
+dist/
+dist-installer/
+build-macos/
+dist-macos/
+packaging/app-icon.ico
+packaging/app-icon.icns
+
+# Local project-management and runtime state
+/*.md
+!/README.md
+!/README.zh-CN.md
+Start-VramRadar.ps1
+*.lnk
+inputs/
+current/
+releases/
+runs/
+work/
+
+# Machine-local application state
+config/
+cache/
+logs/
+runtime/
+profiles/
+*.local.toml
+servers.toml
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

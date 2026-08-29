@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#f8f9f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111816" media="(prefers-color-scheme: dark)">
+  <title>显存雷达</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="titlebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 44 44" focusable="false"><rect x=".75" y=".75" width="42.5" height="42.5" rx="5"></rect><circle cx="22" cy="22" r="12"></circle><path d="M22 7v30M7 22h30"></path><path class="signal-sweep" d="m22 22 9-7"></path><circle class="signal-point" cx="31" cy="15" r="2.25"></circle></svg>
+        </span>
+        <div class="brand-lockup"><h1 class="brand-name">显存雷达</h1><div class="brand-en">VRAM RADAR</div></div>
+      </div>
+      <div class="title-actions">
+        <button id="monitoring-toggle" class="button monitoring-toggle" type="button" hidden aria-pressed="false"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"></circle><path d="M10 9v6M14 9v6"></path></svg><span>暂停监控</span></button>
+        <span id="refresh-clock" class="refresh-clock" role="status" hidden><i aria-hidden="true"></i><span>正在初始化</span></span>
+        <button id="refresh-button" class="button" type="button" hidden><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v5h5"></path><path d="M4 13a8 8 0 0 0 14.9 3M20 20v-5h-5"></path></svg><span>立即刷新</span></button>
+        <button id="settings-button" class="button settings-button" type="button"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M14 4v6"></path><path d="M4 17h2M10 17h10M8 14v6"></path></svg><span>设置</span></button>
+      </div>
+    </header>
+
+    <main>
+      <section id="global-notice" class="global-notice" aria-live="polite" hidden></section>
+      <section id="update-notice" class="update-notice" aria-live="polite" hidden></section>
+      <section id="first-run-home" class="first-run-home" aria-labelledby="first-run-title" hidden>
+        <div class="first-run-radar" aria-hidden="true"><svg viewBox="0 0 120 120" focusable="false"><circle cx="60" cy="60" r="43"></circle><circle cx="60" cy="60" r="27"></circle><circle cx="60" cy="60" r="11"></circle><path d="M60 8v104M8 60h104"></path><path class="signal-sweep" d="m60 60 34-28"></path><circle class="signal-point" cx="94" cy="32" r="4"></circle></svg></div>
+        <div class="eyebrow">欢迎使用显存雷达</div>
+        <h2 id="first-run-title">先添加一台 GPU 服务器</h2>
+        <p>自动查找本机 SSH 配置，确认连接方式后开始监控。</p>
+        <div class="first-run-benefits" aria-label="首次配置说明">
+          <span><strong>1</strong>自动发现</span><span><strong>2</strong>检查登录方式</span><span><strong>3</strong>保存并开始监控</span>
+        </div>
+        <button id="start-onboarding" class="button primary first-run-action" type="button">开始配置</button>
+        <small>没有 SSH 配置也没关系，向导内有 Windows 和 macOS 的完整教程。</small>
+      </section>
+
+      <div id="dashboard-content" hidden>
+        <section class="dashboard-intro" aria-labelledby="dashboard-title">
+          <div class="indexed-heading">
+            <div><h2 id="dashboard-title">GPU 资源总览</h2><p>可用显存、卡型与任务状态</p></div>
+          </div>
+        </section>
+        <section id="summary" class="summary" aria-label="GPU 概览"></section>
+        <details class="match-panel">
+          <summary class="match-summary">
+            <span class="match-symbol" aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="7"></circle><circle cx="12" cy="12" r="2"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></svg></span>
+            <span class="match-copy"><strong>帮我找一台可用 GPU</strong><span>按卡数、单卡空闲显存、卡型与分区筛选</span></span>
+            <span class="summary-action"><span class="when-closed">填写需求</span><span class="when-open">收起</span></span>
+          </summary>
+          <div class="match-body">
+            <div id="saved-view-chips" class="saved-view-chips" aria-label="已保存的资源筛选" hidden></div>
+            <div class="matcher-fields">
+              <label><span>GPU 数量</span><input id="required-gpu-count" type="number" min="1" max="10000" step="1" value="1"></label>
+              <label><span>单卡最低空闲显存</span><div class="input-unit"><input id="required-memory" type="number" min="0" max="1000" step="1" value="0"><span>GiB</span></div></label>
+              <label><span>卡型（可选）</span><input id="preferred-gpu" placeholder="例如 4090、A100"></label>
+            </div>
+            <details class="matcher-more">
+              <summary><span><strong>更多条件</strong><small>分区、同节点与结果数量</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
+              <div class="matcher-more-body">
+                <label><span>分区（可选）</span><input id="preferred-partition" placeholder="例如 gpu-large"></label>
+                <label><span>显示结果</span><select id="recommendation-limit"><option value="3">前 3 个</option><option value="5" selected>前 5 个</option><option value="10">前 10 个</option></select></label>
+                <label class="check-label same-node"><input id="require-same-node" type="checkbox" checked><span>多张 GPU 必须在同一节点</span></label>
+              </div>
+            </details>
+            <div class="match-actions">
+              <button id="recommend-button" class="button primary" type="button">查找可用资源</button>
+              <label class="watch-toggle"><input id="resource-watch-enabled" type="checkbox"><span>有资源时提醒我</span></label>
+              <span id="resource-watch-status" class="resource-watch-status" role="status"></span>
+            </div>
+            <details class="saved-view-editor">
+              <summary><span><strong>保存这组条件</strong><small>下次一键恢复</small></span><span class="summary-action"><span class="when-closed">保存</span><span class="when-open">收起</span></span></summary>
+              <div class="saved-view-editor-body"><input id="saved-view-name" maxlength="40" placeholder="例如 8×H100"><button id="save-view-button" class="button" type="button">保存视图</button></div>
+            </details>
+            <div id="recommendation" class="recommendation" aria-live="polite" hidden></div>
+          </div>
+        </details>
+        <section class="servers-area" aria-labelledby="servers-title">
+          <header class="content-heading">
+            <div class="indexed-heading"><div><h2 id="servers-title">服务器状态</h2><p>展开查看 GPU、进程和任务</p></div></div>
+            <div class="content-heading-actions">
+              <span id="server-list-meta" class="section-meta" role="status">正在读取</span>
+              <div class="disclosure-tools" aria-label="服务器内容显示方式">
+                <button id="collapse-dashboard" class="button compact-button" type="button"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6"></path></svg><span>一键收起</span></button>
+              </div>
+            </div>
+          </header>
+          <div id="server-list" class="server-list"></div>
+          <div id="server-list-pager" class="server-list-pager" hidden><span id="server-list-page-status"></span><button id="server-list-previous-page" class="button" type="button">上一页</button><button id="server-list-next-page" class="button" type="button">下一页</button></div>
+        </section>
+      </div>
+    </main>
+
+    <nav id="server-navigator" class="server-navigator" data-side="right" aria-label="服务器快速导航" hidden>
+      <div class="server-navigator-panel">
+        <header class="server-navigator-head">
+          <button id="server-navigator-drag" class="server-navigator-drag" type="button" aria-label="服务器目录在右侧，拖动或按回车移到左侧" title="拖动到左侧或右侧">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="7" r="1"></circle><circle cx="15" cy="7" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="17" r="1"></circle><circle cx="15" cy="17" r="1"></circle></svg>
+          </button>
+          <strong>服务器</strong>
+          <span id="server-navigator-count" class="server-navigator-count"></span>
+        </header>
+        <div class="server-navigator-controls">
+          <label class="server-navigator-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 4.5 4.5"></path></svg>
+            <input id="server-navigator-search" type="search" placeholder="名称、卡型、分区" autocomplete="off" aria-label="搜索服务器">
+          </label>
+          <div class="server-navigator-filters" role="group" aria-label="筛选服务器">
+            <button type="button" data-server-navigator-filter="all" aria-pressed="true">全部</button>
+            <button type="button" data-server-navigator-filter="available" aria-pressed="false">空闲</button>
+            <button type="button" data-server-navigator-filter="tasks" aria-pressed="false">任务</button>
+            <button type="button" data-server-navigator-filter="issues" aria-pressed="false">异常</button>
+            <button type="button" data-server-navigator-filter="favorites" aria-pressed="false">收藏</button>
+            <button type="button" data-server-navigator-filter="recent" aria-pressed="false">最近</button>
+          </div>
+        </div>
+        <div id="server-navigator-list" class="server-navigator-list"></div>
+        <div id="server-navigator-empty" class="server-navigator-empty" hidden>没有匹配的服务器</div>
+        <footer class="server-navigator-footer">
+          <button id="previous-server" type="button" title="上一台服务器" aria-label="上一台服务器"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m14 7-5 5 5 5"></path></svg><span>上一台</span></button>
+          <span id="server-navigator-position" class="server-navigator-position" aria-label="当前筛选位置">—</span>
+          <button id="next-server" type="button" title="下一台服务器" aria-label="下一台服务器"><span>下一台</span><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 7 5 5-5 5"></path></svg></button>
+        </footer>
+        <span id="server-navigator-status" class="sr-only" role="status" aria-live="polite"></span>
+      </div>
+    </nav>
+  </div>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <header class="dialog-header">
+        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">先用自动发现完成常见设置，需要时再展开登录与高级选项。</p></div>
+        <div class="dialog-header-actions">
+          <div id="settings-disclosure-tools" class="disclosure-tools" aria-label="设置内容显示方式">
+            <button id="collapse-settings" class="button compact-button" type="button">一键收起</button>
+          </div>
+          <button id="close-settings" class="button icon-button" type="button" aria-label="关闭设置"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12"></path><path d="m18 6-12 12"></path></svg></button>
+        </div>
+      </header>
+      <div class="dialog-content">
+        <ol id="onboarding-progress" class="onboarding-progress" aria-label="首次配置进度" hidden>
+          <li data-onboarding-marker="1"><span>1</span><div><strong>了解用途</strong><small>先知道它会做什么</small></div></li>
+          <li data-onboarding-marker="2"><span>2</span><div><strong>发现服务器</strong><small>自动查找或打开教程</small></div></li>
+          <li data-onboarding-marker="3"><span>3</span><div><strong>检查并完成</strong><small>确认连接与登录方式</small></div></li>
+        </ol>
+        <section id="onboarding-welcome" class="onboarding-welcome" hidden>
+          <div class="onboarding-symbol" aria-hidden="true"><svg viewBox="0 0 120 120" focusable="false"><circle cx="60" cy="60" r="43"></circle><circle cx="60" cy="60" r="27"></circle><circle cx="60" cy="60" r="11"></circle><path d="M60 8v104M8 60h104"></path><path class="signal-sweep" d="m60 60 34-28"></path><circle class="signal-point" cx="94" cy="32" r="4"></circle></svg></div>
+          <div class="eyebrow">约 1 分钟完成</div>
+          <h3>集中查看每台服务器的 GPU 状态</h3>
+          <p>集中查看 GPU 显存、进程和 Slurm 任务。</p>
+          <div class="onboarding-points">
+            <article><strong>可用显存</strong><span>先看容量与卡型</span></article>
+            <article><strong>任务详情</strong><span>再展开进程和 Slurm</span></article>
+            <article><strong>本机配置</strong><span>密码保存在系统凭据库</span></article>
+          </div>
+        </section>
+        <section id="profile-settings" class="settings-section profile-settings" aria-labelledby="profile-settings-title">
+          <div class="settings-section-heading"><div><h3 id="profile-settings-title">显示与刷新</h3><p>这些选项只影响这台电脑上的监控界面。</p></div><span class="local-only-badge">仅本机</span></div>
+          <div class="field-grid profile-fields">
+            <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
+            <label><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
+            <label><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
+          </div>
+          <details class="local-tools">
+            <summary><span><strong>诊断与日志</strong><small>连接异常时使用，复制内容会自动脱敏</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
+            <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制脱敏诊断</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
+          </details>
+        </section>
+        <section id="import-panel" class="import-panel">
+          <div class="import-intro">
+            <h3>把你平时登录的 GPU 服务器加进来</h3>
+            <p>如果终端里已经能运行 <code>ssh gpu-lab</code>，进入这一步就会自动查找。</p>
+          </div>
+          <ol class="import-steps" aria-label="服务器导入步骤">
+            <li><span>1</span><div><strong>自动发现</strong><small>本地扫描 SSH 配置，不连接服务器</small></div></li>
+            <li><span>2</span><div><strong>检查类型</strong><small>确认每台服务器是 SSH 直连还是 Slurm</small></div></li>
+            <li><span>3</span><div><strong>保存并查看</strong><small>密码可选，只保存在系统凭据库</small></div></li>
+          </ol>
+          <label><span>服务器设置文件路径</span><input id="server-config-path" placeholder="servers.toml 或 ~/.ssh/config"></label>
+          <div class="import-actions">
+            <label class="check-label"><input id="auto-sync-servers" type="checkbox"><span>启动时自动同步此文件</span></label>
+            <button id="discover-server-config" class="button" type="button">自动发现并导入</button>
+            <button id="import-server-config" class="button primary" type="button">导入并替换列表</button>
+          </div>
+          <div id="import-status" class="import-status" aria-live="polite" hidden></div>
+          <div class="import-privacy">只读取本机服务器别名；不执行配置命令，不连接服务器，不读取私钥、密码或 <code>known_hosts</code>。</div>
+          <details class="import-help">
+            <summary><span><strong>自动检测不到？</strong><small>按 Windows 或 macOS 教程找到 SSH 配置，命令可一键复制</small></span><span class="summary-action"><span class="when-closed">展开教程</span><span class="when-open">收起</span></span></summary>
+            <div class="import-help-body">
+              <div class="guide-callout"><strong>先弄清楚要找什么</strong><p>SSH 配置通常是一个名为 <code>config</code>、没有扩展名的文本文件。终端命令中的 <code>ssh gpu-lab</code> 里，<code>gpu-lab</code> 就是显存雷达要导入的服务器别名。</p></div>
+
+              <details class="platform-guide" open data-default-open>
+                <summary><span><strong>Windows 教程</strong><small>PowerShell 是 Windows 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
+                <div class="platform-guide-body">
+                  <div class="guide-launcher"><div><strong>先打开 PowerShell</strong><p>点击右侧按钮即可打开；也可以按 Windows 键，搜索 <b>PowerShell</b>。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="windows">一键打开 PowerShell</button></div>
+                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的 PowerShell，再按 Enter。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-find-config" aria-label="复制 Windows 查找 SSH 配置命令">复制</button><pre><code id="windows-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | Select-String "Reading configuration data"</code></pre></div></div></section>
+                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>如果上一步没有显示用户配置，检查 <code>%USERPROFILE%\.ssh\config</code> 或 <code>%HOME%\.ssh\config</code>。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-list-ssh" aria-label="复制 Windows 查看 SSH 目录命令">复制</button><pre><code id="windows-list-ssh">Get-ChildItem -Force "$HOME\.ssh"</code></pre></div></div></section>
+                  <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令只会确保 <code>.ssh</code> 目录存在，然后用记事本打开配置文件；已有文件不会被清空。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-open-config" aria-label="复制 Windows 创建 SSH 配置命令">复制</button><pre><code id="windows-open-config">New-Item -ItemType Directory -Force "$HOME\.ssh" | Out-Null; notepad "$HOME\.ssh\config"</code></pre></div></div></details>
+                </div>
+              </details>
+
+              <details class="platform-guide">
+                <summary><span><strong>macOS 教程</strong><small>“终端”是 macOS 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
+                <div class="platform-guide-body">
+                  <div class="guide-launcher"><div><strong>先打开“终端”</strong><p>点击右侧按钮即可打开；也可以按 Command + 空格，搜索“终端”。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="macos">一键打开终端</button></div>
+                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的终端，再按 Return。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-find-config" aria-label="复制 macOS 查找 SSH 配置命令">复制</button><pre><code id="macos-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | grep "Reading configuration data"</code></pre></div></div></section>
+                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>通常是 <code>~/.ssh/config</code>；也可能是 <code>~/.config/ssh/config</code>、Colima 或 OrbStack 的配置。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-list-ssh" aria-label="复制 macOS 查看 SSH 目录命令">复制</button><pre><code id="macos-list-ssh">ls -la ~/.ssh</code></pre></div></div></section>
+                  <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令会创建标准目录和文件、设置推荐权限，再用文本编辑器打开。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-open-config" aria-label="复制 macOS 创建 SSH 配置命令">复制</button><pre><code id="macos-open-config">mkdir -p ~/.ssh &amp;&amp; touch ~/.ssh/config &amp;&amp; chmod 600 ~/.ssh/config &amp;&amp; open -e ~/.ssh/config</code></pre></div></div></details>
+                </div>
+              </details>
+
+              <details class="guide-more">
+                <summary>配置文件应该写什么？查看最小示例</summary>
+                <div class="guide-more-body"><p>把示例中的地址和用户名替换为自己的信息。<code>gpu-lab</code> 是以后在终端和显存雷达中看到的别名。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="ssh-config-example" aria-label="复制 SSH 配置示例">复制</button><pre><code id="ssh-config-example">Host gpu-lab
+    HostName gpu.example.org
+    User researcher</code></pre></div></div>
+              </details>
+
+              <details class="guide-more">
+                <summary>使用 VS Code / Cursor Remote-SSH 或其他工具？</summary>
+                <div class="guide-more-body"><p>在 VS Code、Cursor、VSCodium 或 Windsurf 的设置中搜索 <code>Remote.SSH: Config File</code> 或 <code>remote.SSH.configFile</code>。复制显示的完整路径，粘贴到上方“服务器设置文件路径”，再点击“导入并替换列表”。</p><p>PuTTY Session 不是 OpenSSH 配置；WSL 中的 <code>~/.ssh/config</code> 也属于 Linux 环境。请先把所需别名转换或复制到当前 Windows/macOS 系统能读取的 OpenSSH config。</p></div>
+              </details>
+
+              <div class="guide-finish"><strong>找到路径以后</strong><ol><li>把完整路径粘贴到上方输入框。</li><li>点击“导入并替换列表”。</li><li>检查服务器类型和登录方式，最后点击“保存并开始验证”。</li></ol></div>
+            </div>
+          </details>
+        </section>
+        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p>常用信息直接显示；密码、端口、用户名和私钥放在每台服务器的第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-editor-list" class="server-editor-list"></div>
+        <div id="settings-error" class="form-error" role="alert" hidden></div>
+      </div>
+      <footer class="dialog-footer">
+        <button id="onboarding-later" class="button" type="button" hidden>稍后设置</button>
+        <span class="footer-spacer"></span>
+        <button id="cancel-settings" class="button" type="button">取消</button>
+        <button id="onboarding-back" class="button" type="button" hidden>上一步</button>
+        <button id="onboarding-next" class="button primary" type="button" hidden>下一步</button>
+        <button id="save-settings" class="button primary" type="submit">保存并开始验证</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <template id="server-editor-template">
+    <section class="server-editor">
+      <div class="server-editor-head">
+        <span class="server-editor-title"><span class="server-position" aria-hidden="true">1</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
+        <span class="server-editor-actions">
+          <button class="test-server-connection button" type="button">测试连接</button>
+          <button class="toggle-server-enabled button" type="button" aria-pressed="true">暂停监控</button>
+          <button class="move-server-up button order-button" type="button" title="向上移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 14 5-5 5 5"></path></svg><span>上移</span></button>
+          <button class="move-server-down button order-button" type="button" title="向下移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"></path></svg><span>下移</span></button>
+          <button class="remove-server button danger" type="button">移除</button>
+        </span>
+      </div>
+      <div class="field-grid">
+        <label><span>显示名称</span><input data-field="display_name" required maxlength="80" placeholder="4090 实验服务器"></label>
+        <label><span>连接类型</span><select data-field="backend"><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option></select></label>
+        <label><span>OpenSSH 别名（优先）</span><input data-field="ssh_alias" placeholder="gpu-lab"></label>
+        <label><span>主机地址</span><input data-field="host" placeholder="gpu.example.edu"></label>
+      </div>
+      <p class="editor-help primary-help">OpenSSH 别名与主机地址填写一个即可。自动导入后通常只需确认连接类型。</p>
+      <div class="connection-test-result" role="status" aria-live="polite" hidden></div>
+      <details class="server-editor-more">
+        <summary><span><strong>登录与高级设置</strong><small data-auth-overview>用户名、端口、密码、私钥和本地标识</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
+        <div class="server-editor-more-body">
+          <div class="field-grid">
+            <label><span>服务器 ID（仅本机）</span><input data-field="id" required pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="lab-4090"><small>用于保存配置和凭据引用，通常不需要修改。</small></label>
+            <label><span>端口</span><input data-field="port" type="number" min="1" max="65535" value="22"><small>直连主机始终使用；OpenSSH 别名仅在下方勾选后覆盖。</small></label>
+            <label class="check-label"><input data-field="port_override" type="checkbox"><span>覆盖 OpenSSH 配置中的端口</span></label>
+            <label><span>用户名</span><input data-field="username" placeholder="alice"></label>
+            <label><span>私钥路径（可选）</span><input data-field="identity_file" placeholder="选择或粘贴私钥路径"></label>
+            <label><span>OpenSSH 配置文件（可选）</span><input data-field="ssh_config_file" placeholder="~/.ssh/config"><small>自动导入会填写来源；切换直连或文件移动后可在这里清除或修改。</small></label>
+            <label class="password-field"><span>登录密码（可选）</span><input data-field="password" type="password" autocomplete="new-password" maxlength="4096" placeholder="留空则保持已有密码"><small data-password-status>未保存密码</small></label>
+            <label class="check-label clear-password"><input data-field="clear_password" type="checkbox"><span>删除已保存的登录密码</span></label>
+          </div>
+          <label class="server-command-setting">
+            <input data-field="show_other_user_commands" type="checkbox">
+            <span><strong>显示其他用户的命令摘要</strong><small>仅 SSH 直连生效；敏感参数会在本地遮盖，并限制摘要长度。</small></span>
+          </label>
+          <p class="editor-help">未配置免密引导时，已保存的密码用于认证；完成 SSH Key 引导后会优先使用私钥，密码只在密钥被拒绝时本地回退。首次连接前，请先在 OpenSSH 中核对并接受正确的主机密钥。</p>
+        </div>
+      </details>
+      <details class="ssh-key-setup">
+        <summary><span><strong>一键配置 SSH 免密登录</strong><small data-key-setup-overview>安全生成或复用密钥，部署后自动验证</small></span><span class="summary-action"><span class="when-closed">开始</span><span class="when-open">收起</span></span></summary>
+        <div class="ssh-key-setup-body">
+          <p class="ssh-key-intro"><strong>SSH Key</strong> 是更方便的服务器登录方式。配置完成后，后续连接通常不需要重复输入密码。</p>
+          <ul class="ssh-key-safety">
+            <li>私钥始终留在本机；只把公钥写入当前账号的 <code>authorized_keys</code>。</li>
+            <li>不会覆盖已有密钥；会检查重复项、文件类型、所有者和权限。</li>
+            <li>写入后强制使用所选私钥验证；失败会撤销本次新增内容。</li>
+          </ul>
+          <div class="key-mode-options" role="radiogroup" aria-label="SSH Key 来源">
+            <label><input type="radio" data-key-mode="existing" checked><span><strong>使用现有密钥</strong><small>推荐；不会修改本地密钥</small></span></label>
+            <label><input type="radio" data-key-mode="generate"><span><strong>生成专用密钥</strong><small>不覆盖现有密钥，保存在本机应用配置目录</small></span></label>
+          </div>
+          <div class="existing-key-fields field-grid">
+            <label><span>现有私钥路径</span><input data-key-field="private_key_path" placeholder="~/.ssh/id_ed25519"></label>
+            <label><span>对应公钥路径（可选）</span><input data-key-field="public_key_path" placeholder="~/.ssh/id_ed25519.pub"><small>私钥带口令时建议选择 .pub，并先加载 ssh-agent。</small></label>
+          </div>
+          <details class="ssh-key-notes">
+            <summary>生成专用密钥时会发生什么？</summary>
+            <p>系统生成独立的 Ed25519 密钥，不覆盖 <code>~/.ssh</code> 中任何现有文件。为了后台自动连接，专用私钥不设置密钥口令，并依靠当前系统用户的文件权限保护；需要口令保护时请选择现有密钥并使用 ssh-agent。</p>
+          </details>
+          <div class="ssh-key-setup-actions">
+            <button class="configure-ssh-key button primary" type="button">配置并验证</button>
+            <span>请先保存地址和用户名；如当前密钥不能登录，再保存一次服务器密码。</span>
+          </div>
+          <div class="ssh-key-setup-result connection-test-result" role="status" aria-live="polite" hidden></div>
+        </div>
+      </details>
+    </section>
+  </template>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

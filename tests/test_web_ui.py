@@ -1,0 +1,1157 @@
+from pathlib import Path
+import unittest
+
+
+WEB_ROOT = Path(__file__).parents[1] / "src" / "vram_radar" / "web"
+
+
+class WebUiContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.javascript = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+        cls.styles = (WEB_ROOT / "app.css").read_text(encoding="utf-8")
+        cls.markup = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+
+    def test_task_time_columns_are_unambiguous(self):
+        self.assertIn("运行时长", self.javascript)
+        self.assertIn("提交时间", self.javascript)
+        self.assertIn("时间限额", self.javascript)
+        self.assertIn("结束时间", self.javascript)
+        self.assertNotIn("已运行 / 上限", self.javascript)
+        self.assertNotIn("耗时 / 结束", self.javascript)
+        self.assertIn("value == null ? '未记录'", self.javascript)
+
+    def test_status_view_shows_task_ownership_names_but_omits_direct_hostnames(self):
+        task_table = self.javascript[
+            self.javascript.index("function renderTaskName"):self.javascript.index("function schedulerMemoryMeter")
+        ]
+        live_table = self.javascript[
+            self.javascript.index("function renderLiveTable"):self.javascript.index("function taskBadge")
+        ]
+        self.assertIn("task.name", task_table)
+        self.assertIn("task.user", self.javascript)
+        self.assertNotIn("server.host", live_table)
+        self.assertIn("任务名称", task_table)
+        self.assertIn('<th scope="col">用户</th>', task_table)
+        self.assertIn('<th scope="col">任务名称</th>', task_table)
+        self.assertIn("未记录", task_table)
+        self.assertIn("task-name-details", task_table)
+        self.assertIn("self-user-tag", self.javascript)
+
+    def test_task_hierarchy_separates_self_other_and_time_scope(self):
+        for text in (
+            "我的任务",
+            "其他用户",
+            "正在运行与排队",
+            "过去 ${number((server.tasks || {}).history_window_hours || 24)} 小时结果",
+            "仅显示 Slurm 对当前登录账号可见的 GPU 作业",
+            "PID 进程列表",
+        ):
+            self.assertIn(text, self.javascript)
+        for selector in (".task-owner-stack", ".task-owner-group.mine", ".task-owner-content", ".module-context"):
+            self.assertIn(selector, self.styles)
+        for selector in (".task-name-cell", ".task-name-details", ".task-name-full"):
+            self.assertIn(selector, self.styles)
+
+    def test_direct_gpu_processes_separate_owners_without_claiming_scheduler_history(self):
+        direct_module = self.javascript[
+            self.javascript.index("function formatElapsedSeconds"):self.javascript.index("function schedulerMemoryMeter")
+        ]
+        for text in (
+            "我的进程",
+            "其他用户",
+            "归属不可见",
+            "进程 / 任务",
+            "显存合计",
+            "运行时长",
+            "启动时间",
+            "不是调度队列，不包含排队或完成历史",
+            "上次 GPU 进程",
+            "不能据此判断它们现在仍在运行",
+        ):
+            self.assertIn(text, direct_module)
+        self.assertIn("process.command_preview", direct_module)
+        self.assertIn("其他用户命令摘要未启用", direct_module)
+        self.assertIn("敏感参数已遮盖", direct_module)
+        self.assertIn("其他用户摘要还需在服务器设置中开启", direct_module)
+        self.assertIn("process.command_visibility", direct_module)
+        self.assertNotIn("command_raw", self.javascript)
+        self.assertIn("escapeHtml(preview)", direct_module)
+        self.assertIn('data-task-module="gpu-processes"', direct_module)
+        for selector in (
+            ".process-module",
+            ".process-summary-pill",
+            ".process-command-details",
+            ".process-gpu-list",
+        ):
+            self.assertIn(selector, self.styles)
+
+    def test_visual_hierarchy_uses_distinct_semantic_levels_and_compact_defaults(self):
+        for contract in (
+            '<h3 class="server-name">',
+            '<h4>${moduleTitle}</h4>',
+            '<h4>任务详情</h4>',
+            '<h4>代码工作目录</h4>',
+            '<h5>${escapeHtml(title)}</h5>',
+            '<h6>${escapeHtml(title)}</h6>',
+            "function renderModuleContext",
+            'data-context-note="${escapeHtml(key)}"',
+            "moduleOpen(server.server_id, 'gpu-processes', false)",
+            "moduleOpen(server.server_id, 'cluster-tasks', false)",
+            "processes: groups.others, currentUser, defaultOpen: false",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertNotIn("function renderNodeTopology", self.javascript)
+        self.assertNotIn('<section class="module-section">', self.javascript)
+        self.assertNotIn("GPU 集群状态", self.javascript)
+        for style in (
+            ".server-name { margin: 0; font-family: var(--display-font); font-size: 21px",
+            ".cluster-heading h4 { margin: 0; font-family: var(--display-font); font-size: 16px",
+            ".task-owner-heading h5 { margin: 0; font-family: var(--display-font); font-size: 14.5px",
+            ".task-period-head h6 { margin: 0; font-family: var(--display-font); font-size: 13px",
+            ".cluster-module { margin: 10px 14px 0",
+            ".task-owner-stack { display: grid; gap: 8px; margin-left: 5px",
+        ):
+            self.assertIn(style, self.styles)
+
+    def test_module_expansion_state_is_scoped_by_server_and_module(self):
+        self.assertIn("`${serverId}:${moduleKey}`", self.javascript)
+        self.assertIn("cluster.dataset.module", self.javascript)
+        self.assertIn("group.dataset.taskModule", self.javascript)
+
+    def test_account_home_and_lazy_directory_tree_are_progressively_disclosed(self):
+        for contract in (
+            "登录账号",
+            "主目录",
+            "代码工作目录",
+            "account.home_directory",
+            "api.inspect_account_directory(serverId, rootPath, force)",
+            "function renderDirectoryEntries",
+            "function loadDirectoryTree",
+            "function pinDefaultDirectory",
+            "function resetDefaultDirectory",
+            "固定为默认目录",
+            "恢复自动定位",
+            "展开更多",
+            'data-module="account-directory"',
+            'data-directory-path="${safePath}"',
+            "展开后读取",
+            "名称、类型、大小和修改时间",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertIn("directoryTrees = new Map()", self.javascript)
+        self.assertIn("openDirectoryNodes.clear()", self.javascript)
+        self.assertIn(
+            '<header class="server-head"><div class="server-identity">',
+            self.javascript,
+        )
+        self.assertIn(
+            "${renderAccountOverview(server)}<div class=\"server-head-controls\"><span class=\"server-status\">",
+            self.javascript,
+        )
+        self.assertNotIn("</header>${renderAccountOverview(server)}", self.javascript)
+        for selector in (
+            ".account-overview",
+            ".account-fact",
+            ".directory-module",
+            ".directory-tree",
+            ".directory-node",
+            ".directory-file",
+            ".directory-rootbar",
+        ):
+            self.assertIn(selector, self.styles)
+        self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
+        self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
+        for layout_contract in (
+            ".server-head { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(360px, auto)",
+            ".account-overview { grid-column: 2; min-width: 0; display: flex",
+            ".server-head-controls { grid-column: 3; min-width: 0; display: flex",
+            ".server-status { display: inline-flex",
+            ".server-quick-actions { min-width: 0; display: flex",
+            "@media (max-width: 1040px)",
+            ".server-head { grid-template-columns: minmax(165px, 1fr) auto",
+            ".account-overview { grid-column: 1 / -1; grid-row: 2; display: grid",
+        ):
+            self.assertIn(layout_contract, self.styles)
+        self.assertNotIn(".server-quick-actions { grid-column: 1 / -1", self.styles)
+        account_presentation = self.javascript[
+            self.javascript.index("function renderAccountOverview"):
+            self.javascript.index("function configuredDefaultDirectory")
+        ]
+        server_header = self.javascript[
+            self.javascript.index("function renderServer(server"):
+            self.javascript.index("function snapshotRevision")
+        ]
+        self.assertNotIn("server.ssh_alias", account_presentation + server_header)
+
+    def test_server_order_can_be_changed_and_saved_from_settings(self):
+        for selector in ("move-server-up", "move-server-down", "server-position"):
+            self.assertIn(selector, self.markup)
+        for text in (
+            "function refreshServerEditorOrder",
+            "function moveServerEditor",
+            "ui.editorList.insertBefore",
+            "querySelectorAll('.server-editor')",
+        ):
+            self.assertIn(text, self.javascript)
+        self.assertIn(".server-editor-actions", self.styles)
+        self.assertIn(".order-button:disabled", self.styles)
+
+    def test_automatic_catalog_action_discovers_and_imports_in_one_step(self):
+        self.assertIn("自动发现并导入", self.markup)
+        self.assertIn("~/.ssh/config", self.markup)
+        self.assertIn("不读取私钥、密码", self.markup)
+        discover = self.javascript[
+            self.javascript.index("async function discoverServerConfig"):
+            self.javascript.index("async function importServerConfig")
+        ]
+        self.assertIn("await api.discover_server_config()", discover)
+        self.assertIn("api.import_server_config(result.paths", discover)
+        self.assertIn("ui.discoverServerConfig.disabled = true", discover)
+        self.assertIn("ui.discoverServerConfig.disabled = false", discover)
+
+    def test_import_messages_distinguish_parsing_from_save_and_connection_validation(self):
+        import_flow = self.javascript[
+            self.javascript.index("function applyImportedServerConfig"):
+            self.javascript.index("function collectProfile")
+        ]
+        self.assertIn("已解析", import_flow)
+        self.assertIn("尚未保存", import_flow)
+        self.assertIn("尚未连接验证", import_flow)
+        self.assertNotIn("正在验证并导入", import_flow)
+        self.assertLess(import_flow.index("已解析"), import_flow.index("尚未保存"))
+
+    def test_removed_import_candidates_persist_as_alias_tombstones(self):
+        self.assertIn("let pendingIgnoredSshAliases = new Set()", self.javascript)
+        settings = self.javascript[
+            self.javascript.index("function openSettings"):
+            self.javascript.index("async function discoverServerConfig")
+        ]
+        self.assertIn(
+            "pendingIgnoredSshAliases = new Set(currentProfile?.ignored_ssh_aliases || [])",
+            settings,
+        )
+
+        imported = self.javascript[
+            self.javascript.index("function applyImportedServerConfig"):
+            self.javascript.index("async function importServerConfig")
+        ]
+        self.assertIn("ignoredAliasKeys", imported)
+        self.assertIn("visibleCandidates", imported)
+        self.assertIn(
+            "populateServerEditors(visibleCandidates, {importedCandidate: true, allowEmpty: true})",
+            imported,
+        )
+        self.assertIn("result.servers.length - visibleCandidates.length", imported)
+        self.assertIn("已保留 ${pendingRemovalCount} 台本次移除项", imported)
+        self.assertIn("已解析 ${visibleCandidates.length} 台服务器候选", imported)
+
+        editor = self.javascript[
+            self.javascript.index("function addServerEditor"):
+            self.javascript.index("function addAndFocusServerEditor")
+        ]
+        self.assertIn("editor.dataset.originalSshAlias = values.ssh_alias || ''", editor)
+        self.assertIn("editor.dataset.importedCandidate = String(options.importedCandidate === true)", editor)
+        self.assertIn("const wasSaved = (currentProfile?.servers || []).some", editor)
+        self.assertIn("const wasImportedCandidate = editor.dataset.importedCandidate === 'true'", editor)
+        self.assertIn(
+            "if (wasSaved || wasImportedCandidate) rememberIgnoredSshAlias(editor.dataset.originalSshAlias)",
+            editor,
+        )
+        self.assertNotIn("rememberIgnoredSshAlias(value('ssh_alias'))", editor)
+
+        profile_collector = self.javascript[
+            self.javascript.index("function collectProfile"):
+            self.javascript.index("function collectPasswordUpdates")
+        ]
+        self.assertIn("const activeAliasKeys", profile_collector)
+        self.assertIn("const ignoredSshAliases", profile_collector)
+        self.assertIn("ignored_ssh_aliases: ignoredSshAliases", profile_collector)
+        self.assertIn("!activeAliasKeys.has(sshAliasKey(alias))", profile_collector)
+
+    def test_stale_automatic_discovery_cannot_replace_manual_edits(self):
+        onboarding = self.javascript[
+            self.javascript.index("function invalidateServerDiscovery"):self.javascript.index("async function importServerConfig")
+        ]
+        set_step = self.javascript[
+            self.javascript.index("function setOnboardingStep"):
+            self.javascript.index("function setSettingsMode")
+        ]
+        discover = self.javascript[
+            self.javascript.index("async function discoverServerConfig"):
+            self.javascript.index("async function importServerConfig")
+        ]
+        self.assertIn("const generation = ++serverDiscoveryGeneration", discover)
+        self.assertIn("onboardingStep === 2", discover)
+        self.assertIn("ui.dialog.open", discover)
+        self.assertGreaterEqual(discover.count("if (!requestIsCurrent()) return"), 2)
+        self.assertLess(
+            discover.index("if (!requestIsCurrent()) return"),
+            discover.index("applyImportedServerConfig(imported)"),
+        )
+        self.assertIn("onboardingStep === 2 && nextStep !== 2", onboarding)
+        self.assertIn("onboardingDiscoveryStarted = false", set_step)
+        self.assertLess(
+            set_step.index("onboardingDiscoveryStarted = false"),
+            set_step.index("onboardingStep = nextStep"),
+        )
+        self.assertIn("onboardingStep === 2 && !onboardingDiscoveryStarted", set_step)
+        self.assertIn("void discoverServerConfig()", set_step)
+        self.assertIn("ui.dialog.addEventListener('close', invalidateServerDiscovery)", self.javascript)
+
+    def test_server_config_guide_is_progressive_and_commands_are_copyable(self):
+        for text in (
+            "把你平时登录的 GPU 服务器加进来",
+            "自动检测不到？",
+            "Windows 教程",
+            "macOS 教程",
+            "配置文件应该写什么？",
+            "使用 VS Code / Cursor Remote-SSH",
+            "找到路径以后",
+        ):
+            self.assertIn(text, self.markup)
+        self.assertGreaterEqual(self.markup.count('class="copy-command"'), 7)
+        self.assertIn('data-copy-target="windows-find-config"', self.markup)
+        self.assertIn('data-copy-target="macos-find-config"', self.markup)
+        self.assertIn('data-platform="windows">一键打开 PowerShell', self.markup)
+        self.assertIn('data-platform="macos">一键打开终端', self.markup)
+        self.assertIn("async function writeClipboard", self.javascript)
+        self.assertIn("async function openSetupTerminal", self.javascript)
+        self.assertIn("api.open_setup_terminal(platformName)", self.javascript)
+        self.assertIn("navigator.clipboard?.writeText", self.javascript)
+        self.assertIn("document.execCommand('copy')", self.javascript)
+        self.assertIn("void copyCommand(copyButton)", self.javascript)
+        self.assertIn("void openSetupTerminal(setupTerminal.dataset.platform)", self.javascript)
+        for selector in (".import-steps", ".platform-guide", ".guide-launcher", ".command-box", ".copy-command"):
+            self.assertIn(selector, self.styles)
+
+    def test_product_layout_prioritizes_live_capacity_and_progressive_actions(self):
+        for text in (
+            "GPU 资源总览",
+            "当前可用显存",
+            "服务器状态",
+            "帮我找一台可用 GPU",
+            "填写需求",
+        ):
+            self.assertIn(text, self.markup + self.javascript)
+        self.assertIn('<details class="match-panel">', self.markup)
+        self.assertIn('id="server-list-meta"', self.markup)
+        self.assertIn("所有监控就绪 GPU 合计", self.javascript)
+        for selector in (
+            ".dashboard-intro",
+            ".metric-detail",
+            ".match-summary",
+            ".content-heading",
+        ):
+            self.assertIn(selector, self.styles)
+        self.assertNotIn("不会提交或占用 GPU", self.markup)
+        self.assertNotIn("本机只读监控", self.markup)
+
+    def test_gpu_recommendation_is_hidden_until_requested_and_emphasizes_key_facts(self):
+        self.assertIn(
+            'id="recommendation" class="recommendation" aria-live="polite" hidden',
+            self.markup,
+        )
+        recommendation = self.javascript[
+            self.javascript.index("function renderRecommendationResult"):
+            self.javascript.index("function refreshServerEditorOrder")
+        ]
+        for contract in (
+            "recommendationRequested = true",
+            "ui.recommendation.hidden = false",
+            "推荐服务器",
+            "单卡可用显存",
+            "分区",
+            "卡型",
+            "空闲 GPU",
+            "function clearRecommendation",
+        ):
+            self.assertIn(contract, recommendation)
+        self.assertIn("if (recommendationRequested) await updateRecommendation()", self.javascript)
+        self.assertEqual(recommendation.count("result.reason"), 1)
+        for selector in (
+            ".recommendation-result",
+            ".recommendation-main strong",
+            ".recommendation-memory strong",
+            ".recommendation-facts",
+        ):
+            self.assertIn(selector, self.styles)
+
+    def test_multi_server_navigator_is_compact_informative_and_keyboard_accessible(self):
+        for selector in (
+            'id="server-navigator"',
+            'id="server-navigator-drag"',
+            'data-side="right"',
+            'class="server-navigator-panel"',
+            'id="server-navigator-list"',
+            'id="server-navigator-search"',
+            'id="server-navigator-empty"',
+            'id="server-navigator-position"',
+            'id="server-navigator-status"',
+            'aria-label="当前筛选位置"',
+            'id="previous-server"',
+            'id="next-server"',
+            'aria-label="服务器快速导航"',
+            'aria-label="筛选服务器"',
+            'data-server-navigator-filter="all"',
+            'data-server-navigator-filter="available"',
+            'data-server-navigator-filter="tasks"',
+            'data-server-navigator-filter="issues"',
+        ):
+            self.assertIn(selector, self.markup)
+        for contract in (
+            "function renderServerNavigator",
+            "function applyServerNavigatorSide",
+            "function persistServerNavigatorSide",
+            "function beginServerNavigatorDrag",
+            "function moveServerNavigatorDrag",
+            "function finishServerNavigatorDrag",
+            "function serverNavigatorResourceSummary",
+            "function serverNavigatorOwnTaskSummary",
+            "function serverNavigatorOwnActivity",
+            "function serverNavigatorActivityCount",
+            "function serverNavigatorHasAvailableResource",
+            "function serverNavigatorSearchText",
+            "function serverMatchesNavigator",
+            "function syncActiveServerFromScroll",
+            "function navigateToServer",
+            "function navigateRelativeServer",
+            "function scheduleServerNavigatorSearchRender",
+            "servers.length > 1",
+            "serverNavigatorFilter === 'available'",
+            "serverNavigatorFilter === 'tasks'",
+            "serverNavigatorFilter === 'issues'",
+            "ui.serverNavigatorSearch.addEventListener('input'",
+            "ui.previousServer.addEventListener('click'",
+            "ui.nextServer.addEventListener('click'",
+            "当前服务器不在筛选结果中",
+            "scrollIntoView",
+            "aria-current",
+            "window.addEventListener('scroll'",
+            "window.addEventListener('resize'",
+            "api.set_navigator_side",
+            "addEventListener('pointerdown'",
+            "addEventListener('pointermove'",
+            "addEventListener('pointerup'",
+            "addEventListener('pointercancel'",
+        ):
+            self.assertIn(contract, self.javascript)
+        for selector in (
+            ".server-navigator",
+            ".server-navigator-panel",
+            ".server-navigator[data-side=\"left\"]",
+            ".server-navigator-drag",
+            ".server-navigator.dragging",
+            ".server-navigator:hover",
+            ".server-navigator:focus-within",
+            ".server-navigator-item.active",
+            ".server-navigator-copy",
+            ".server-navigator-controls",
+            ".server-navigator-search",
+            ".server-navigator-filters",
+            ".server-navigator-empty",
+            ".server-navigator-footer",
+            ".server-navigator-position",
+        ):
+            self.assertIn(selector, self.styles)
+        search_index = self.javascript[
+            self.javascript.index("function serverNavigatorSearchText"):self.javascript.index("function serverMatchesNavigator")
+        ]
+        self.assertNotIn("server.host", search_index)
+        self.assertNotIn("ssh_alias", search_index)
+        self.assertNotIn("addEventListener('keydown'", self.javascript)
+        self.assertNotIn('id="server-navigator-position" class="server-navigator-position" aria-live=', self.markup)
+        self.assertIn('id="server-navigator-status" class="sr-only" role="status" aria-live="polite"', self.markup)
+        self.assertIn('已定位到服务器 ${server.display_name}', self.javascript)
+        self.assertIn("scroll-margin-top: 84px", self.styles)
+        self.assertIn("@media (max-width: 900px)", self.styles)
+
+    def test_server_navigator_task_filter_shows_only_my_current_activity(self):
+        navigator = self.javascript[
+            self.javascript.index("function serverNavigatorOwnActivity"):self.javascript.index("function setActiveServer")
+        ]
+        own_activity = navigator[
+            navigator.index("function serverNavigatorOwnActivity"):navigator.index("function serverNavigatorActivityCount")
+        ]
+        self.assertIn("server.tasks?.current_user", own_activity)
+        self.assertIn("server.tasks?.active", own_activity)
+        self.assertIn("task.user", own_activity)
+        self.assertIn("process.owner_scope === 'mine'", own_activity)
+        own_summary = navigator[
+            navigator.index("function serverNavigatorOwnTaskSummary"):navigator.index("function serverNavigatorResourceSummary")
+        ]
+        self.assertNotIn("server.tasks?.counts", own_summary)
+        self.assertIn("serverNavigatorFilter === 'tasks'", navigator)
+        matches = navigator[
+            navigator.index("function serverMatchesNavigator"):navigator.index("function renderServerNavigatorItem")
+        ]
+        self.assertIn("serverNavigatorActivityCount(server) > 0", matches)
+        self.assertNotIn("server.tasks?.counts", matches)
+        self.assertIn("const taskSummary = serverNavigatorOwnTaskSummary(server)", navigator)
+        self.assertNotIn("function serverNavigatorTaskSummary", navigator)
+        self.assertNotIn("当前无任务", navigator)
+        self.assertNotIn("当前无 GPU 进程", navigator)
+
+    def test_server_navigator_never_treats_stale_or_offline_activity_as_current(self):
+        own_activity = self.javascript[
+            self.javascript.index("function serverNavigatorOwnActivity"):
+            self.javascript.index("function serverNavigatorActivityCount")
+        ]
+        online_guard = "if (server.connection?.state !== 'online') return [];"
+        self.assertIn(online_guard, own_activity)
+        self.assertLess(own_activity.index(online_guard), own_activity.index("server.backend === 'slurm_ssh'"))
+
+    def test_non_retryable_errors_still_offer_manual_revalidation(self):
+        error_renderer = self.javascript[
+            self.javascript.index("function renderError"):
+            self.javascript.index("function serverGlyph")
+        ]
+        self.assertIn("retry-server", error_renderer)
+        self.assertIn("重新验证", error_renderer)
+        self.assertIn("disabled", error_renderer)
+        self.assertNotIn("error.retryable ?", error_renderer)
+
+    def test_server_navigator_avoids_layout_bound_animation_and_linear_scroll_scans(self):
+        for contract in (
+            "let serverNavigationCards = []",
+            "let serverNavigationCardsById = new Map()",
+            "let serverNavigatorItems = new Map()",
+            "let serverNavigatorPositions = new Map()",
+            "while (low <= high)",
+            "serverNavigationCardsById.get(activeServerId)",
+            "serverNavigatorItems.get(serverId)",
+            "window.requestAnimationFrame(() =>",
+            "scrollIntoView({behavior: 'auto'",
+        ):
+            self.assertIn(contract, self.javascript)
+        scroll_sync = self.javascript[
+            self.javascript.index("function syncActiveServerFromScroll"):self.javascript.index("function scheduleServerNavigationSync")
+        ]
+        self.assertNotIn("querySelectorAll('.server-card')", scroll_sync)
+        self.assertNotIn("cards.find", scroll_sync)
+        self.assertNotIn("cards.reduce", scroll_sync)
+        self.assertNotIn("behavior: reducedMotion ? 'auto' : 'smooth'", self.javascript)
+        self.assertNotIn("window.matchMedia?.('(max-width: 900px)').matches", scroll_sync)
+        self.assertIn("contain: layout paint style", self.styles)
+        self.assertIn("will-change: transform", self.styles)
+        self.assertIn("transition: transform .16s ease", self.styles)
+        self.assertNotIn("transition: width .2s ease", self.styles)
+        schedule_sync = self.javascript[
+            self.javascript.index("function scheduleServerNavigationSync"):self.javascript.index("function renderServerNavigator(servers)")
+        ]
+        self.assertLess(schedule_sync.index("ui.serverNavigator.hidden"), schedule_sync.index("window.requestAnimationFrame"))
+
+    def test_empty_profile_uses_a_dedicated_progressive_onboarding(self):
+        for selector in (
+            'id="first-run-home"',
+            'id="dashboard-content"',
+            'id="onboarding-progress"',
+            'id="onboarding-welcome"',
+            'data-onboarding-marker="1"',
+            'data-onboarding-marker="2"',
+            'data-onboarding-marker="3"',
+        ):
+            self.assertIn(selector, self.markup)
+        for text in (
+            "先添加一台 GPU 服务器",
+            "自动发现",
+            "检查并完成",
+            "没有 SSH 配置也没关系",
+            "稍后设置",
+        ):
+            self.assertIn(text, self.markup)
+        for contract in (
+            "function setOnboardingStep",
+            "function setSettingsMode",
+            "ui.firstRunHome.hidden = hasServers",
+            "ui.dashboardContent.hidden = !hasServers",
+            "ui.refresh.hidden = !hasServers",
+            "openSettings({onboarding: true})",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertIn(".first-run-home", self.styles)
+        self.assertIn(".onboarding-progress", self.styles)
+        self.assertIn(".onboarding-welcome", self.styles)
+        onboarding = self.javascript[
+            self.javascript.index("function setOnboardingStep"):self.javascript.index("async function discoverServerConfig")
+        ]
+        self.assertIn("onboardingStep === 2", onboarding)
+        self.assertIn("void discoverServerConfig()", onboarding)
+        self.assertIn("onboardingDiscoveryStarted = false", onboarding)
+
+    def test_complete_content_keeps_only_one_click_collapse(self):
+        for selector in (
+            'id="collapse-dashboard"',
+            'id="collapse-settings"',
+        ):
+            self.assertIn(selector, self.markup)
+        for selector in (
+            'id="expand-dashboard"',
+            'id="restore-dashboard"',
+            'id="expand-settings"',
+            'id="restore-settings"',
+        ):
+            self.assertNotIn(selector, self.markup)
+        self.assertEqual(self.markup.count("一键收起"), 2)
+        self.assertNotIn("全部展开", self.markup)
+        self.assertNotIn("恢复默认", self.markup)
+        for contract in (
+            "function setDetailsOpen",
+            "function collapseDashboardDisclosure",
+            "function collapseSettingsDisclosure",
+            "function prepareSettingsDisclosure",
+            "dashboardDisclosureMode",
+            "openClusters.clear()",
+            "openTaskGroups.clear()",
+            "openContextNotes.clear()",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertIn(".disclosure-tools", self.styles)
+        self.assertIn(".compact-button", self.styles)
+
+    def test_server_editor_keeps_common_fields_visible_and_advanced_fields_nested(self):
+        self.assertIn('<details class="server-editor-more">', self.markup)
+        self.assertIn("登录与高级设置", self.markup)
+        self.assertIn("密码、端口、用户名和私钥放在每台服务器的第二层设置中", self.markup)
+        self.assertIn('data-server-editor-name', self.markup)
+        self.assertIn('data-auth-overview', self.markup)
+        self.assertIn("refreshEditorName", self.javascript)
+        self.assertIn("authOverview.textContent", self.javascript)
+        for selector in (".settings-section", ".server-editor-more", ".server-editor-more-body"):
+            self.assertIn(selector, self.styles)
+
+    def test_server_editor_exposes_config_source_and_preserves_hidden_advanced_fields(self):
+        self.assertIn('data-field="ssh_config_file"', self.markup)
+        self.assertIn("OpenSSH 配置文件", self.markup)
+        profile_collector = self.javascript[
+            self.javascript.index("function collectProfile"):
+            self.javascript.index("function collectPasswordUpdates")
+        ]
+        self.assertIn("ssh_config_file: value('ssh_config_file')", profile_collector)
+        self.assertIn("connect_timeout_seconds", profile_collector)
+        self.assertNotIn("host_key_fingerprint", profile_collector)
+        self.assertIn("existing", profile_collector)
+        self.assertNotIn("editor.dataset.sshConfigFile", profile_collector)
+
+    def test_connection_test_never_probes_stale_saved_configuration(self):
+        helper_start = self.javascript.index("function serverEditorHasUnsavedConnectionChanges")
+        helper_end = self.javascript.index("async function configureServerSshKey", helper_start)
+        helper = self.javascript[helper_start:helper_end]
+        for field in (
+            "id",
+            "backend",
+            "ssh_alias",
+            "host",
+            "port",
+            "username",
+            "identity_file",
+            "ssh_config_file",
+            "password",
+            "clear_password",
+        ):
+            self.assertIn(field, helper)
+        self.assertIn("data-field=\"port_override\"", helper)
+
+        connection_test = self.javascript[
+            self.javascript.index("async function testServerEditorConnection"):
+            self.javascript.index("function refreshEditorEnabledState")
+        ]
+        self.assertIn("const savedServer = currentProfile?.servers?.find", connection_test)
+        self.assertIn("serverEditorHasUnsavedConnectionChanges(editor, savedServer)", connection_test)
+        self.assertIn("请先保存", connection_test)
+        self.assertLess(
+            connection_test.index("serverEditorHasUnsavedConnectionChanges(editor, savedServer)"),
+            connection_test.index("api.test_connection(serverId)"),
+        )
+
+        key_setup = self.javascript[
+            self.javascript.index("async function configureServerSshKey"):
+            self.javascript.index("async function testServerEditorConnection")
+        ]
+        self.assertIn("serverEditorHasUnsavedConnectionChanges(editor, savedServer)", key_setup)
+
+    def test_other_user_command_preview_has_an_explicit_per_server_setting(self):
+        self.assertIn('data-field="show_other_user_commands"', self.markup)
+        self.assertIn("显示其他用户的命令摘要", self.markup)
+        self.assertIn("show_other_user_commands", self.javascript)
+        self.assertIn(".server-command-setting", self.styles)
+
+    def test_server_password_editor_sends_secrets_outside_profile_payload(self):
+        self.assertIn('data-field="password" type="password"', self.markup)
+        self.assertIn('autocomplete="new-password"', self.markup)
+        self.assertIn('data-field="clear_password"', self.markup)
+        self.assertIn("function collectPasswordUpdates", self.javascript)
+        self.assertIn(
+            "api.save_profile(proposedProfile, collectPasswordUpdates(), collectServerRenames())",
+            self.javascript,
+        )
+        self.assertIn("function collectServerRenames", self.javascript)
+        self.assertIn("editor.dataset.originalId", self.javascript)
+        self.assertIn("editor.dataset.sshConfigFile", self.javascript)
+        profile_collector = self.javascript[
+            self.javascript.index("function collectProfile"):self.javascript.index("function collectPasswordUpdates")
+        ]
+        self.assertNotIn("password", profile_collector)
+        self.assertIn("navigator_side", profile_collector)
+
+    def test_server_editor_has_progressive_secure_ssh_key_setup(self):
+        for text in (
+            "一键配置 SSH 免密登录",
+            "使用现有密钥",
+            "生成专用密钥",
+            "私钥始终留在本机",
+            "不会覆盖已有密钥",
+            "失败会撤销本次新增内容",
+            "配置并验证",
+        ):
+            self.assertIn(text, self.markup)
+        for contract in (
+            "async function configureServerSshKey",
+            "api.configure_ssh_key(serverId",
+            "window.confirm(confirmation)",
+            "private_key_path",
+            "public_key_path",
+            "prefer_identity_auth",
+        ):
+            self.assertIn(contract, self.javascript)
+        for selector in (
+            ".ssh-key-setup",
+            ".ssh-key-setup-body",
+            ".key-mode-options",
+            ".ssh-key-safety",
+        ):
+            self.assertIn(selector, self.styles)
+
+    def test_icons_and_status_styles_have_one_vector_system(self):
+        for symbol in ("⚙", "⌄", "↯"):
+            self.assertNotIn(symbol, self.javascript + self.markup)
+        self.assertIn('class="ui-icon"', self.markup)
+        self.assertIn(".task-badge.warning", self.styles)
+        self.assertIn(".status-dot.online", self.styles)
+
+    def test_precision_radar_identity_uses_functional_svg_and_restrained_surfaces(self):
+        for contract in (
+            'class="brand-mark"',
+            'class="signal-sweep"',
+            "function capacityTape",
+            "function serverGlyph",
+            'class="metric capacity-metric"',
+            'class="server-rail"',
+        ):
+            self.assertIn(contract, self.markup + self.javascript)
+        for token in (
+            "--instrument:",
+            "--instrument-accent:",
+            "--display-font:",
+            ".capacity-visual",
+            ".capacity-tape",
+            ".server-card.online .server-rail",
+        ):
+            self.assertIn(token, self.styles)
+        for forbidden in ("gradient", "backdrop-filter", "border-radius: 999"):
+            self.assertNotIn(forbidden, self.styles)
+
+    def test_memory_meter_has_accessible_semantics(self):
+        self.assertIn('role="progressbar"', self.javascript)
+        self.assertIn('aria-valuenow="${percent}"', self.javascript)
+        self.assertIn(".memory-track.critical", self.styles)
+        self.assertIn("function schedulerMemoryMeter", self.javascript)
+        self.assertIn("调度显存占用", self.javascript)
+        self.assertIn("GPU 调度占用率", self.javascript)
+        self.assertIn("按 Slurm 已分配整卡计算，不代表进程实时显存", self.javascript)
+        self.assertIn("allocatedGpus * perGpu", self.javascript)
+        self.assertIn("summary.total_vram_gib", self.javascript)
+        self.assertIn('role="img" aria-label="${escapeHtml(accessible)}"', self.javascript)
+        self.assertIn("可用比例", self.javascript)
+        self.assertIn("总量待补充", self.javascript)
+        self.assertIn("tape-cell${index < activeCount ? ' available' : ''}", self.javascript)
+        self.assertIn("percent <= 20 ? 'critical' : percent <= 50 ? 'warning' : 'healthy'", self.javascript)
+        self.assertIn(".capacity-visual.warning .capacity-visual-head strong", self.styles)
+        self.assertIn(".capacity-visual.critical .capacity-visual-head strong", self.styles)
+        self.assertIn(".capacity-visual.healthy .capacity-visual-head strong", self.styles)
+        self.assertIn("var(--instrument-warning)", self.styles)
+        self.assertIn("var(--instrument-critical)", self.styles)
+        self.assertIn(".scheduler-memory-note", self.styles)
+        self.assertIn('<progress class="memory-track ${tone}"', self.javascript)
+        self.assertNotIn('style="width:', self.javascript)
+
+    def test_large_cluster_nodes_are_compact_lazy_paged_and_revision_bound(self):
+        for contract in (
+            "const CLUSTER_NODE_PAGE_SIZE = 75",
+            "function renderLargeClusterSummary",
+            "function loadClusterNodes",
+            "api.get_cluster_nodes(",
+            "const currentDataRevision = currentSnapshot?.servers?.find",
+            "const requestRevision = next.revision",
+            "requestRevision,",
+            "const latestDataRevision = currentSnapshot?.servers?.find",
+            "const responseRevision = result.revision ?? requestRevision",
+            "if (revisionChanged)",
+            "result?.code === 'snapshot_changed'",
+            "cluster.dataset.module === 'cluster-nodes'",
+            "event.target.closest?.('.cluster-node-filters')",
+            "const values = new FormData(form)",
+            "const clusterPage = event.target.closest('.cluster-node-page')",
+        ):
+            self.assertIn(contract, self.javascript)
+        for selector in (
+            ".large-cluster-overview",
+            ".cluster-group-grid",
+            ".cluster-node-filters",
+            ".cluster-node-pager",
+        ):
+            self.assertIn(selector, self.styles)
+
+    def test_scheduler_node_columns_use_one_fixed_table_track(self):
+        for contract in (
+            'table class="scheduler-node-table"',
+            '<colgroup><col class="node-name-column">',
+            "function copyableValue",
+            "copyableValue(node.node, '节点名')",
+        ):
+            self.assertIn(contract, self.javascript)
+        for selector in (
+            ".scheduler-node-table { min-width: 1040px; table-layout: fixed; }",
+            ".scheduler-node-table .node-memory-column { width: 27%; }",
+            ".copyable-cell { vertical-align: middle; }",
+            ".copyable-value { max-width: 100%; display: inline-flex",
+        ):
+            self.assertIn(selector, self.styles)
+        self.assertNotIn(".copyable-cell { display: flex", self.styles)
+
+    def test_large_server_fleet_keeps_main_paging_independent_from_navigator_filters(self):
+        self.assertIn("const SERVER_FLEET_PAGE_SIZE = 50", self.javascript)
+        self.assertIn("const SERVER_NAVIGATOR_RENDER_LIMIT = 80", self.javascript)
+        main_page = self.javascript[
+            self.javascript.index("function mainServerEntries"):
+            self.javascript.index("function updateServerFleetPager")
+        ]
+        self.assertNotIn("filteredServerEntries", main_page)
+        self.assertIn("servers.slice(serverFleetPageOffset", main_page)
+        self.assertIn("ui.serverListPreviousPage.addEventListener('click'", self.javascript)
+        self.assertIn("ui.serverListNextPage.addEventListener('click'", self.javascript)
+        self.assertIn("const targetOffset = Math.floor(serverIndex / SERVER_FLEET_PAGE_SIZE)", self.javascript)
+        self.assertIn(".server-list-pager", self.styles)
+
+    def test_background_refresh_repaints_on_completion_without_blocking_the_ui(self):
+        for contract in (
+            "function scheduleRefreshCompletion",
+            "await api.get_snapshot()",
+            "snapshot.monitoring?.in_flight",
+            "const revision = snapshotRevision(snapshot)",
+            "revision == null || revision !== lastRenderedRevision",
+            "function syncUnchangedSnapshotStatus(snapshot)",
+            "syncUnchangedSnapshotStatus(snapshot)",
+            "currentSnapshot = snapshot",
+            "后台读取中…界面仍可操作",
+            "scheduleRefreshCompletion(generation, attempt + 1)",
+        ):
+            self.assertIn(contract, self.javascript)
+
+    def test_cluster_node_requests_ignore_out_of_order_results(self):
+        cluster_load = self.javascript[
+            self.javascript.index("async function loadClusterNodes"):
+            self.javascript.index("function renderSchedulerTable")
+        ]
+        for contract in (
+            "const clusterNodeRequestGenerations = new Map()",
+            "clusterNodeRequestGenerations.set(serverId, requestGeneration)",
+            "clusterNodeRequestGenerations.get(serverId) !== requestGeneration",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertGreaterEqual(
+            cluster_load.count("clusterNodeRequestGenerations.get(serverId) !== requestGeneration"),
+            3,
+        )
+
+    def test_directory_requests_ignore_stale_results_and_merge_into_latest_tree(self):
+        directory_load = self.javascript[
+            self.javascript.index("function directoryRequestKey"):
+            self.javascript.index("function expandLoadedDirectories")
+        ]
+        for contract in (
+            "const directoryRequestTokens = new Map()",
+            "let directoryRequestSequence = 0",
+            "const requestGeneration = ++directoryRequestSequence",
+            "directoryRequestTokens.set(requestKey, requestGeneration)",
+            "const latest = directoryTrees.get(serverId)",
+            "mergeDirectoryAccount(serverId, latest, result.account, result.cache)",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertGreaterEqual(
+            directory_load.count("directoryRequestTokens.get(requestKey) !== requestGeneration"),
+            2,
+        )
+        self.assertIn(
+            "if (directoryRequestTokens.get(requestKey) === requestGeneration) directoryRequestTokens.delete(requestKey)",
+            directory_load,
+        )
+        pin_reset = self.javascript[
+            self.javascript.index("async function pinDefaultDirectory"):
+            self.javascript.index("function renderError")
+        ]
+        self.assertGreaterEqual(pin_reset.count("invalidateDirectoryRequests(serverId)"), 2)
+        save = self.javascript[
+            self.javascript.index("async function saveSettings"):
+            self.javascript.index("async function loadApplication")
+        ]
+        self.assertIn("invalidateChangedServerCaches(previousProfile, result.profile)", save)
+        self.assertNotIn("directoryTrees.clear()", save)
+
+    def test_directory_and_snapshot_repaints_are_incremental_and_bounded(self):
+        for contract in (
+            "const MAX_DIRECTORY_ROOTS_PER_SERVER = 32",
+            "const uiRenderMetrics = Object.seal",
+            "function repaintDirectory(serverId)",
+            "function reconcileServerCards(entries)",
+            "function serverCardRenderSignature(server, index)",
+            "function populateServerEditors(servers, options = {})",
+            "document.createDocumentFragment()",
+            "request_background_refresh",
+            "document.addEventListener('visibilitychange'",
+        ):
+            self.assertIn(contract, self.javascript)
+        directory_load = self.javascript[
+            self.javascript.index("async function loadDirectoryTree"):
+            self.javascript.index("function expandLoadedDirectories")
+        ]
+        self.assertIn("repaintDirectory(serverId)", directory_load)
+        self.assertNotIn("render(currentSnapshot)", directory_load)
+        self.assertIn("result.cache", directory_load)
+        renderer = self.javascript[
+            self.javascript.index("function render(snapshot)"):
+            self.javascript.index("function showToast")
+        ]
+        self.assertIn("reconcileServerCards(entries)", renderer)
+        self.assertNotIn("ui.list.innerHTML", renderer)
+        directory_entries = self.javascript[
+            self.javascript.index("function renderDirectoryEntries"):
+            self.javascript.index("function renderDirectoryRootBar")
+        ]
+        self.assertIn("const children = expanded ? renderLevel(absolutePath) : ''", directory_entries)
+
+    def test_directory_cache_has_a_bounded_freshness_deadline_without_rebuilding_unchanged_trees(self):
+        for contract in (
+            "const directoryFreshnessDeadlines = new Map()",
+            "let directoryFreshnessTimer = null",
+            "function rememberDirectoryFreshness",
+            "cache?.revalidate_after_seconds",
+            "function scheduleDirectoryFreshnessValidation",
+            "function deferDirectoryFreshness",
+            "const DIRECTORY_FRESHNESS_ERROR_RETRY_MS = 30_000",
+            "function directoryValidationVisible",
+            "server.connection?.state !== 'online'",
+            "!module?.open",
+            "await loadDirectoryTree(serverId, false, rootPath || null)",
+            "clearDirectoryFreshness(serverId)",
+        ):
+            self.assertIn(contract, self.javascript)
+        directory_load = self.javascript[
+            self.javascript.index("async function loadDirectoryTree"):
+            self.javascript.index("function expandLoadedDirectories")
+        ]
+        self.assertIn("directoryFreshnessDeadlines.get(requestKey)", directory_load)
+        self.assertIn("rememberDirectoryFreshness(serverId, rootPath, result.cache)", directory_load)
+        self.assertGreaterEqual(directory_load.count("deferDirectoryFreshness(serverId, rootPath)"), 2)
+        self.assertIn("if (result.unchanged && latest?.status === 'loaded')", directory_load)
+        unchanged_branch = directory_load[
+            directory_load.index("if (result.unchanged && latest?.status === 'loaded')"):
+            directory_load.index("} else if (result.unchanged)")
+        ]
+        self.assertNotIn("directoryStateFromAccount", unchanged_branch)
+        self.assertNotIn("mergeDirectoryAccount", unchanged_branch)
+        self.assertIn("if (!rootPath && force) invalidateDirectoryRequests(serverId)", directory_load)
+
+    def test_loaded_directory_is_explicitly_marked_stale_when_server_is_not_online(self):
+        directory_render = self.javascript[
+            self.javascript.index("function renderDirectoryModule"):
+            self.javascript.index("function directoryRequestKey")
+        ]
+        self.assertIn("server.connection?.state !== 'online'", directory_render)
+        self.assertIn("旧目录快照 · 当前服务器未监控就绪，仅供参考", directory_render)
+        self.assertIn("${stale ? '旧目录快照 · ' : ''}", directory_render)
+
+    def test_large_fleet_and_local_actions_avoid_unrelated_full_repaints(self):
+        navigator = self.javascript[
+            self.javascript.index("function renderServerNavigator"):
+            self.javascript.index("function scheduleServerNavigatorSearchRender")
+        ]
+        self.assertIn("const allMatches = filteredServerEntries(servers)", navigator)
+        self.assertIn("visibleServerEntries(allMatches)", navigator)
+        self.assertNotIn("visibleServerEntries(servers)", navigator)
+        cluster_load = self.javascript[
+            self.javascript.index("async function loadClusterNodes"):
+            self.javascript.index("function renderSchedulerTable")
+        ]
+        self.assertIn("repaintClusterNodes(serverId)", cluster_load)
+        self.assertNotIn("render(currentSnapshot)", cluster_load)
+        favorite = self.javascript[
+            self.javascript.index("async function setFavoriteServer"):
+            self.javascript.index("async function setServerEnabled")
+        ]
+        self.assertIn("repaintFavoriteServer(serverId)", favorite)
+        self.assertNotIn("render(currentSnapshot)", favorite)
+
+    def test_convenience_controls_are_wired_where_they_are_used(self):
+        for contract in (
+            "ui.monitoringToggle.addEventListener('click'",
+            "ui.saveView.addEventListener('click'",
+            "ui.resourceWatchEnabled.addEventListener('change'",
+            "const favorite = event.target.closest('.favorite-server')",
+            "const toggleServer = event.target.closest('.toggle-server-monitoring')",
+            "const openTerminal = event.target.closest('.open-terminal')",
+            "const contextCopy = event.target.closest('[data-copy-value]')",
+            "ui.copyDiagnostics.addEventListener('click'",
+            "ui.openLogsDirectory.addEventListener('click'",
+        ):
+            self.assertIn(contract, self.javascript)
+        self.assertIn("? await api.get_redacted_diagnostics()", self.javascript)
+        self.assertIn(": await api.get_redacted_diagnostics(serverId)", self.javascript)
+        self.assertIn("? await api.copy_redacted_diagnostics()", self.javascript)
+        self.assertIn(": await api.copy_redacted_diagnostics(serverId)", self.javascript)
+        self.assertIn("诊断已复制到剪贴板，可直接粘贴给维护者", self.javascript)
+        bulk = self.javascript[
+            self.javascript.index("function collapseDashboardDisclosure"):
+            self.javascript.index("function collapseSettingsDisclosure")
+        ]
+        self.assertNotIn("loadDirectoryTree", bulk)
+        for selector in (
+            ".server-quick-actions",
+            ".saved-view-chip",
+            ".watch-toggle",
+            ".connection-test-result",
+        ):
+            self.assertIn(selector, self.styles)
+        self.assertIn(".server-status-label { display: none; }", self.styles)
+        self.assertIn(".server-quick-actions .open-terminal { display: none; }", self.styles)
+
+    def test_ssh_copy_uses_the_backend_canonical_command(self):
+        copy_flow = self.javascript[
+            self.javascript.index("async function copyServerSshCommand"):
+            self.javascript.index("function scheduleRefreshCompletion")
+        ]
+        self.assertIn("await api.get_ssh_command(serverId)", copy_flow)
+        self.assertIn("await writeClipboard(result.command)", copy_flow)
+        self.assertIn("result.endpoint_complete", copy_flow)
+        self.assertIn("完整 SSH 命令已复制（地址、用户与端口已包含）", copy_flow)
+        self.assertIn("result.warning", copy_flow)
+        quick_actions = self.javascript[
+            self.javascript.index("function renderServerQuickActions"):
+            self.javascript.index("function serverNavigatorOwnActivity")
+        ]
+        self.assertIn("copy-server-ssh", quick_actions)
+        self.assertIn('data-server-id="${escapeHtml(serverId)}"', quick_actions)
+        self.assertIn("const copySsh = event.target.closest('.copy-server-ssh')", self.javascript)
+        self.assertIn("copyServerSshCommand(copySsh.dataset.serverId)", self.javascript)
+        self.assertNotIn("function sshCommandForServer", self.javascript)
+        self.assertNotIn("function shellQuote", self.javascript)
+
+    def test_refresh_clock_uses_the_last_completed_data_revision_time(self):
+        self.assertIn("function snapshotDataUpdatedAt(snapshot)", self.javascript)
+        helper = self.javascript[
+            self.javascript.index("function snapshotDataUpdatedAt(snapshot)"):
+            self.javascript.index("function syncUnchangedSnapshotStatus")
+        ]
+        self.assertIn("snapshot.monitoring?.data_updated_at", helper)
+        for start_marker, end_marker in (
+            ("function syncUnchangedSnapshotStatus", "function render(snapshot)"),
+            ("function render(snapshot)", "function showToast"),
+        ):
+            block = self.javascript[
+                self.javascript.index(start_marker):self.javascript.index(end_marker)
+            ]
+            self.assertIn("snapshotDataUpdatedAt(snapshot)", block)
+            self.assertNotIn("new Date(snapshot.fetched_at)", block)
+            self.assertIn("状态更新于", block)
+
+    def test_refresh_ignores_older_status_responses_errors_and_cleanup(self):
+        refresh = self.javascript[
+            self.javascript.index("async function refresh(force"):
+            self.javascript.index("function resourceCriteriaFromInputs")
+        ]
+        awaited = refresh.index("const snapshot = await api.get_status(force, serverId)")
+        guarded = refresh.index("if (generation !== refreshPollGeneration) return", awaited)
+        rendered = refresh.index("render(snapshot)", guarded)
+        self.assertLess(awaited, guarded)
+        self.assertLess(guarded, rendered)
+        self.assertIn("catch (error) {\n    if (generation !== refreshPollGeneration) return;", refresh)
+        self.assertIn(
+            "finally {\n    if (generation === refreshPollGeneration) ui.refresh.disabled = false;",
+            refresh,
+        )
+
+    def test_startup_notice_has_priority_and_only_renders_its_message(self):
+        render = self.javascript[
+            self.javascript.index("function render(snapshot)"):
+            self.javascript.index("function showToast")
+        ]
+        notice_lookup = render.index("const startupNotice = (Array.isArray(snapshot.notices) ? snapshot.notices : []).find")
+        notice_branch = render.index("if (startupNotice)", notice_lookup)
+        unavailable_branch = render.index("else if (unavailable > 0", notice_branch)
+        self.assertLess(notice_lookup, notice_branch)
+        self.assertLess(notice_branch, unavailable_branch)
+        self.assertIn("escapeHtml(String(startupNotice.message).trim())", render)
+        startup_branch = render[notice_branch:unavailable_branch]
+        self.assertNotIn("startupNotice.code", startup_branch)
+        self.assertNotIn("startupNotice.details", startup_branch)
+
+    def test_removed_companion_has_no_live_web_surface(self):
+        combined = self.javascript + self.markup + self.styles
+        for removed in ("iPhone 伴侣", "createCompanionApi", "pairing-token", "companion-mode", "start-companion"):
+            self.assertNotIn(removed, combined)
+        self.assertIn("window.addEventListener('pywebviewready', initialize", self.javascript)
+
+    def test_responsive_desktop_metadata_and_safe_areas_are_present(self):
+        self.assertIn('name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"', self.markup)
+        self.assertNotIn('rel="manifest"', self.markup)
+        self.assertNotIn('rel="apple-touch-icon"', self.markup)
+        self.assertIn("env(safe-area-inset-top)", self.styles)
+        self.assertIn("min-height: 44px", self.styles)
+        self.assertIn("prefers-reduced-motion: reduce", self.styles)
+        self.assertIn("--data-font", self.styles)
+
+    def test_readable_type_scrollbars_and_compact_navigator_survive_narrow_windows(self):
+        for contract in (
+            "--ui-font:",
+            "--display-font:",
+            "--mono-font:",
+            "--data-font: var(--mono-font)",
+            "--font-body: 16px",
+            "font-family: var(--ui-font)",
+            "code, pre, kbd, samp { font-family: var(--mono-font); }",
+            "html::-webkit-scrollbar",
+            "scrollbar-color: var(--scrollbar-thumb) transparent",
+            "scrollbar-gutter: stable",
+            ".dialog-content { min-width: 0; padding: 20px; overflow-x: hidden; overflow-y: auto; }",
+            ".notice-copy, .error-copy, .form-error, .toast",
+            "overflow-wrap: anywhere",
+            ".account-home strong { max-width: min(620px, 62vw); overflow: visible",
+            ".directory-root strong { min-width: 0; overflow: visible",
+            ".title-actions { min-width: 0; display: flex; flex: 1 1 auto",
+            ".server-navigator { top: auto; bottom: max(10px, env(safe-area-inset-bottom))",
+        ):
+            self.assertIn(contract, self.styles)
+        self.assertNotIn(".server-navigator { display: none; }", self.styles)
+        self.assertNotIn("transition: max-height", self.styles)
+        self.assertNotIn("transition: padding", self.styles)
+        self.assertIn(
+            '<meta name="theme-color" content="#f8f9f4" media="(prefers-color-scheme: light)">',
+            self.markup,
+        )
+        self.assertIn(
+            '<meta name="theme-color" content="#111816" media="(prefers-color-scheme: dark)">',
+            self.markup,
+        )
+
+    def test_desktop_checks_for_updates(self):
+        self.assertIn('id="update-notice"', self.markup)
+        self.assertIn("async function checkForUpdates", self.javascript)
+        self.assertNotIn("clientMode", self.javascript)
+        self.assertIn("void checkForUpdates()", self.javascript)
+        self.assertIn("api.open_latest_release()", self.javascript)
+        self.assertIn(".update-notice", self.styles)
+        self.assertIn("直接运行新安装包即可保留原快捷方式", self.javascript)
+
+
+if __name__ == "__main__":
+    unittest.main()

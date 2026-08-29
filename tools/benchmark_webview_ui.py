@@ -1,0 +1,791 @@
+"""Synthetic, server-free pywebview benchmark for the VRAM Radar UI.
+
+The benchmark loads the real ``web/index.html`` in a hidden pywebview window,
+but injects only a small ``FakeApi`` whose Profile and snapshots live in memory.
+It never opens the user's Profile, reads SSH configuration, or contacts a
+server.  The process exits non-zero when an incremental-rendering contract is
+broken, and always destroys its hidden window on completion or timeout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import ctypes
+from ctypes import wintypes
+import json
+import logging
+import os
+from pathlib import Path
+import tempfile
+import threading
+import time
+from typing import Any
+
+
+SERVER_COUNT = 120
+RENDER_ITERATIONS = 100
+DIRECTORY_ENTRY_COUNT = 160
+
+
+def _empty_profile() -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "profile_revision": 1,
+        "id": "webview-benchmark",
+        "display_name": "Synthetic benchmark",
+        "refresh_seconds": 3_600,
+        "server_config_path": "",
+        "auto_sync_servers": False,
+        "ignored_ssh_aliases": [],
+        "navigator_side": "right",
+        "close_behavior": "exit",
+        "servers": [],
+    }
+
+
+def _empty_snapshot() -> dict[str, Any]:
+    now = "2026-08-30T00:00:00Z"
+    return {
+        "profile": {"refresh_seconds": 3_600},
+        "fetched_at": now,
+        "notices": [],
+        "monitoring": {
+            "revision": 1,
+            "in_flight": False,
+            "paused": False,
+            "data_updated_at": now,
+        },
+        "summary": {
+            "revision": 1,
+            "free_vram_gib": 0,
+            "total_vram_gib": 0,
+            "online_servers": 0,
+            "total_servers": 0,
+            "total_gpus": 0,
+            "data_updated_at": now,
+        },
+        "servers": [],
+    }
+
+
+class FakeApi:
+    """Minimum startup API for the benchmark; every response is synthetic."""
+
+    def __init__(self) -> None:
+        self._profile = _empty_profile()
+        self._snapshot = _empty_snapshot()
+        self.calls: dict[str, int] = {
+            "get_profile": 0,
+            "get_status": 0,
+            "get_snapshot": 0,
+            "check_for_updates": 0,
+            "request_background_refresh": 0,
+        }
+        self._lock = threading.Lock()
+
+    def _count(self, name: str) -> None:
+        with self._lock:
+            self.calls[name] += 1
+
+    def get_profile(self) -> dict[str, Any]:
+        self._count("get_profile")
+        return copy.deepcopy(self._profile)
+
+    def get_status(self, _force: bool = False, _server_id: str | None = None) -> dict[str, Any]:
+        self._count("get_status")
+        return copy.deepcopy(self._snapshot)
+
+    def get_snapshot(self) -> dict[str, Any]:
+        self._count("get_snapshot")
+        return copy.deepcopy(self._snapshot)
+
+    def check_for_updates(self) -> dict[str, Any]:
+        self._count("check_for_updates")
+        return {"ok": True, "update_available": False}
+
+    def request_background_refresh(self) -> dict[str, Any]:
+        self._count("request_background_refresh")
+        return {"ok": True, "accepted": False, "synthetic": True}
+
+
+class _ProcessEntry32W(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", wintypes.DWORD),
+        ("cntUsage", wintypes.DWORD),
+        ("th32ProcessID", wintypes.DWORD),
+        ("th32DefaultHeapID", ctypes.c_size_t),
+        ("th32ModuleID", wintypes.DWORD),
+        ("cntThreads", wintypes.DWORD),
+        ("th32ParentProcessID", wintypes.DWORD),
+        ("pcPriClassBase", ctypes.c_long),
+        ("dwFlags", wintypes.DWORD),
+        ("szExeFile", wintypes.WCHAR * 260),
+    ]
+
+
+class _ProcessMemoryCounters(ctypes.Structure):
+    _fields_ = [
+        ("cb", wintypes.DWORD),
+        ("PageFaultCount", wintypes.DWORD),
+        ("PeakWorkingSetSize", ctypes.c_size_t),
+        ("WorkingSetSize", ctypes.c_size_t),
+        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+        ("PagefileUsage", ctypes.c_size_t),
+        ("PeakPagefileUsage", ctypes.c_size_t),
+    ]
+
+
+def _filetime_seconds(value: wintypes.FILETIME) -> float:
+    ticks = (int(value.dwHighDateTime) << 32) | int(value.dwLowDateTime)
+    return ticks / 10_000_000
+
+
+def _windows_process_tree_metrics(root_pid: int) -> dict[str, Any] | None:
+    """Read CPU time and working set for this benchmark's process tree.
+
+    The implementation is read-only and uses Win32 process snapshots, so the
+    measurement includes WebView2 children without requiring psutil, WMI, or a
+    shell subprocess.  Inaccessible short-lived children are counted and
+    skipped rather than failing the UI benchmark.
+    """
+
+    if os.name != "nt":
+        return None
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    snapshot_flag = 0x00000002
+    invalid_handle = ctypes.c_void_p(-1).value
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry32W)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry32W)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    kernel32.GetProcessTimes.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    psapi.GetProcessMemoryInfo.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_ProcessMemoryCounters),
+        wintypes.DWORD,
+    ]
+    psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+    handle = kernel32.CreateToolhelp32Snapshot(snapshot_flag, 0)
+    if not handle or int(handle) == invalid_handle:
+        return None
+    parents: dict[int, int] = {}
+    names: dict[int, str] = {}
+    try:
+        entry = _ProcessEntry32W()
+        entry.dwSize = ctypes.sizeof(entry)
+        available = bool(kernel32.Process32FirstW(handle, ctypes.byref(entry)))
+        while available:
+            pid = int(entry.th32ProcessID)
+            parents[pid] = int(entry.th32ParentProcessID)
+            names[pid] = str(entry.szExeFile)
+            entry.dwSize = ctypes.sizeof(entry)
+            available = bool(kernel32.Process32NextW(handle, ctypes.byref(entry)))
+    finally:
+        kernel32.CloseHandle(handle)
+
+    process_ids = {int(root_pid)}
+    changed = True
+    while changed:
+        changed = False
+        for pid, parent in parents.items():
+            if parent in process_ids and pid not in process_ids:
+                process_ids.add(pid)
+                changed = True
+
+    query_limited = 0x1000
+    vm_read = 0x0010
+    working_set = 0
+    peak_working_set = 0
+    cpu_seconds = 0.0
+    sampled = 0
+    inaccessible = 0
+    sampled_names: dict[str, int] = {}
+    for pid in sorted(process_ids):
+        process = kernel32.OpenProcess(query_limited | vm_read, False, pid)
+        if not process:
+            inaccessible += 1
+            continue
+        try:
+            memory = _ProcessMemoryCounters()
+            memory.cb = ctypes.sizeof(memory)
+            created = wintypes.FILETIME()
+            exited = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            memory_ok = bool(
+                psapi.GetProcessMemoryInfo(
+                    process, ctypes.byref(memory), ctypes.sizeof(memory)
+                )
+            )
+            time_ok = bool(
+                kernel32.GetProcessTimes(
+                    process,
+                    ctypes.byref(created),
+                    ctypes.byref(exited),
+                    ctypes.byref(kernel),
+                    ctypes.byref(user),
+                )
+            )
+            if not memory_ok and not time_ok:
+                inaccessible += 1
+                continue
+            sampled += 1
+            name = names.get(pid, "unknown")
+            sampled_names[name] = sampled_names.get(name, 0) + 1
+            if memory_ok:
+                working_set += int(memory.WorkingSetSize)
+                peak_working_set += int(memory.PeakWorkingSetSize)
+            if time_ok:
+                cpu_seconds += _filetime_seconds(kernel) + _filetime_seconds(user)
+        finally:
+            kernel32.CloseHandle(process)
+    return {
+        "root_pid": int(root_pid),
+        "discovered_process_count": len(process_ids),
+        "sampled_process_count": sampled,
+        "inaccessible_process_count": inaccessible,
+        "working_set_mib": round(working_set / 1024 / 1024, 3),
+        "peak_working_set_sum_mib": round(peak_working_set / 1024 / 1024, 3),
+        "cpu_seconds": round(cpu_seconds, 6),
+        "processes": sampled_names,
+    }
+
+
+BENCHMARK_JAVASCRIPT = r"""
+(() => {
+  const metricCopy = () => ({
+    fullRenders: Number(window.__VRAM_RADAR_PERF__?.fullRenders || 0),
+    serverCardCreates: Number(window.__VRAM_RADAR_PERF__?.serverCardCreates || 0),
+    directoryRepaints: Number(window.__VRAM_RADAR_PERF__?.directoryRepaints || 0),
+    navigatorBuilds: Number(window.__VRAM_RADAR_PERF__?.navigatorBuilds || 0),
+  });
+  const metricDelta = (after, before) => Object.fromEntries(
+    Object.keys(after).map(key => [key, after[key] - before[key]]),
+  );
+  const heap = () => {
+    const value = performance.memory;
+    if (!value) return null;
+    return {
+      used_mib: Number((value.usedJSHeapSize / 1024 / 1024).toFixed(3)),
+      total_mib: Number((value.totalJSHeapSize / 1024 / 1024).toFixed(3)),
+      limit_mib: Number((value.jsHeapSizeLimit / 1024 / 1024).toFixed(3)),
+    };
+  };
+  const forceLayout = element => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.width + bounds.height + element.offsetHeight;
+  };
+  const round = value => Number(value.toFixed(3));
+  try {
+    window.clearInterval(refreshTimer);
+    window.clearTimeout(refreshPollTimer);
+    refreshTimer = null;
+    refreshPollTimer = null;
+    refreshPollGeneration += 1;
+    if (ui.dialog.open) ui.dialog.close();
+
+    const now = '2026-08-30T00:00:00Z';
+    const servers = Array.from({length: 120}, (_, index) => {
+      const suffix = String(index).padStart(3, '0');
+      return {
+        server_id: `synthetic-${suffix}`,
+        display_name: `Synthetic GPU ${suffix}`,
+        backend: 'direct_ssh',
+        view_kind: 'live-memory',
+        host: `synthetic-${suffix}.invalid`,
+        total_gpus: 1,
+        free_vram_gib: 60,
+        total_vram_gib: 80,
+        gpus: [{
+          gpu_index: 0,
+          gpu_type: index % 2 ? 'NVIDIA A100-SXM4-80GB' : 'NVIDIA H100 80GB HBM3',
+          memory_used_gib: 20,
+          memory_free_gib: 60,
+          memory_total_gib: 80,
+          utilization_percent: index % 100,
+          temperature_c: 42 + (index % 20),
+        }],
+        processes: {
+          supported: true,
+          current_user: 'benchmark',
+          active: [],
+          metadata_limited: false,
+        },
+        account: {
+          username: 'benchmark',
+          home_directory: `/srv/benchmark/work-${suffix}`,
+        },
+        connection: {
+          state: 'online',
+          data_origin: 'live',
+          data_revision: 7,
+          last_success_at: now,
+          retry_at: null,
+          error: null,
+        },
+      };
+    });
+    const profile = {
+      schema_version: 1,
+      profile_revision: 2,
+      id: 'webview-benchmark',
+      display_name: 'Synthetic benchmark',
+      refresh_seconds: 3600,
+      server_config_path: '',
+      auto_sync_servers: false,
+      ignored_ssh_aliases: [],
+      navigator_side: 'right',
+      close_behavior: 'exit',
+      servers: servers.map(server => ({
+        id: server.server_id,
+        display_name: server.display_name,
+        backend: server.backend,
+        ssh_alias: server.server_id,
+        host: server.host,
+        port: 22,
+        port_override: false,
+        username: 'benchmark',
+        identity_file: '',
+        ssh_config_file: '',
+        enabled: true,
+        show_other_user_commands: false,
+        connect_timeout_seconds: 10,
+      })),
+    };
+    const snapshot = {
+      profile: {refresh_seconds: 3600},
+      fetched_at: now,
+      notices: [],
+      monitoring: {
+        revision: 7,
+        in_flight: false,
+        paused: false,
+        data_updated_at: now,
+      },
+      summary: {
+        revision: 7,
+        free_vram_gib: 7200,
+        total_vram_gib: 9600,
+        online_servers: 120,
+        total_servers: 120,
+        total_gpus: 120,
+        data_updated_at: now,
+      },
+      servers,
+    };
+
+    currentProfile = profile;
+    profileServerListReference = null;
+    profileServersById = new Map();
+    syncProfileConvenienceState(profile);
+    currentSnapshot = null;
+    lastRenderedRevision = null;
+    lastSummaryRenderSignature = '';
+    lastNavigatorRenderSignature = '';
+    activeServerId = '';
+    serverFleetPageOffset = 0;
+    serverNavigatorFilter = 'all';
+    serverNavigatorQuery = '';
+    serverNavigationCards = [];
+    serverNavigationCardsById = new Map();
+    serverNavigatorItems = new Map();
+    serverNavigatorPositions = new Map();
+    renderedServerCardSignatures.clear();
+    directoryTrees.clear();
+    directoryRequestTokens.clear();
+    openClusters.clear();
+    openDirectoryNodes.clear();
+    openTaskGroups.clear();
+    openContextNotes.clear();
+    ui.list.replaceChildren();
+    ui.summary.replaceChildren();
+    ui.editorList.replaceChildren();
+    ui.serverNavigatorList.replaceChildren();
+    const heapBefore = heap();
+
+    const initialMetricsBefore = metricCopy();
+    const initialStart = performance.now();
+    render(snapshot);
+    forceLayout(ui.list);
+    const initialWall = performance.now() - initialStart;
+    const initialMetricsAfter = metricCopy();
+    const visibleCardsAfterInitial = ui.list.querySelectorAll(':scope > .server-card').length;
+    const firstCard = ui.list.querySelector('.server-card');
+    const initialDomNodes = document.getElementsByTagName('*').length;
+
+    const repeatMetricsBefore = metricCopy();
+    const repeatStart = performance.now();
+    for (let index = 0; index < 100; index += 1) render(snapshot);
+    forceLayout(ui.list);
+    const repeatWall = performance.now() - repeatStart;
+    const repeatMetricsAfter = metricCopy();
+    const firstCardAfterRepeatedRender = ui.list.querySelector('.server-card');
+
+    const directoryRoot = '/srv/benchmark/code';
+    const expandedRoot = `${directoryRoot}/project-000`;
+    const directoryEntries = [
+      ...Array.from({length: 80}, (_, index) => {
+        const name = `project-${String(index).padStart(3, '0')}`;
+        return {
+          name,
+          path: name,
+          absolute_path: `${directoryRoot}/${name}`,
+          parent_absolute_path: directoryRoot,
+          kind: 'directory',
+          has_more: false,
+          size_bytes: 0,
+          modified_at: now,
+        };
+      }),
+      ...Array.from({length: 80}, (_, index) => {
+        const name = `module-${String(index).padStart(3, '0')}.py`;
+        return {
+          name,
+          path: `project-000/${name}`,
+          absolute_path: `${expandedRoot}/${name}`,
+          parent_absolute_path: expandedRoot,
+          kind: 'file',
+          has_more: false,
+          size_bytes: 1024 + index,
+          modified_at: now,
+        };
+      }),
+    ];
+    const directoryAccount = {
+      username: 'benchmark',
+      home_directory: '/srv/benchmark',
+      directory_tree: {
+        supported: true,
+        root: directoryRoot,
+        root_source: 'auto',
+        entries: directoryEntries,
+        truncated: false,
+      },
+    };
+    const directoryState = directoryStateFromAccount(
+      directoryAccount,
+      {state: 'hit', age_seconds: 0.25},
+    );
+    directoryState.loadedRoots.add(expandedRoot);
+    directoryState.loadedRootOrder.push(expandedRoot);
+    directoryTrees.set(servers[0].server_id, directoryState);
+    openClusters.add(`${servers[0].server_id}:account-directory`);
+
+    const directoryMetricsBefore = metricCopy();
+    const directoryCardBefore = ui.list.querySelector('.server-card');
+    const directoryStart = performance.now();
+    repaintDirectory(servers[0].server_id);
+    const directoryModule = directoryCardBefore.querySelector('.directory-module');
+    forceLayout(directoryModule);
+    const directoryFirstWall = performance.now() - directoryStart;
+    const firstModuleNodes = directoryModule.querySelectorAll('*').length;
+    const firstDocumentNodes = document.getElementsByTagName('*').length;
+    const firstRootNodes = directoryModule.querySelectorAll('.directory-node').length;
+    const firstFileNodes = directoryModule.querySelectorAll('.directory-file').length;
+
+    const expandStart = performance.now();
+    openDirectoryNodes.add(`${servers[0].server_id}:${expandedRoot}`);
+    repaintDirectory(servers[0].server_id);
+    const expandedModule = directoryCardBefore.querySelector('.directory-module');
+    forceLayout(expandedModule);
+    const expandWall = performance.now() - expandStart;
+    const expandedModuleNodes = expandedModule.querySelectorAll('*').length;
+    const expandedDocumentNodes = document.getElementsByTagName('*').length;
+    const expandedFileNodes = expandedModule.querySelectorAll('.directory-file').length;
+
+    const collapseStart = performance.now();
+    openDirectoryNodes.delete(`${servers[0].server_id}:${expandedRoot}`);
+    repaintDirectory(servers[0].server_id);
+    const collapsedModule = directoryCardBefore.querySelector('.directory-module');
+    forceLayout(collapsedModule);
+    const collapseWall = performance.now() - collapseStart;
+    const collapsedModuleNodes = collapsedModule.querySelectorAll('*').length;
+    const collapsedDocumentNodes = document.getElementsByTagName('*').length;
+    const collapsedFileNodes = collapsedModule.querySelectorAll('.directory-file').length;
+    const directoryMetricsAfter = metricCopy();
+    const heapAfterDirectory = heap();
+
+    const settingsStart = performance.now();
+    openSettings({forceNormal: true});
+    forceLayout(ui.dialog);
+    const settingsWall = performance.now() - settingsStart;
+    const editors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
+    const editorIds = editors.map(editor => editor.querySelector('[data-field="id"]')?.value || '');
+    const heapAfterSettings = heap();
+    const settingsDomNodes = ui.dialog.querySelectorAll('*').length;
+    if (ui.dialog.open) ui.dialog.close();
+
+    const assertions = {
+      initial_visible_cards_paginated_to_50: visibleCardsAfterInitial === 50,
+      initial_server_cards_created_once: metricDelta(initialMetricsAfter, initialMetricsBefore).serverCardCreates === 50,
+      repeated_render_preserves_card_identity: firstCard === firstCardAfterRepeatedRender,
+      repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
+      repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
+      repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
+      directory_fixture_has_160_entries: directoryEntries.length === 160,
+      directory_initially_skips_cached_children: firstRootNodes === 80 && firstFileNodes === 0,
+      directory_expand_materializes_cached_children: expandedFileNodes === 80 && expandedModuleNodes > firstModuleNodes,
+      directory_collapse_releases_cached_children: collapsedFileNodes === 0 && collapsedModuleNodes === firstModuleNodes,
+      directory_updates_preserve_server_card: directoryCardBefore === ui.list.querySelector('.server-card'),
+      directory_uses_three_local_repaints: metricDelta(directoryMetricsAfter, directoryMetricsBefore).directoryRepaints === 3,
+      settings_builds_all_120_servers: editors.length === 120,
+      settings_server_ids_remain_unique: new Set(editorIds).size === 120,
+    };
+    return JSON.stringify({
+      ok: Object.values(assertions).every(Boolean),
+      synthetic_only: true,
+      remote_connections: 0,
+      document_hidden: document.hidden,
+      initial_render: {
+        server_count: 120,
+        visible_server_cards: visibleCardsAfterInitial,
+        wall_ms: round(initialWall),
+        dom_nodes: initialDomNodes,
+        metrics_delta: metricDelta(initialMetricsAfter, initialMetricsBefore),
+      },
+      repeated_render: {
+        iterations: 100,
+        total_wall_ms: round(repeatWall),
+        average_wall_ms: round(repeatWall / 100),
+        server_card_dom_identity_preserved: firstCard === firstCardAfterRepeatedRender,
+        visible_server_cards: ui.list.querySelectorAll(':scope > .server-card').length,
+        metrics_delta: metricDelta(repeatMetricsAfter, repeatMetricsBefore),
+      },
+      directory_module: {
+        entry_count: directoryEntries.length,
+        first_local_paint: {
+          wall_ms: round(directoryFirstWall),
+          module_dom_nodes: firstModuleNodes,
+          document_dom_nodes: firstDocumentNodes,
+          root_directory_nodes: firstRootNodes,
+          cached_child_file_nodes: firstFileNodes,
+        },
+        expand_cached_subtree: {
+          wall_ms: round(expandWall),
+          module_dom_nodes: expandedModuleNodes,
+          document_dom_nodes: expandedDocumentNodes,
+          cached_child_file_nodes: expandedFileNodes,
+        },
+        collapse_cached_subtree: {
+          wall_ms: round(collapseWall),
+          module_dom_nodes: collapsedModuleNodes,
+          document_dom_nodes: collapsedDocumentNodes,
+          cached_child_file_nodes: collapsedFileNodes,
+        },
+        metrics_delta: metricDelta(directoryMetricsAfter, directoryMetricsBefore),
+      },
+      settings: {
+        server_count: 120,
+        wall_ms: round(settingsWall),
+        editor_count: editors.length,
+        unique_editor_ids: new Set(editorIds).size,
+        dialog_dom_nodes: settingsDomNodes,
+      },
+      js_heap: {
+        before: heapBefore,
+        after_directory: heapAfterDirectory,
+        after_settings: heapAfterSettings,
+      },
+      ui_render_metrics_final: metricCopy(),
+      assertions,
+    });
+  } catch (error) {
+    return JSON.stringify({
+      ok: false,
+      synthetic_only: true,
+      remote_connections: 0,
+      error: String(error?.message || error),
+      stack: String(error?.stack || ''),
+    });
+  }
+})()
+"""
+
+
+def _wait_until_ready(window: Any, deadline: float) -> None:
+    last_error: Exception | None = None
+    readiness_script = """
+        JSON.stringify({
+          ready: document.readyState === 'complete'
+            && typeof render === 'function'
+            && typeof currentProfile !== 'undefined'
+            && currentProfile !== null
+            && typeof currentSnapshot !== 'undefined'
+            && currentSnapshot !== null
+            && Boolean(document.getElementById('settings-dialog')),
+          state: document.readyState,
+        })
+    """
+    while time.monotonic() < deadline:
+        try:
+            value = window.evaluate_js(readiness_script)
+            payload = json.loads(value) if isinstance(value, str) else value
+            if payload and payload.get("ready"):
+                return
+        except Exception as exc:  # pywebview raises while the page is loading
+            last_error = exc
+        time.sleep(0.05)
+    if last_error is not None:
+        raise TimeoutError(f"WebView did not become ready: {last_error}")
+    raise TimeoutError("WebView did not become ready before the benchmark deadline")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--timeout-seconds", type=float, default=90.0)
+    args = parser.parse_args()
+    timeout_seconds = max(10.0, float(args.timeout_seconds))
+    index_path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "vram_radar"
+        / "web"
+        / "index.html"
+    )
+    if not index_path.is_file():
+        print(json.dumps({"ok": False, "error": f"missing UI: {index_path}"}, indent=2))
+        return 2
+
+    try:
+        import webview
+    except ImportError as exc:
+        print(json.dumps({"ok": False, "error": f"pywebview unavailable: {exc}"}, indent=2))
+        return 2
+
+    logging.disable(logging.CRITICAL)
+    api = FakeApi()
+    result: dict[str, Any] = {}
+    result_lock = threading.Lock()
+    timed_out = threading.Event()
+    started_at = time.perf_counter()
+
+    with tempfile.TemporaryDirectory(prefix="vram-radar-webview-benchmark-") as temporary:
+        window = webview.create_window(
+            "VRAM Radar synthetic UI benchmark",
+            url=index_path.as_uri(),
+            js_api=api,
+            width=1_180,
+            height=780,
+            min_size=(840, 600),
+            hidden=True,
+            focus=False,
+            background_color="#071017",
+        )
+        if window is None:
+            print(json.dumps({"ok": False, "error": "pywebview returned no window"}, indent=2))
+            return 2
+
+        def abort_on_timeout() -> None:
+            timed_out.set()
+            with result_lock:
+                result.setdefault("error", f"benchmark exceeded {timeout_seconds:g} seconds")
+                result["ok"] = False
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+        watchdog = threading.Timer(timeout_seconds, abort_on_timeout)
+        watchdog.daemon = True
+        watchdog.start()
+
+        def run_benchmark() -> None:
+            try:
+                deadline = time.monotonic() + max(1.0, timeout_seconds - 1.0)
+                _wait_until_ready(window, deadline)
+                startup_wall_ms = round((time.perf_counter() - started_at) * 1_000, 3)
+                process_before = _windows_process_tree_metrics(os.getpid())
+                raw = window.evaluate_js(BENCHMARK_JAVASCRIPT)
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+                process_after = _windows_process_tree_metrics(os.getpid())
+                if not isinstance(payload, dict):
+                    raise TypeError(f"unexpected JavaScript result: {type(payload).__name__}")
+                payload["startup_to_ready_wall_ms"] = startup_wall_ms
+                payload["fake_api_calls"] = dict(api.calls)
+                payload["timeout_seconds"] = timeout_seconds
+                if process_before is not None and process_after is not None:
+                    payload["windows_process_tree"] = {
+                        "before": process_before,
+                        "after": process_after,
+                        "benchmark_cpu_seconds": round(
+                            process_after["cpu_seconds"] - process_before["cpu_seconds"], 6
+                        ),
+                        "working_set_delta_mib": round(
+                            process_after["working_set_mib"]
+                            - process_before["working_set_mib"],
+                            3,
+                        ),
+                    }
+                else:
+                    payload["windows_process_tree"] = None
+                with result_lock:
+                    result.update(payload)
+            except Exception as exc:
+                with result_lock:
+                    result.update(
+                        {
+                            "ok": False,
+                            "synthetic_only": True,
+                            "remote_connections": 0,
+                            "error": str(exc),
+                        }
+                    )
+            finally:
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+
+        try:
+            webview.start(
+                run_benchmark,
+                private_mode=True,
+                storage_path=temporary,
+            )
+        except Exception as exc:
+            with result_lock:
+                result.update(
+                    {
+                        "ok": False,
+                        "synthetic_only": True,
+                        "remote_connections": 0,
+                        "error": f"pywebview failed: {exc}",
+                    }
+                )
+        finally:
+            watchdog.cancel()
+
+    with result_lock:
+        output = dict(result)
+    if timed_out.is_set():
+        output["timed_out"] = True
+        output["ok"] = False
+    else:
+        output["timed_out"] = False
+    output.setdefault("synthetic_only", True)
+    output.setdefault("remote_connections", 0)
+    print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if output.get("ok") is True else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
