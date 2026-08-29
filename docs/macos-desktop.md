@@ -95,26 +95,29 @@ editor settings, and portable `servers.toml` catalogs. The local scan neither
 connects to a host nor executes OpenSSH configuration commands. See
 [server config discovery](server-config-discovery.md) for manual fallback steps.
 
-For the signed public archive, extract the ZIP and open the app matching the
-Mac's processor normally from Finder. The release gate requires a Developer ID
-signature, accepted notarization, a stapled ticket, and a successful Gatekeeper
-assessment for each native application.
+For the current unsigned public archive, first launch requires only this
+bounded exception: extract the ZIP, right-click the app matching the Mac's
+processor, select **Open**, then confirm **Open** once. Do not disable
+Gatekeeper globally and do not remove quarantine attributes with a shell
+command. If device policy removes the Open option, the device administrator
+must approve the app.
 
 ## Signing and distribution
 
 The stable GitHub workflow builds each architecture on a native runner and
 requires the complete test suite, strict bundle code verification, source asset
 matching, packaged askpass exchange, Cocoa smoke, and exact architecture
-checks. The workflow invokes `tools/sign_notarize_macos.sh` for each native
-architecture and fails closed when any Apple credential is missing,
-notarization is not accepted, stapling fails, or Gatekeeper rejects the bundle.
-`VRAM_RADAR_REQUIRE_DISTRIBUTION_SIGNING=1` is also enforced when validating
-the final combined archive.
+checks. Version 0.6.1 is distributed without an Apple Developer ID signature
+or Apple notarization, so Gatekeeper may require Finder's right-click **Open**
+confirmation on first launch. The maintained `tools/sign_notarize_macos.sh`
+path remains available for a future credentialed release, and
+`VRAM_RADAR_REQUIRE_DISTRIBUTION_SIGNING=1` retains the stronger Developer ID,
+stapling, and Gatekeeper validation gate when that path is selected.
 
 The maintained workflow is manually dispatched with the stable tag and exact
 commit SHA. It creates one non-preview GitHub Release only after the Windows,
 Apple Silicon, and Intel artifacts all pass. The two validated native apps are
 then placed together in one public macOS ZIP. The final ZIP is extracted and
 the selected app is launched and fully validated again on both native runner
-architectures. A missing, unsigned, unnotarized, or failed architecture blocks
-the entire release.
+architectures. A missing or failed architecture blocks the entire release;
+version 0.6.1 does not claim notarization.

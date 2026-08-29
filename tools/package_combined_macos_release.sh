@@ -11,10 +11,6 @@ if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "RELEASE_TAG must be a stable semantic version tag." >&2
   exit 2
 fi
-if [[ "${VRAM_RADAR_DISTRIBUTION_SIGNED:-}" != "1" ]]; then
-  echo "Combined public macOS releases require signed and notarized native applications." >&2
-  exit 2
-fi
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 input_dir="${1:-$project_root/native-assets}"
@@ -48,9 +44,6 @@ for bundle in "$arm_bundle" "$intel_bundle"; do
   [[ -d "$bundle" ]] || { echo "Expected app bundle is missing: $bundle" >&2; exit 2; }
   bundle_version="$(plutil -extract CFBundleShortVersionString raw "$bundle/Contents/Info.plist")"
   [[ "$bundle_version" == "$version" ]] || { echo "Bundle version $bundle_version does not match $version" >&2; exit 2; }
-  codesign --verify --deep --strict --verbose=2 "$bundle"
-  xcrun stapler validate "$bundle"
-  spctl --assess --type execute --verbose=4 "$bundle"
 done
 
 [[ "$(lipo -archs "$arm_bundle/Contents/MacOS/VRAMRadar")" == "arm64" ]] || { echo "Apple Silicon app has the wrong architecture" >&2; exit 2; }
@@ -66,8 +59,8 @@ printf '%s\n' \
   'Apple Silicon (M1/M2/M3/M4): open VRAM Radar (Apple Silicon).app' \
   'Intel Mac: open VRAM Radar (Intel).app' \
   '' \
-  'Both applications are Apple Developer ID signed, notarized, and stapled.' \
-  'Choose the application that matches your Mac processor.' \
+  'This release is not Apple Developer ID signed or notarized.' \
+  'If macOS blocks first launch, right-click the matching app and choose Open.' \
   > "$stage/VRAM Radar macOS/README.txt"
 
 asset="$project_root/VRAMRadar-$version-macos.zip"

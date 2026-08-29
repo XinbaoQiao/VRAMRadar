@@ -147,7 +147,7 @@ Download `VRAMRadar-0.7.0-macos.zip`:
 - `VRAM Radar (Apple Silicon).app` supports M1, M2, M3, and M4 Macs, with a current validation boundary of macOS 14 or newer.
 - `VRAM Radar (Intel).app` supports Intel x86_64 Macs, with a current validation boundary of macOS 15 or newer.
 
-The macOS applications are Developer ID signed, notarized, and stapled. The release workflow verifies both architectures with Gatekeeper before publishing the combined archive. After extracting the archive, open the `.app` that matches your Mac processor normally from Finder.
+This release is not signed with an Apple Developer ID and is not notarized because no Apple distribution credentials are configured for the project. After extracting the archive, use Finder's right-click **Open** action on the matching `.app`, then confirm **Open** once. Do not disable Gatekeeper globally.
 
 > The current public stable release is `v0.7.0`. Update checks start independently of server refresh, retry visibly after a network failure, and repeat while the app remains open. Windows installer copies now support a confirmed, SHA-256-verified update with rollback and automatic restart. GitHub exposes only the two files users need to download: the Windows installer and the combined macOS archive.
 
@@ -157,8 +157,8 @@ SHA-256 digest, preserves the previous installation for rollback, and restarts
 the same executable path after success. Because `v0.6.1` does not yet contain
 the independent updater, installing that first updater-enabled version is a
 one-time manual bootstrap. On macOS, the app downloads and verifies the archive
-but asks the user to replace the `.app` manually because in-place macOS bundle
-replacement is not yet implemented.
+but asks the user to replace the `.app` manually until Developer ID signing and
+notarization are available.
 
 ## Automatic configuration coverage
 
@@ -209,7 +209,7 @@ If no source is found, follow the [Windows and macOS SSH configuration discovery
 | Credential store | Windows Credential Manager | macOS Keychain |
 | Desktop runtime | WebView2 / native window | Cocoa / WebKit |
 | Shortcut after update | Stable install path; verified one-click upgrade after the bootstrap release | Replace the `.app` manually |
-| Current signing claim | Unsigned; per-user install avoids UAC | Developer ID signed, notarized, stapled, and Gatekeeper-verified |
+| Current signing claim | Unsigned; per-user install avoids UAC | Unsigned and unnotarized; one Finder confirmation required |
 | Update behavior | Check and notify; never auto-install | Check and notify; never auto-install |
 
 More detail:

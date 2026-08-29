@@ -18,7 +18,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         cls.packager = (ROOT / "tools" / "package_macos_release.sh").read_text(encoding="utf-8")
         cls.combined_packager = (ROOT / "tools" / "package_combined_macos_release.sh").read_text(encoding="utf-8")
         cls.readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        cls.release_notes = (ROOT / "docs" / "release-notes-v0.7.0.md").read_text(encoding="utf-8")
+        cls.release_notes = (ROOT / "docs" / "release-notes-v0.4.3.md").read_text(encoding="utf-8")
 
     def test_spec_selects_cocoa_keychain_and_app_bundle_on_macos(self) -> None:
         self.assertIn('sys.platform == "darwin"', self.spec)
@@ -72,21 +72,18 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn('"real_server_contacted": False', self.validator)
         self.assertIn('if sys.platform != "darwin"', self.validator)
 
-    def test_ci_builds_signed_validated_native_apple_silicon_and_intel_packages(self) -> None:
+    def test_ci_builds_validated_native_apple_silicon_and_intel_packages_without_secrets(self) -> None:
         self.assertIn("runner: macos-14", self.workflow)
         self.assertIn("runner: macos-15-intel", self.workflow)
         self.assertIn("VRAM_RADAR_RELEASE_TAG: ${{ inputs.release_tag }}", self.workflow)
         self.assertIn("VRAM_RADAR_EXPECTED_MACOS_ARCH: ${{ matrix.arch }}", self.workflow)
         self.assertIn("tools\\validate_packaged_tray.py", self.workflow)
         self.assertIn("VRAMRadar-*-macos-${{ matrix.arch }}.zip", self.workflow)
-        self.assertIn("secrets.MACOS_CERTIFICATE_P12", self.workflow)
-        self.assertIn("secrets.MACOS_CERTIFICATE_PASSWORD", self.workflow)
-        self.assertIn("secrets.MACOS_SIGNING_IDENTITY", self.workflow)
-        self.assertIn("secrets.APPLE_ID", self.workflow)
-        self.assertIn("secrets.APPLE_TEAM_ID", self.workflow)
-        self.assertIn("secrets.APPLE_APP_SPECIFIC_PASSWORD", self.workflow)
-        self.assertIn('VRAM_RADAR_REQUIRE_DISTRIBUTION_SIGNING: "1"', self.workflow)
-        self.assertIn("bash tools/sign_notarize_macos.sh", self.workflow)
+        self.assertIn("bash tools/package_macos_release.sh", self.workflow)
+        self.assertNotIn("secrets.MACOS_", self.workflow)
+        self.assertNotIn("secrets.APPLE_", self.workflow)
+        self.assertNotIn('VRAM_RADAR_REQUIRE_DISTRIBUTION_SIGNING: "1"', self.workflow)
+        self.assertNotIn("bash tools/sign_notarize_macos.sh", self.workflow)
         self.assertNotIn("--prerelease", self.workflow)
 
     def test_unsigned_macos_packager_emits_native_archive_and_checksum(self) -> None:
@@ -112,14 +109,14 @@ class MacOSPackagingContractTests(unittest.TestCase):
         ):
             self.assertIn(contract, self.combined_packager)
 
-    def test_signed_distribution_boundary_is_explicit(self) -> None:
-        self.assertIn("ID signed, notarized, and stapled", self.release_notes)
-        self.assertIn("Gatekeeper verification", self.release_notes)
-        self.assertIn("Developer ID 签名", self.release_notes)
-        self.assertIn("Gatekeeper 验证", self.release_notes)
-        self.assertIn("VRAM_RADAR_DISTRIBUTION_SIGNED", self.combined_packager)
-        self.assertIn("xcrun stapler validate", self.combined_packager)
-        self.assertIn("spctl --assess --type execute", self.combined_packager)
+    def test_unsigned_current_distribution_boundary_is_explicit(self) -> None:
+        self.assertIn("This release is not signed", self.readme)
+        self.assertIn("with an Apple Developer ID", self.readme)
+        self.assertIn("not notarized", self.readme)
+        self.assertIn("right-click **Open**", self.readme)
+        self.assertIn("未使用 Apple Developer ID 签名", self.release_notes)
+        self.assertIn("未经过 Apple", self.release_notes)
+        self.assertIn("右键应用并选择“打开”", self.release_notes)
 
     def test_signer_uses_hardened_runtime_notarytool_and_stapler(self) -> None:
         for contract in (
@@ -147,14 +144,9 @@ class MacOSPackagingContractTests(unittest.TestCase):
             'git rev-parse "$RELEASE_TAG^{commit}"',
             'gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs"',
             'cleanup_failed_draft() (',
-            'restore_previous_release() (',
             'created_release_id=""',
             'repos/$GITHUB_REPOSITORY/releases/$created_release_id',
             'release_tags="$(gh api --paginate',
-            'REPLACE_EXISTING_RELEASE: ${{ inputs.replace_existing_release }}',
-            'gh release download "$RELEASE_TAG"',
-            'gh release delete "$RELEASE_TAG"',
-            'replacement_started="1"',
             'tag_lookup_status=$?',
             'case "$tag_lookup_status" in',
             'created_release_id="$(gh api --method POST',
@@ -170,7 +162,9 @@ class MacOSPackagingContractTests(unittest.TestCase):
         ):
             self.assertIn(contract, self.workflow)
         self.assertNotIn('if gh release view "$RELEASE_TAG"', self.workflow)
+        self.assertNotIn('gh release delete "$RELEASE_TAG"', self.workflow)
         self.assertNotIn('gh release upload "$RELEASE_TAG" release-assets/*', self.workflow)
+        self.assertNotIn('DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/', self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-windows", self.workflow)
         self.assertNotIn("VRAMRadar-0.4.0-macos", self.workflow)
         public_assets = self.workflow.split("public_assets=(", 1)[1].split(")", 1)[0]
