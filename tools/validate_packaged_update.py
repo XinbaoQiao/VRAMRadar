@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -27,15 +29,32 @@ def wait_for(path: Path, timeout: float = 30.0) -> None:
     raise RuntimeError(f"timed out waiting for {path}")
 
 
-def wait_until_removable(path: Path, timeout: float = 20.0) -> None:
+def wait_for_process_exit(pid: int, timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            path.unlink(missing_ok=True)
+    if os.name == "nt":
+        synchronize = 0x00100000
+        wait_object_0 = 0
+        wait_timeout = 258
+        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        if not handle:
             return
-        except PermissionError:
+        try:
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            result = ctypes.windll.kernel32.WaitForSingleObject(handle, remaining_ms)
+            if result == wait_object_0:
+                return
+            if result != wait_timeout:
+                raise OSError("could not wait for updated process")
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
             time.sleep(0.2)
-    raise RuntimeError(f"updated process did not release {path}")
+    raise RuntimeError(f"updated process {pid} did not exit")
 
 
 def validate(installer: Path) -> None:
@@ -89,12 +108,16 @@ def validate(installer: Path) -> None:
             if completed.returncode != 0:
                 raise RuntimeError(f"packaged updater exited with {completed.returncode}")
             wait_for(activation)
+            activation_document = json.loads(activation.read_text(encoding="utf-8"))
+            updated_pid = int(activation_document["pid"])
+            if updated_pid <= 0 or updated_pid == process.pid:
+                raise RuntimeError("updated application did not publish a new process identity")
             subprocess.run(
                 [str(executable), "--profile", profile, "--home", str(home), "--quit-existing"],
                 check=True,
                 timeout=20,
             )
-            wait_until_removable(home / "logs" / "app.log")
+            wait_for_process_exit(updated_pid)
             if not executable.is_file() or not marker.is_file():
                 raise RuntimeError("updated installation is incomplete")
             if list(root.glob("install.update-backup-*")):
