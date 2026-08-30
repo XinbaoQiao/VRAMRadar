@@ -109,7 +109,8 @@ A100/Slurm 节点表使用固定列轨道，长节点名、分区名或状态不
 ### 桌面级便利功能
 
 - 在设置中切换简体中文 / English；完整界面会立即切换，本地偏好在重启和覆盖更新后仍会保留。
-- 为收藏服务器持久设置资源提醒：整张 GPU 空闲，或任意单卡达到可选的最低空闲显存阈值时发送系统通知。窗口收起后仍会继续判断；同一次可用状态只提醒一次，不会每轮刷新重复弹出。
+- 新 Profile 默认开启收藏服务器 GPU 可用提醒：整张 GPU 空闲，或任意单卡达到可选的最低空闲显存阈值时发送系统通知。窗口收起后仍会继续判断；同一次可用状态只提醒一次，不会每轮刷新重复弹出。
+- 新添加的服务器默认开启其他用户任务与命令摘要。SSH 直连显示经本地敏感参数遮盖和长度限制的 GPU 进程命令；Slurm 显示调度器作业名、状态、用户、节点和时间，不声称读取完整 shell 命令。已有的明确关闭选择会保留。
 - 收藏服务器、复制 SSH 配置、打开系统终端、单独暂停服务器监控。“复制 SSH”生成可直接粘贴进 OpenSSH config 的 `Host` 配置块，包含静态确认的 `HostName`、`User`、`Port`、可选 `IdentityFile` 和非交互安全选项；遇到条件式或动态配置时，会回退复制安全的可执行别名命令并明确提示，而不会猜测字段。
 - Windows 最小化或关闭后可留在通知区域；右键菜单提供状态、显示、刷新、设置、暂停和退出。
 - 自动检查 GitHub 最新稳定版，只提醒，不静默下载安装。
@@ -141,27 +142,27 @@ VRAM Radar 不是对终端工具的重新包装，也不要求你放弃它们。
 
 ### Windows
 
-下载 `VRAMRadar-Setup-0.7.0.exe`。这是 Windows 推荐下载。默认按当前用户安装，不需要管理员权限；安装器会创建稳定的开始菜单 / 桌面快捷方式，后续运行新版安装器会原位升级并保留用户 Profile。可以安装到 `D:\Apps\VRAM Radar` 等当前用户可写目录；只有选择 `Program Files` 等受保护目录时才需要管理员权限。公开 Release 不再提供 Windows 便携 ZIP。
+下载 `VRAMRadar-Setup-0.8.0.exe`。这是 Windows 推荐下载。默认按当前用户安装，不需要管理员权限；安装器会创建稳定的开始菜单 / 桌面快捷方式，后续运行新版安装器会原位升级并保留用户 Profile。可以安装到 `D:\Apps\VRAM Radar` 等当前用户可写目录；只有选择 `Program Files` 等受保护目录时才需要管理员权限。公开 Release 不再提供 Windows 便携 ZIP。
 
-当前 `v0.7.0` Windows 包没有 Authenticode 发布者证书。VRAM Radar 正在申请 [SignPath Foundation](https://signpath.org/) 开源项目免费签名；只有公开安装包通过项目维护的[签名验证门](docs/windows-code-signing.md)后，我们才会把后续版本标为已签名。在此之前，如果 SmartScreen 弹出提示，请先确认文件来自本仓库的 Latest Release，再点击 **更多信息 → 仍要运行**。单位管理的电脑可能不允许绕过未签名软件，此时应联系管理员，不要关闭系统安全保护。
+当前 `v0.8.0` Windows 包没有 Authenticode 发布者证书。VRAM Radar 正在申请 [SignPath Foundation](https://signpath.org/) 开源项目免费签名；只有公开安装包通过项目维护的[签名验证门](docs/windows-code-signing.md)后，我们才会把后续版本标为已签名。在此之前，如果 SmartScreen 弹出提示，请先确认文件来自本仓库的 Latest Release，再点击 **更多信息 → 仍要运行**。单位管理的电脑可能不允许绕过未签名软件，此时应联系管理员，不要关闭系统安全保护。
 
 ### macOS
 
-下载 `VRAMRadar-0.7.0-macos.zip`：
+下载 `VRAMRadar-0.8.0-macos.zip`：
 
 - `VRAM Radar (Apple Silicon).app`：M1 / M2 / M3 / M4，当前验证边界为 macOS 14 或更新版本。
 - `VRAM Radar (Intel).app`：Intel x86_64，当前验证边界为 macOS 15 或更新版本。
 
 当前项目没有配置 Apple 分发凭据，因此公开 Mac 包没有 Developer ID 签名和公证。解压后，在 Finder 中右击对应 `.app`，选择 **打开**，再确认一次 **打开**；不要全局关闭 Gatekeeper。
 
-> 当前公开稳定版为 `v0.7.0`。更新检查不再等待服务器刷新；网络失败会显示重试入口，应用持续运行时也会定期复查。Windows 正式安装版支持经用户确认、校验 SHA-256、失败自动回滚并重启的一键更新。GitHub Release 只保留 Windows 安装器与合并后的 macOS 下载包。
+> 当前公开稳定版为 `v0.8.0`。更新检查不再等待服务器刷新；网络失败会显示重试入口，应用持续运行时也会定期复查。Windows 正式安装版支持经用户确认、校验 SHA-256、失败自动回滚并重启的一键更新。GitHub Release 只保留 Windows 安装器与合并后的 macOS 下载包。
 
 <details>
 <summary><strong>发布包边界</strong></summary>
 
-`VRAMRadar-Setup-0.7.0.exe` 是 Windows 推荐下载。原位升级会保留固定安装路径，因此开始菜单和桌面快捷方式仍然有效。公开 Release 不再提供 Windows 便携 ZIP，只保留用户实际需要的两个文件：Windows 安装器和合并后的 macOS 包。
+`VRAMRadar-Setup-0.8.0.exe` 是 Windows 推荐下载。原位升级会保留固定安装路径，因此开始菜单和桌面快捷方式仍然有效。公开 Release 不再提供 Windows 便携 ZIP，只保留用户实际需要的两个文件：Windows 安装器和合并后的 macOS 包。
 
-Windows 一键更新只接受当前仓库正式 Release 中名称和地址完全匹配的安装包，执行前会校验 GitHub 提供的 SHA-256，并在替换前保留旧安装用于失败回滚。同一可见版号下的修复包会用精确源码提交区分，因此已安装的 `v0.7.0` 也能收到较新的 `v0.7.0` 修复提示。手动覆盖安装时，安装器会等待已认证的旧实例真正退出，再替换文件并重建开始菜单和桌面快捷方式；如果旧进程没有退出，安装会在改动应用文件前停止，避免只更新一半。`v0.6.1` 尚未包含独立更新器，因此从该版本升级到 `v0.7.0` 需要手动安装一次；此后的版本才能使用应用内一键替换。macOS 会下载并校验压缩包，但在具备 Developer ID 签名和公证之前，仍需用户手动替换 `.app`。
+Windows 一键更新只接受当前仓库正式 Release 中名称和地址完全匹配的安装包，执行前会校验 GitHub 提供的 SHA-256，并在替换前保留旧安装用于失败回滚。同一可见版号下的修复包会用精确源码提交区分，因此已安装的 `v0.8.0` 也能收到较新的 `v0.8.0` 修复提示。手动覆盖安装时，安装器会等待已认证的旧实例真正退出，再替换文件并重建开始菜单和桌面快捷方式；如果旧进程没有退出，安装会在改动应用文件前停止，避免只更新一半。`v0.6.1` 尚未包含独立更新器，因此从该版本升级到 `v0.7.0` 需要手动安装一次；此后的版本才能使用应用内一键替换。macOS 会下载并校验压缩包，但在具备 Developer ID 签名和公证之前，仍需用户手动替换 `.app`。
 
 当前版本未使用 Apple Developer ID 签名，也未经过 Apple 公证。首次启动时，请在 Finder 中右击应用并选择 **打开**，并仅在信任本仓库时确认系统提示。
 
@@ -174,7 +175,7 @@ Windows 一键更新只接受当前仓库正式 Release 中名称和地址完全
 
 VRAM Radar 会在本地按确定性优先级扫描并合并以下来源：
 
-- v2 `servers.toml`，包括便携 Harness 的 `harness/config/servers.toml`。
+- v2 与 v3 `servers.toml`，包括便携 Harness 的 `harness/config/servers.toml`。
 - 用户、XDG、系统、Homebrew 和已安装 OpenSSH 客户端附近的 `config`。
 - 有界 OpenSSH `Include` 片段，包含循环保护和 Windows 反斜杠路径处理。
 - VS Code、VS Code Insiders、Cursor、VSCodium 与 Windsurf 的 `remote.SSH.configFile`。
@@ -224,7 +225,7 @@ OpenSSH 本身无法告诉应用某个别名是 Direct SSH 还是 Slurm，所以
 
 - [Windows 安装、通知区域与快捷方式更新](docs/windows-install-and-update.md)
 - [macOS 构建、架构与验证边界](docs/macos-desktop.md)
-- [v0.7.0 发布说明](docs/release-notes-v0.7.0.md)
+- [v0.8.0 发布说明](docs/release-notes-v0.8.0.md)
 
 ## 常见问题
 

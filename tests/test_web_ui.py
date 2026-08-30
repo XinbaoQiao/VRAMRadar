@@ -38,6 +38,7 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript,
         )
         self.assertIn("ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked", self.javascript)
+        self.assertIn("currentProfile?.favorite_alert_enabled !== false", self.javascript)
         self.assertIn("Notify me when favorite GPUs are available", self.localization)
         self.assertIn("Leave empty: notify only for idle GPUs", self.localization)
 
@@ -793,11 +794,27 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertIn("serverEditorHasUnsavedConnectionChanges(editor, savedServer)", key_setup)
 
-    def test_other_user_command_preview_has_an_explicit_per_server_setting(self):
+    def test_other_user_summaries_default_on_and_cover_direct_and_slurm_servers(self):
         self.assertIn('data-field="show_other_user_commands"', self.markup)
-        self.assertIn("显示其他用户的命令摘要", self.markup)
+        self.assertIn("显示其他用户的任务与命令摘要", self.markup)
+        self.assertIn("show_other_user_commands: true", self.javascript)
+        self.assertIn("Slurm：显示其他用户的作业名、状态与时间", self.javascript)
+        self.assertIn("调度器视图不读取完整 shell 命令", self.javascript)
+        self.assertNotIn("server-command-setting').hidden", self.javascript)
         self.assertIn("show_other_user_commands", self.javascript)
         self.assertIn(".server-command-setting", self.styles)
+
+    def test_connecting_server_is_presented_as_configuring_not_as_an_error(self):
+        renderer = self.javascript[
+            self.javascript.index("function renderConfiguring"):
+            self.javascript.index("function serverCardRenderSignature")
+        ]
+        self.assertIn("正在配置并验证服务器", renderer)
+        self.assertIn("完成前不会显示为错误", renderer)
+        self.assertIn("state === 'connecting'", renderer)
+        self.assertIn("renderConfiguring(server)", renderer)
+        self.assertIn(".configuring-panel", self.styles)
+        self.assertIn("正在配置中", self.javascript)
 
     def test_server_password_editor_sends_secrets_outside_profile_payload(self):
         self.assertIn('data-field="password" type="password"', self.markup)

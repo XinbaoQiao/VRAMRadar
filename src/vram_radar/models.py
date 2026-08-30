@@ -206,7 +206,7 @@ class ServerProfile:
     auth_ref: str = ""
     default_work_directory: str = ""
     connect_timeout_seconds: int = 10
-    show_other_user_commands: bool = False
+    show_other_user_commands: bool = True
     prefer_identity_auth: bool = False
     gpu_memory_gib: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_MEMORY_MAP))
 
@@ -284,7 +284,7 @@ class ServerProfile:
             ),
             connect_timeout_seconds=timeout,
             show_other_user_commands=require_bool(
-                raw.get("show_other_user_commands", False),
+                raw.get("show_other_user_commands", True),
                 f"server {server_id} show_other_user_commands",
             ),
             prefer_identity_auth=require_bool(
@@ -338,7 +338,7 @@ class Profile:
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
     favorite_server_ids: tuple[str, ...] = ()
-    favorite_alert_enabled: bool = False
+    favorite_alert_enabled: bool = True
     favorite_alert_min_memory_gib: float = 0.0
     saved_views: tuple[dict[str, Any], ...] = ()
     schema_version: int = 1
@@ -412,7 +412,7 @@ class Profile:
         )
         if len(favorites) != len(set(favorites)):
             raise ConfigError("profile favorite_server_ids must be unique")
-        favorite_alert_enabled = raw.get("favorite_alert_enabled", False)
+        favorite_alert_enabled = raw.get("favorite_alert_enabled", True)
         if not isinstance(favorite_alert_enabled, bool):
             raise ConfigError("profile favorite_alert_enabled must be true or false")
         favorite_alert_min_memory = raw.get("favorite_alert_min_memory_gib", 0)

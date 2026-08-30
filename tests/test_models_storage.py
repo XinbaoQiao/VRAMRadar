@@ -90,10 +90,44 @@ class ModelStorageTests(unittest.TestCase):
         self.assertEqual(profile.close_behavior, "tray")
         self.assertEqual(profile.ui_language, "zh-CN")
         self.assertEqual(profile.favorite_server_ids, ())
-        self.assertFalse(profile.favorite_alert_enabled)
+        self.assertTrue(profile.favorite_alert_enabled)
         self.assertEqual(profile.favorite_alert_min_memory_gib, 0.0)
         self.assertEqual(profile.ignored_ssh_aliases, ())
         self.assertEqual(profile.saved_views, ())
+
+    def test_new_defaults_enable_alerts_and_other_user_summaries_without_overriding_opt_outs(self):
+        default_profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "default-on",
+                "display_name": "Default on",
+                "servers": [
+                    {
+                        "id": "gpu-default",
+                        "display_name": "GPU default",
+                        "backend": "direct_ssh",
+                        "host": "gpu-default.example.test",
+                    }
+                ],
+            }
+        )
+        opted_out = Profile.from_dict(
+            {
+                **default_profile.to_dict(),
+                "favorite_alert_enabled": False,
+                "servers": [
+                    {
+                        **default_profile.to_dict()["servers"][0],
+                        "show_other_user_commands": False,
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(default_profile.favorite_alert_enabled)
+        self.assertTrue(default_profile.servers[0].show_other_user_commands)
+        self.assertFalse(opted_out.favorite_alert_enabled)
+        self.assertFalse(opted_out.servers[0].show_other_user_commands)
 
     def test_ui_language_round_trip_and_validation(self):
         english = Profile.from_dict(dict(PROFILE, ui_language="en"))

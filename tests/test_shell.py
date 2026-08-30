@@ -2887,6 +2887,7 @@ class ShellApiTests(unittest.TestCase):
                         "display_name": "Old A100",
                         "backend": "slurm_ssh",
                         "ssh_alias": "old-a100",
+                        "show_other_user_commands": False,
                     },
                     {
                         "id": "direct-gpu",

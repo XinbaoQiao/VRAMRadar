@@ -492,6 +492,11 @@ tr:last-child td { border-bottom: 0; }
 .error-title { font-weight: 700; }
 .error-copy { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 4px; }
 .error-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.configuring-panel { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 15px; padding: 16px; background: color-mix(in srgb, var(--cyan) 6%, var(--surface)); }
+.configuring-symbol { width: 46px; height: 46px; display: grid; place-items: center; border-radius: var(--radius-md); color: var(--cyan-text); background: color-mix(in srgb, var(--cyan) 13%, var(--surface)); }
+.configuring-symbol .ui-icon { width: 22px; height: 22px; }
+.configuring-title { font-weight: 700; }
+.configuring-copy { color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 4px; }
 .loading-skeleton { padding: 16px; display: grid; gap: 10px; }
 .skeleton-line { height: 13px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--muted) 14%, transparent); }
 .skeleton-line:nth-child(2) { width: 72%; }

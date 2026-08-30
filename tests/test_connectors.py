@@ -169,7 +169,7 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(process["metadata_visibility"], "none")
 
     @patch("vram_radar.connectors.run_remote")
-    def test_other_user_command_is_hidden_by_default(self, remote):
+    def test_other_user_command_is_hidden_after_explicit_opt_out(self, remote):
         canary = "OTHER-USER-CANARY"
         process_rows = "GPU-a, 2222, /usr/bin/python, 2048"
         remote.return_value = self.direct_protocol(
@@ -183,7 +183,13 @@ class ConnectorTests(unittest.TestCase):
                 )
             },
         )
-        server = ServerProfile(id="gpu", display_name="4090", backend="direct_ssh", ssh_alias="gpu-alias")
+        server = ServerProfile(
+            id="gpu",
+            display_name="4090",
+            backend="direct_ssh",
+            ssh_alias="gpu-alias",
+            show_other_user_commands=False,
+        )
 
         snapshot = query_direct_ssh(server)
         process = snapshot["processes"]["active"][0]

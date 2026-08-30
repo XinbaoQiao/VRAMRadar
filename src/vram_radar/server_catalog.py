@@ -549,8 +549,8 @@ def import_server_catalog(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
             document = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"无法读取服务器设置文件：{exc}") from exc
-    if document.get("version") != 2 or not isinstance(document.get("servers"), dict):
-        raise ConfigError("服务器设置文件必须是受支持的 servers.toml version 2")
+    if document.get("version") not in {2, 3} or not isinstance(document.get("servers"), dict):
+        raise ConfigError("服务器设置文件必须是受支持的 servers.toml version 2 或 3")
     sensitive = _sensitive_paths(document)
     if sensitive:
         raise ConfigError("服务器设置文件包含不允许导入的凭据字段：" + ", ".join(sensitive))
@@ -1004,7 +1004,7 @@ def import_server_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], l
         raise ConfigError(f"无法读取服务器设置文件：{exc}") from exc
     if re.search(r"(?im)^\s*(?:host|include)\s*(?:=\s*)?\S+", leading_text):
         return import_openssh_config(source)
-    raise ConfigError("无法识别配置格式；请选择 servers.toml v2 或 OpenSSH ~/.ssh/config")
+    raise ConfigError("无法识别配置格式；请选择 servers.toml v2/v3 或 OpenSSH ~/.ssh/config")
 
 
 def profile_from_server_config(profile: Profile, path: str | Path) -> tuple[Profile, list[str]]:

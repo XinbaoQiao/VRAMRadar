@@ -157,6 +157,18 @@ class ServerCatalogTests(unittest.TestCase):
             )
             self.assertTrue(synchronized.servers[1].prefer_identity_auth)
 
+    def test_import_accepts_current_harness_v3_catalog_with_default_summaries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "servers.toml"
+            path.write_text(CATALOG.replace("version = 2", "version = 3"), encoding="utf-8")
+
+            servers, warnings = import_server_catalog(path)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual([server.id for server in servers], ["direct-gpu", "slurm-a100"])
+        self.assertTrue(all(server.show_other_user_commands for server in servers))
+        self.assertEqual(servers[1].gpu_memory_gib["A100-40G"], 40)
+
     def test_explicit_path_is_resolved_and_missing_path_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "servers.toml"

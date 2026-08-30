@@ -198,7 +198,7 @@ const ICONS = Object.freeze({
 });
 const icon = (name, className = 'ui-icon') => `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
 const stateLabel = state => ({
-  connecting: '正在验证', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
+  connecting: '正在配置中', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
   security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '已停用'
 })[state] || state;
 const backendLabel = backend => backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
@@ -1106,6 +1106,11 @@ function renderError(server) {
   return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。旧快照仅供参考，不计入顶部实时汇总。' : '。当前没有可显示的 GPU 快照。'}</div></div><div class="error-actions">${trustHostKey}${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
 }
 
+function renderConfiguring(server) {
+  const backend = server.backend === 'slurm_ssh' ? 'Slurm 调度器' : 'GPU 采集器';
+  return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在配置并验证服务器</div><div class="configuring-copy">正在连接 SSH、检查${escapeHtml(backend)}并读取第一份 GPU 数据；完成前不会显示为错误。</div></div></div>`;
+}
+
 function serverGlyph(backend) {
   if (backend === 'slurm_ssh') {
     return '<svg viewBox="0 0 30 30" focusable="false"><rect x="4" y="4" width="8" height="8"></rect><rect x="18" y="4" width="8" height="8"></rect><rect x="4" y="18" width="8" height="8"></rect><rect x="18" y="18" width="8" height="8"></rect><path d="M12 8h6M8 12v6M22 12v6M12 22h6"></path></svg>';
@@ -1684,9 +1689,13 @@ function navigateRelativeServer(offset) {
 function renderServer(server, index = 0) {
   const state = server.connection.state;
   const hasData = Boolean(server.view_kind);
-  const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
+  const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : state === 'connecting' ? '正在建立首次有效快照' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
   const data = hasData ? (server.view_kind === 'live-memory' ? renderLiveTable(server) : renderSchedulerTable(server)) : '';
-  const body = state === 'online' ? data : `${renderError(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`;
+  const body = state === 'online'
+    ? data
+    : state === 'connecting'
+      ? `${renderConfiguring(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`
+      : `${renderError(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`;
   const position = String(index + 1).padStart(2, '0');
   return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div></header>${body}${renderDirectoryModule(server)}</div></article>`;
 }
@@ -2431,7 +2440,7 @@ function addServerEditor(server = {}, options = {}) {
   );
   let generatedIndex = 1;
   while (usedIds.has(`server-${generatedIndex}`)) generatedIndex += 1;
-  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'direct_ssh', ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: false, prefer_identity_auth: false, connect_timeout_seconds: 10};
+  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'direct_ssh', ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: true, prefer_identity_auth: false, connect_timeout_seconds: 10};
   const values = {...defaults, ...server};
   usedIds.add(values.id);
   editor.dataset.draftIndex = String(options.draftIndex ?? settingsServerDrafts.length);
@@ -2514,7 +2523,10 @@ function addServerEditor(server = {}, options = {}) {
   editor.querySelector('.configure-ssh-key').addEventListener('click', () => void configureServerSshKey(editor));
   refreshKeyMode();
   const refreshCapabilities = () => {
-    editor.querySelector('.server-command-setting').hidden = editor.querySelector('[data-field="backend"]').value !== 'direct_ssh';
+    const slurm = editor.querySelector('[data-field="backend"]').value === 'slurm_ssh';
+    editor.querySelector('[data-command-summary-help]').textContent = slurm
+      ? 'Slurm：显示其他用户的作业名、状态与时间；调度器视图不读取完整 shell 命令。'
+      : 'SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。';
   };
   editor.querySelector('[data-field="backend"]').addEventListener('change', refreshCapabilities);
   editor.querySelector('.test-server-connection').addEventListener('click', () => void testServerEditorConnection(editor));
@@ -2749,7 +2761,7 @@ function openSettings(options = {}) {
   ui.refreshSeconds.value = currentProfile?.refresh_seconds || 15;
   ui.language.value = currentProfile?.ui_language === 'en' ? 'en' : 'zh-CN';
   ui.closeBehavior.value = currentProfile?.close_behavior === 'exit' ? 'exit' : 'tray';
-  ui.favoriteAlertEnabled.checked = Boolean(currentProfile?.favorite_alert_enabled);
+  ui.favoriteAlertEnabled.checked = currentProfile?.favorite_alert_enabled !== false;
   ui.favoriteAlertMinMemory.value = Number(currentProfile?.favorite_alert_min_memory_gib) > 0
     ? String(currentProfile.favorite_alert_min_memory_gib)
     : '';
