@@ -40,6 +40,7 @@ def _empty_profile() -> dict[str, Any]:
         "ignored_ssh_aliases": [],
         "navigator_side": "right",
         "close_behavior": "exit",
+        "ui_language": "zh-CN",
         "servers": [],
     }
 
@@ -306,7 +307,7 @@ BENCHMARK_JAVASCRIPT = r"""
     const now = '2026-08-30T00:00:00Z';
     const servers = Array.from({length: 120}, (_, index) => {
       const suffix = String(index).padStart(3, '0');
-      return {
+      const server = {
         server_id: `synthetic-${suffix}`,
         display_name: `Synthetic GPU ${suffix}`,
         backend: 'direct_ssh',
@@ -343,6 +344,38 @@ BENCHMARK_JAVASCRIPT = r"""
           error: null,
         },
       };
+      if (index === 0) {
+        server.backend = 'slurm_ssh';
+        server.view_kind = 'scheduler';
+        server.nodes = [{
+          node: 'gpu-a100-01', partition: 'gpu-large', gpu_type: 'A100-80G',
+          memory_per_gpu_gib: 80, total_gpus: 8, free_gpus: 4,
+          allocated_gpus: 4, total_vram_gib: 640, free_vram_gib: 320,
+          tasks: ['1001'], state: 'mix',
+        }];
+        server.tasks = {
+          current_user: 'benchmark', history_supported: true, history_window_hours: 24,
+          counts: {PENDING: 1, RUNNING: 1, COMPLETED: 1},
+          active: [
+            {job_id: '1001', name: 'training', user: 'benchmark', state: 'RUNNING', nodes: 'gpu-a100-01', elapsed: '01:02:03', submitted_at: now, time_limit: '04:00:00', gpu_count: 4},
+            {job_id: '1002', name: 'queued', user: 'other-user', state: 'PENDING', reason: 'Resources', elapsed: '00:00', submitted_at: now, time_limit: '02:00:00', gpu_count: 2},
+          ],
+          recent: [{job_id: '999', name: 'completed', user: 'benchmark', state: 'COMPLETED', nodes: 'gpu-a100-01', elapsed: '00:30:00', ended_at: now, gpu_count: 1}],
+        };
+      } else if (index === 1) {
+        server.backend = 'slurm_ssh';
+        server.view_kind = 'scheduler';
+        server.large_cluster = {total_nodes: 1000};
+        server.node_groups = [{gpu_type: 'H100-80G', partition: 'gpu-large', total_nodes: 1000, total_gpus: 8000, free_gpus: 2400, issue_nodes: 2}];
+        server.tasks = {current_user: 'benchmark', history_supported: false, counts: {}, active: [], recent: []};
+      } else if (index === 2) {
+        server.connection = {
+          state: 'auth_required', data_origin: 'none', data_revision: 7,
+          last_success_at: null, retry_at: null,
+          error: {message: 'Authentication failed', code: 'authentication_failed', retryable: false},
+        };
+      }
+      return server;
     });
     const profile = {
       schema_version: 1,
@@ -355,6 +388,7 @@ BENCHMARK_JAVASCRIPT = r"""
       ignored_ssh_aliases: [],
       navigator_side: 'right',
       close_behavior: 'exit',
+      ui_language: 'zh-CN',
       servers: servers.map(server => ({
         id: server.server_id,
         display_name: server.display_name,
@@ -566,6 +600,29 @@ BENCHMARK_JAVASCRIPT = r"""
     }
     const closedEditorCount = ui.editorList.querySelectorAll(':scope > .server-editor').length;
 
+    openSettings({forceNormal: true});
+    window.VRAMRadarI18n.setLanguage('en');
+    const untranslatedChinese = [];
+    const translationWalker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
+    let translationNode = translationWalker.nextNode();
+    while (translationNode) {
+      if (
+        /[\u3400-\u9fff]/u.test(translationNode.nodeValue || '')
+        && !translationNode.parentElement?.closest('template, script, style')
+      ) untranslatedChinese.push((translationNode.nodeValue || '').trim());
+      translationNode = translationWalker.nextNode();
+    }
+    document.querySelectorAll('[aria-label], [title], [placeholder]').forEach(element => {
+      if (element.closest('template')) return;
+      for (const attribute of ['aria-label', 'title', 'placeholder']) {
+        const value = element.getAttribute(attribute) || '';
+        if (/[\u3400-\u9fff]/u.test(value)) untranslatedChinese.push(`${attribute}: ${value}`);
+      }
+    });
+    window.VRAMRadarI18n.setLanguage('zh-CN');
+    ui.dialog.close();
+    ui.dialog.dispatchEvent(new Event('close'));
+
     const assertions = {
       initial_visible_cards_paginated_to_50: visibleCardsAfterInitial === 50,
       initial_server_cards_created_once: metricDelta(initialMetricsAfter, initialMetricsBefore).serverCardCreates === 50,
@@ -590,6 +647,7 @@ BENCHMARK_JAVASCRIPT = r"""
       settings_cross_page_edit_is_preserved: collectedProfile.servers.length === 120 && collectedProfile.servers[0].display_name === 'Detached editor stays with server zero',
       settings_cross_page_password_is_preserved_outside_profile: collectedPasswords['synthetic-000'] === 'benchmark-secret' && !JSON.stringify(collectedProfile).includes('benchmark-secret'),
       settings_close_releases_editor_dom: closedEditorCount === 0,
+      english_interface_has_no_untranslated_chinese: untranslatedChinese.length === 0,
     };
     return JSON.stringify({
       ok: Object.values(assertions).every(Boolean),
@@ -648,6 +706,7 @@ BENCHMARK_JAVASCRIPT = r"""
       },
       ui_render_metrics_final: metricCopy(),
       assertions,
+      untranslated_chinese: [...new Set(untranslatedChinese)].slice(0, 100),
     });
   } catch (error) {
     return JSON.stringify({

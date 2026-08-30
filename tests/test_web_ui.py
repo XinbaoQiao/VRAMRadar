@@ -9,8 +9,24 @@ class WebUiContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.javascript = (WEB_ROOT / "app.js").read_text(encoding="utf-8")
+        cls.localization = (WEB_ROOT / "localization.js").read_text(encoding="utf-8")
         cls.styles = (WEB_ROOT / "app.css").read_text(encoding="utf-8")
         cls.markup = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
+
+    def test_language_setting_is_persistent_complete_and_loaded_before_the_app(self):
+        self.assertIn('id="ui-language"', self.markup)
+        self.assertIn('<option value="zh-CN">简体中文</option>', self.markup)
+        self.assertIn('<option value="en">English</option>', self.markup)
+        self.assertLess(
+            self.markup.index('<script src="localization.js"></script>'),
+            self.markup.index('<script src="app.js"></script>'),
+        )
+        self.assertIn("window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN')", self.javascript)
+        self.assertIn("ui_language: ui.language.value", self.javascript)
+        self.assertIn("window.VRAMRadarI18n?.setLanguage(currentProfile?.ui_language || 'zh-CN')", self.javascript)
+        self.assertIn("MutationObserver", self.localization)
+        self.assertIn("document.documentElement.lang = language", self.localization)
+        self.assertIn("english_interface_has_no_untranslated_chinese", (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"))
 
     def test_task_time_columns_are_unambiguous(self):
         self.assertIn("运行时长", self.javascript)

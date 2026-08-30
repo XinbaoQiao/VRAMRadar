@@ -56,6 +56,7 @@ def assert_bundle_metadata() -> dict[str, object]:
 def assert_packaged_assets() -> None:
     pairs = (
         (ROOT / "src" / "vram_radar" / "web" / "app.js", RESOURCES / "vram_radar" / "web" / "app.js"),
+        (ROOT / "src" / "vram_radar" / "web" / "localization.js", RESOURCES / "vram_radar" / "web" / "localization.js"),
         (ROOT / "src" / "vram_radar" / "web" / "app.css", RESOURCES / "vram_radar" / "web" / "app.css"),
         (ROOT / "src" / "vram_radar" / "web" / "index.html", RESOURCES / "vram_radar" / "web" / "index.html"),
         (

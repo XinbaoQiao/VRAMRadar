@@ -901,6 +901,24 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result["profile"]["profile_revision"], 0)
         api.store.save.assert_not_called()
 
+    def test_profile_save_persists_language_and_refreshes_native_menu(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            service = Mock()
+            api = AppApi(Profile.empty("local"), store, paths, service)
+            tray_controller = Mock()
+            api.bind_tray_controller(tray_controller)
+            raw = Profile.empty("local").to_dict()
+            raw["ui_language"] = "en"
+
+            result = api.save_profile(self.versioned_profile(api, raw))
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["profile"]["ui_language"], "en")
+            self.assertEqual(store.load("local").ui_language, "en")
+            tray_controller.refresh_menu.assert_called_once_with()
+
     def test_auto_sync_save_applies_catalog_immediately_and_matches_restart(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "profile-home"

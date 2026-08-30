@@ -21,6 +21,7 @@ const ui = {
   editorNextPage: document.getElementById('server-editor-next-page'),
   profileName: document.getElementById('profile-name'),
   refreshSeconds: document.getElementById('refresh-seconds'),
+  language: document.getElementById('ui-language'),
   closeBehavior: document.getElementById('close-behavior'),
   copyDiagnostics: document.getElementById('copy-diagnostics'),
   openLogsDirectory: document.getElementById('open-logs-directory'),
@@ -172,7 +173,9 @@ function profileServerFor(serverId) {
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[character]);
-const number = value => value == null ? '未知' : Number(value).toLocaleString('zh-CN', {maximumFractionDigits: 2});
+const activeLocale = () => window.VRAMRadarI18n?.language === 'en' ? 'en-US' : 'zh-CN';
+const localizedText = value => window.VRAMRadarI18n?.translateText(value, window.VRAMRadarI18n.language) || value;
+const number = value => value == null ? '未知' : Number(value).toLocaleString(activeLocale(), {maximumFractionDigits: 2});
 const ICONS = Object.freeze({
   alert: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v5"></path><path d="M12 16.5h.01"></path>',
   cancelled: '<circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6"></path><path d="m15 9-6 6"></path>',
@@ -234,7 +237,7 @@ function formatTaskTimestamp(value) {
   if (!value || value === 'Unknown' || value === 'N/A') return '—';
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(activeLocale(), {
     month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(date);
 }
@@ -270,7 +273,7 @@ const formatGpuType = value => String(value || '未知卡型').replace(/\s+x(\d+
 function formatTime(value) {
   if (!value) return '从未成功';
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString('zh-CN');
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString(activeLocale());
 }
 
 function formatRetry(value) {
@@ -1158,6 +1161,7 @@ function acceptProfile(candidate) {
     ) return false;
   }
   currentProfile = candidate;
+  window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN');
   syncProfileConvenienceState(currentProfile);
   return true;
 }
@@ -2131,7 +2135,10 @@ async function evaluateResourceWatch() {
       const now = Date.now();
       if (matched && !resourceWatchMatched && now - resourceWatchLastNotificationAt >= RESOURCE_WATCH_COOLDOWN_MS) {
         resourceWatchLastNotificationAt = now;
-        if (api?.show_notification) await api.show_notification('显存雷达：资源可用', '你设置的 GPU 条件已有匹配结果。');
+        if (api?.show_notification) await api.show_notification(
+          localizedText('显存雷达：资源可用'),
+          localizedText('你设置的 GPU 条件已有匹配结果。'),
+        );
       }
       resourceWatchMatched = matched;
     } catch (_error) {
@@ -2708,6 +2715,7 @@ function openSettings(options = {}) {
   ui.settingsError.hidden = true;
   ui.profileName.value = currentProfile?.display_name || '我的 GPU';
   ui.refreshSeconds.value = currentProfile?.refresh_seconds || 15;
+  ui.language.value = currentProfile?.ui_language === 'en' ? 'en' : 'zh-CN';
   ui.closeBehavior.value = currentProfile?.close_behavior === 'exit' ? 'exit' : 'tray';
   ui.serverConfigPath.value = currentProfile?.server_config_path || '';
   ui.autoSyncServers.checked = Boolean(currentProfile?.auto_sync_servers);
@@ -2810,6 +2818,7 @@ function collectProfile() {
     ignored_ssh_aliases: ignoredSshAliases,
     navigator_side: serverNavigatorSide,
     close_behavior: ui.closeBehavior.value,
+    ui_language: ui.language.value,
     servers,
   };
 }
@@ -3215,6 +3224,9 @@ ui.resourceWatchEnabled.addEventListener('change', () => {
 ui.saveView.addEventListener('click', saveCurrentView);
 ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
+ui.language.addEventListener('change', () => {
+  window.VRAMRadarI18n?.setLanguage(ui.language.value);
+});
 ui.editorSearch.addEventListener('input', () => {
   syncVisibleServerDrafts();
   settingsServerQuery = ui.editorSearch.value;
@@ -3260,6 +3272,7 @@ ui.dialog.addEventListener('close', () => {
   // the same dialog.  Never let that stale event discard the new session's
   // drafts or invalidate its discovery request.
   if (ui.dialog.open) return;
+  window.VRAMRadarI18n?.setLanguage(currentProfile?.ui_language || 'zh-CN');
   invalidateServerDiscovery();
   ui.editorList.replaceChildren();
   settingsServerDrafts = [];

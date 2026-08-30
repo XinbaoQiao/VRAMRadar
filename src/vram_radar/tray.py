@@ -301,6 +301,7 @@ def create_windows_tray_icon(
     toggle_pause: Callable[[], None] | None = None,
     is_paused: StateCallback | None = None,
     status_text: TextCallback | str | None = None,
+    language: TextCallback | str = "zh-CN",
 ) -> Any:
     pystray = importlib.import_module("pystray")
     image_module = importlib.import_module("PIL.Image")
@@ -343,6 +344,14 @@ def create_windows_tray_icon(
             logging.getLogger("vram_radar").exception("failed to read automatic-monitoring state")
             return False
 
+    def english() -> bool:
+        try:
+            value = language() if callable(language) else language
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to read interface language")
+            return False
+        return str(value).strip() == "en"
+
     def status_label(_item: Any) -> str:
         try:
             value = status_text() if callable(status_text) else status_text
@@ -352,27 +361,34 @@ def create_windows_tray_icon(
         if value is not None and str(value).strip():
             return str(value).strip()
         if is_paused is not None:
+            if english():
+                return "Automatic monitoring paused" if paused() else "Automatic monitoring active"
             return "自动监控已暂停" if paused() else "自动监控中"
-        return "VRAM Radar 正在运行"
+        return "VRAM Radar is running" if english() else "VRAM Radar 正在运行"
 
     def pause_label(_item: Any) -> str:
+        if english():
+            return "Resume automatic monitoring" if paused() else "Pause automatic monitoring"
         return "继续自动监控" if paused() else "暂停自动监控"
+
+    def menu_label(chinese: str, english_text: str) -> Callable[[Any], str]:
+        return lambda _item: english_text if english() else chinese
 
     def exit_callback(_icon: Any, _item: Any) -> None:
         exit_application()
 
     menu = pystray.Menu(
         pystray.MenuItem(status_label, None, enabled=False),
-        pystray.MenuItem("显示 VRAM Radar", show_callback, default=True),
-        pystray.MenuItem("立即刷新", refresh_callback, enabled=refresh_application is not None),
-        pystray.MenuItem("打开设置", settings_callback, enabled=open_settings is not None),
+        pystray.MenuItem(menu_label("显示 VRAM Radar", "Show VRAM Radar"), show_callback, default=True),
+        pystray.MenuItem(menu_label("立即刷新", "Refresh now"), refresh_callback, enabled=refresh_application is not None),
+        pystray.MenuItem(menu_label("打开设置", "Open settings"), settings_callback, enabled=open_settings is not None),
         pystray.MenuItem(
             pause_label,
             toggle_pause_callback,
             enabled=toggle_pause is not None and is_paused is not None,
         ),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("退出", exit_callback),
+        pystray.MenuItem(menu_label("退出", "Exit"), exit_callback),
     )
     return pystray.Icon("vram-radar", image, "VRAM Radar", menu)
 
@@ -389,6 +405,7 @@ class WindowsTrayController:
         toggle_pause: Callable[[], None] | None = None,
         is_paused: StateCallback | None = None,
         status_text: TextCallback | str | None = None,
+        language: TextCallback | str = "zh-CN",
         close_behavior: Callable[[], str] | str = "hide",
         before_exit: Callable[[], None] | None = None,
         restore_application: Callable[[], object] | None = None,
@@ -402,6 +419,7 @@ class WindowsTrayController:
         self.toggle_pause = toggle_pause
         self.is_paused = is_paused
         self.status_text = status_text
+        self.language = language
         self.close_behavior = close_behavior
         self.before_exit = before_exit
         self.restore_application = restore_application
@@ -442,6 +460,7 @@ class WindowsTrayController:
                     if self.status_text is not None or self.is_paused is not None
                     else None
                 ),
+                language=self.current_language,
             )
         else:
             # Preserve the original three-argument factory contract for tests,
@@ -489,10 +508,16 @@ class WindowsTrayController:
             if _hidden_notification_sent:
                 return
             _hidden_notification_sent = True
-        self.notify(
-            "VRAM Radar 仍在运行",
-            "窗口已收起到通知区域。右键图标可以刷新、暂停监控或退出。",
-        )
+        if self.current_language() == "en":
+            self.notify(
+                "VRAM Radar is still running",
+                "The window is in the notification area. Right-click the icon to refresh, pause monitoring, or exit.",
+            )
+        else:
+            self.notify(
+                "VRAM Radar 仍在运行",
+                "窗口已收起到通知区域。右键图标可以刷新、暂停监控或退出。",
+            )
 
     def _close_behavior_value(self) -> str:
         try:
@@ -580,7 +605,17 @@ class WindowsTrayController:
             value = None
         if value is not None and str(value).strip():
             return str(value).strip()
+        if self.current_language() == "en":
+            return "Automatic monitoring paused" if self.automatic_monitoring_is_paused() else "Automatic monitoring active"
         return "自动监控已暂停" if self.automatic_monitoring_is_paused() else "自动监控中"
+
+    def current_language(self) -> str:
+        try:
+            value = self.language() if callable(self.language) else self.language
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to read interface language")
+            return "zh-CN"
+        return "en" if str(value).strip() == "en" else "zh-CN"
 
     def refresh_menu(self) -> bool:
         callback = getattr(self.icon, "update_menu", None)

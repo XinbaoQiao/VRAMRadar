@@ -58,7 +58,7 @@ def find_window(process_id: int) -> int | None:
         if owner.value == process_id and title_length > 0:
             title = ctypes.create_unicode_buffer(title_length + 1)
             user32.GetWindowTextW(handle, title, len(title))
-            if title.value == "显存雷达":
+            if title.value == "VRAM Radar":
                 handles.append(int(handle))
         return True
 

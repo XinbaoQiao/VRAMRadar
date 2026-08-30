@@ -73,8 +73,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
         tray_source = (ROOT / "src" / "vram_radar" / "tray.py").read_text(encoding="utf-8")
         shell_source = (ROOT / "src" / "vram_radar" / "shell.py").read_text(encoding="utf-8")
         spec = (ROOT / "packaging" / "vram-radar.spec").read_text(encoding="utf-8")
-        self.assertIn('MenuItem("显示 VRAM Radar"', tray_source)
-        self.assertIn('MenuItem("退出"', tray_source)
+        self.assertIn('menu_label("显示 VRAM Radar", "Show VRAM Radar")', tray_source)
+        self.assertIn('menu_label("退出", "Exit")', tray_source)
         self.assertIn("events.minimized", tray_source)
         self.assertIn("events.closing", tray_source)
         self.assertIn("WindowsTrayController", shell_source)
@@ -85,6 +85,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("WM_CLOSE", validator)
         self.assertIn("HWND_TOPMOST", validator)
         self.assertIn("HWND_NOTOPMOST", validator)
+        self.assertIn('title.value == "VRAM Radar"', validator)
         self.assertIn('"--quit-existing"', validator)
         self.assertIn('"--no-auto-import"', validator)
 

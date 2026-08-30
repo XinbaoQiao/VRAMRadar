@@ -221,6 +221,53 @@ class TrayControllerTests(unittest.TestCase):
         self.assertTrue(controller.notify("资源可用", "H100 已空闲"))
         self.assertEqual(icon.notifications[-1], ("资源可用", "H100 已空闲"))
 
+    def test_quick_action_menu_and_hidden_notice_follow_english_profile(self):
+        source = Mock()
+        source.__enter__ = Mock(return_value=source)
+        source.__exit__ = Mock(return_value=False)
+        source.convert.return_value = "rgba-image"
+        image_module = SimpleNamespace(open=Mock(return_value=source))
+        pystray_module = SimpleNamespace(Menu=FakeMenu, MenuItem=FakeMenuItem, Icon=FakePystrayIcon)
+
+        with patch(
+            "vram_radar.tray.importlib.import_module",
+            side_effect=lambda name: pystray_module if name == "pystray" else image_module,
+        ):
+            icon = tray.create_windows_tray_icon(
+                Path("app-icon.png"),
+                Mock(),
+                Mock(),
+                refresh_application=Mock(),
+                open_settings=Mock(),
+                toggle_pause=Mock(),
+                is_paused=lambda: False,
+                language=lambda: "en",
+            )
+
+        self.assertEqual(
+            [item.text for item in icon.menu.items if item is not FakeMenu.SEPARATOR],
+            [
+                "Automatic monitoring active",
+                "Show VRAM Radar",
+                "Refresh now",
+                "Open settings",
+                "Pause automatic monitoring",
+                "Exit",
+            ],
+        )
+
+        window = Mock()
+        window.events = SimpleNamespace(closing=FakeEvent(), minimized=FakeEvent())
+        controller = WindowsTrayController(
+            window,
+            Path("app-icon.png"),
+            icon_factory=lambda *_args, **_kwargs: FakeIcon(),
+            language=lambda: "en",
+        )
+        controller.start()
+        controller._notify_hidden_once()
+        self.assertEqual(controller.icon.notifications[-1][0], "VRAM Radar is still running")
+
     def test_repeated_close_hides_notify_only_once_for_the_process(self):
         window = Mock()
         hidden = threading.Event()

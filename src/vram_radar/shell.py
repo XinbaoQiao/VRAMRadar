@@ -698,6 +698,7 @@ class AppApi:
         self.latest_release_url: str | None = None
         self._latest_release: dict[str, Any] | None = None
         self._notification_callback: Callable[[str, str], bool] | None = None
+        self._tray_controller: WindowsTrayController | None = None
         self._key_setup_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
         self._profile_revision = 0
@@ -995,6 +996,14 @@ class AppApi:
         """Bind the platform notification surface without exposing it to Profile data."""
 
         self._notification_callback = callback
+
+    def bind_tray_controller(
+        self,
+        controller: WindowsTrayController | None,
+    ) -> None:
+        """Refresh native menu labels after a saved interface-language change."""
+
+        self._tray_controller = controller
 
     def set_monitoring_paused(self, paused: bool) -> dict[str, Any]:
         if not isinstance(paused, bool):
@@ -1973,7 +1982,7 @@ class AppApi:
             # fields. Local usability preferences have their own endpoints and
             # must not disappear when that profile form is saved.
             persisted_profile = self.profile.to_dict()
-            for preference in ("close_behavior", "favorite_server_ids", "saved_views"):
+            for preference in ("close_behavior", "ui_language", "favorite_server_ids", "saved_views"):
                 if preference not in candidate:
                     candidate[preference] = copy.deepcopy(persisted_profile[preference])
             updates = password_updates or {}
@@ -2168,6 +2177,9 @@ class AppApi:
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = profile
             self._profile_revision += 1
+            tray_controller = self._tray_controller
+            if tray_controller is not None:
+                tray_controller.refresh_menu()
             return {
                 "ok": True,
                 "profile": self._desktop_profile(profile),
@@ -2834,7 +2846,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 initial_geometry = window_state.geometry
                 window = webview.create_window(
-                    "显存雷达",
+                    "VRAM Radar",
                     url=index_path.as_uri(),
                     js_api=api,
                     width=initial_geometry.width,
@@ -2876,10 +2888,16 @@ def main(argv: list[str] | None = None) -> int:
                         snapshot = service.snapshot()
                         summary = snapshot.get("summary", {})
                         if service.is_paused():
-                            return "自动监控已暂停"
+                            return (
+                                "Automatic monitoring paused"
+                                if api.profile.ui_language == "en"
+                                else "自动监控已暂停"
+                            )
                         online = int(summary.get("online_servers") or 0)
                         total = int(summary.get("total_servers") or 0)
                         total_gpus = int(summary.get("total_gpus") or 0)
+                        if api.profile.ui_language == "en":
+                            return f"{online}/{total} online · {total_gpus} GPUs"
                         return f"{online}/{total} 台在线 · {total_gpus} 张 GPU"
 
                     def toggle_monitoring() -> None:
@@ -2906,6 +2924,7 @@ def main(argv: list[str] | None = None) -> int:
                         toggle_pause=toggle_monitoring,
                         is_paused=service.is_paused,
                         status_text=notification_status,
+                        language=lambda: api.profile.ui_language,
                         close_behavior=lambda: (
                             "exit" if api.profile.close_behavior == "exit" else "hide"
                         ),
@@ -2917,6 +2936,7 @@ def main(argv: list[str] | None = None) -> int:
                         candidate.start()
                         tray_controller = candidate
                         shutdown.bind_tray_controller(candidate)
+                        api.bind_tray_controller(candidate)
                         api.bind_notification_callback(candidate.notify)
                     except Exception:
                         logging.getLogger("vram_radar").exception("failed to start the Windows notification icon")
@@ -2946,6 +2966,7 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     if tray_controller is not None:
                         api.bind_notification_callback(None)
+                        api.bind_tray_controller(None)
                         tray_controller.stop()
                     elif non_tray_closing_handler is not None:
                         try:

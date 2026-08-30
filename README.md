@@ -106,6 +106,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 
 ### Desktop conveniences
 
+- Switch the complete interface between Simplified Chinese and English in Settings; the local preference survives restarts and in-place updates.
 - Favorite a server, copy its SSH command, open the system terminal, or pause that server's monitoring. **Copy SSH** includes a statically provable `HostName`, `User`, and `Port` while preserving the owning `-F` configuration and alias; conditional or dynamic configurations fall back to the safe alias command with a clear warning instead of guessed connection details.
 - On Windows, minimize or close to the notification area; its menu exposes status, show, refresh, settings, pause, and exit actions.
 - Check the latest stable GitHub Release after startup and notify only—never silently download or install code.

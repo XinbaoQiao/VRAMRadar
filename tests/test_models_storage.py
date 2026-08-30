@@ -88,9 +88,19 @@ class ModelStorageTests(unittest.TestCase):
 
         self.assertEqual(profile.schema_version, 1)
         self.assertEqual(profile.close_behavior, "tray")
+        self.assertEqual(profile.ui_language, "zh-CN")
         self.assertEqual(profile.favorite_server_ids, ())
         self.assertEqual(profile.ignored_ssh_aliases, ())
         self.assertEqual(profile.saved_views, ())
+
+    def test_ui_language_round_trip_and_validation(self):
+        english = Profile.from_dict(dict(PROFILE, ui_language="en"))
+
+        self.assertEqual(english.ui_language, "en")
+        self.assertEqual(english.to_dict()["ui_language"], "en")
+        self.assertEqual(Profile.from_dict(english.to_dict()), english)
+        with self.assertRaisesRegex(ConfigError, "ui_language must be zh-CN or en"):
+            Profile.from_dict(dict(PROFILE, ui_language="fr"))
 
     def test_ignored_ssh_aliases_round_trip_without_changing_profile_schema(self):
         raw = dict(PROFILE, ignored_ssh_aliases=["retired-gpu", "Legacy.A100"])

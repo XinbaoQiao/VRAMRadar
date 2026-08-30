@@ -34,6 +34,10 @@ the one-click path.
 
 ### Configuration reliability and large-fleet usability
 
+- The complete desktop interface can now switch between Simplified Chinese and
+  English in Settings. The choice is stored with the local Profile and also
+  updates native Windows notification-area actions; existing Profiles retain
+  Simplified Chinese until the user changes the setting.
 - Automatic discovery keeps each imported alias attached to its exact OpenSSH
   source, while `User`, `Port`, `IdentityFile`, `Include`, `ProxyJump`, and
   `ProxyCommand` remain owned by OpenSSH at connection time. Removing an
@@ -102,6 +106,9 @@ do not disable platform security globally.
 
 ### 配置可靠性与大规模服务器体验
 
+- 设置中可在简体中文和英文之间切换完整桌面界面；语言选择随本机 Profile
+  持久化，并同步更新 Windows 通知区域菜单。已有 Profile 默认继续使用简体中文，
+  只有用户主动切换后才会改变。
 - 自动发现会保留每个别名对应的原始 OpenSSH 配置来源；`User`、`Port`、
   `IdentityFile`、`Include`、`ProxyJump` 与 `ProxyCommand` 仍由 OpenSSH 在连接时
   解析。用户删除过的导入别名会被本地记录为忽略项，启动同步不会反复加回；新增别名

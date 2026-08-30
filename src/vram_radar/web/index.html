@@ -165,6 +165,7 @@
           <div class="field-grid profile-fields">
             <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
             <label><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
+            <label><span>界面语言</span><select id="ui-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
             <label><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
           </div>
           <details class="local-tools">
@@ -323,6 +324,7 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="localization.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

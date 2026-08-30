@@ -9,6 +9,7 @@ from typing import Any
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh"})
 SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
+SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
 SUPPORTED_SAVED_VIEW_FILTERS = frozenset({"all", "available", "tasks", "issues"})
 MAX_FAVORITE_SERVER_IDS = 512
 MAX_IGNORED_SSH_ALIASES = 4096
@@ -335,6 +336,7 @@ class Profile:
     ignored_ssh_aliases: tuple[str, ...] = ()
     navigator_side: str = "right"
     close_behavior: str = "tray"
+    ui_language: str = "zh-CN"
     favorite_server_ids: tuple[str, ...] = ()
     saved_views: tuple[dict[str, Any], ...] = ()
     schema_version: int = 1
@@ -393,6 +395,9 @@ class Profile:
             or close_behavior.strip().lower() not in SUPPORTED_CLOSE_BEHAVIORS
         ):
             raise ConfigError("profile close_behavior must be tray or exit")
+        ui_language = raw.get("ui_language", "zh-CN")
+        if not isinstance(ui_language, str) or ui_language.strip() not in SUPPORTED_UI_LANGUAGES:
+            raise ConfigError("profile ui_language must be zh-CN or en")
         favorite_server_ids = raw.get("favorite_server_ids", [])
         if not isinstance(favorite_server_ids, (list, tuple)):
             raise ConfigError("profile favorite_server_ids must be an array")
@@ -428,6 +433,7 @@ class Profile:
             ignored_ssh_aliases=tuple(ignored_ssh_aliases),
             navigator_side=navigator_side.strip().lower(),
             close_behavior=close_behavior.strip().lower(),
+            ui_language=ui_language.strip(),
             favorite_server_ids=favorites,
             saved_views=saved_views,
         )
@@ -443,6 +449,7 @@ class Profile:
             "ignored_ssh_aliases": list(self.ignored_ssh_aliases),
             "navigator_side": self.navigator_side,
             "close_behavior": self.close_behavior,
+            "ui_language": self.ui_language,
             "favorite_server_ids": list(self.favorite_server_ids),
             "saved_views": [dict(view) for view in self.saved_views],
             "servers": [server.to_dict() for server in self.servers],
