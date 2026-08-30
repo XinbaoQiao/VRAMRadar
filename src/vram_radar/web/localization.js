@@ -390,10 +390,23 @@
     ['复制任务 ID', 'Copy job ID'],
     ['显存雷达：资源可用', 'VRAM Radar: resources available'],
     ['你设置的 GPU 条件已有匹配结果。', 'Your GPU requirements now have a matching result.'],
+    ['未能检查更新', 'Could not check for updates'],
+    ['重试', 'Retry'],
+    ['安装并重启', 'Install and restart'],
+    ['下载并显示', 'Download and show'],
+    ['打开 Release', 'Open Release'],
+    ['更新包已通过 GitHub 元数据校验，确认后会安全替换并自动重启。', 'The package passed GitHub metadata validation. After confirmation, it will be replaced safely and the app will restart.'],
+    ['更新包会先校验 SHA-256，再在 Finder 中显示。', 'The package will be SHA-256 verified before it is shown in Finder.'],
+    ['当前版本需要从 GitHub Release 手动安装。', 'Install this version manually from the GitHub Release.'],
   ]);
 
   const PATTERNS = [
     [/^状态更新于 (.+) · 每 ([\d,.]+) 秒$/, 'Updated $1 · every $2 seconds'],
+    [/^发现 VRAM Radar (.+) 的修复构建$/, 'VRAM Radar $1 repair build available'],
+    [/^发现 VRAM Radar (.+)$/, 'VRAM Radar $1 available'],
+    [/^当前版本 (.+)。更新包已通过 GitHub 元数据校验，确认后会安全替换并自动重启。$/, 'Current version $1. The package passed GitHub metadata validation and will be replaced safely before restart.'],
+    [/^当前版本 (.+)。更新包会先校验 SHA-256，再在 Finder 中显示。$/, 'Current version $1. The package will be SHA-256 verified before it is shown in Finder.'],
+    [/^当前版本 (.+)。当前版本需要从 GitHub Release 手动安装。$/, 'Current version $1. Install the update manually from the GitHub Release.'],
     [/^约 ([\d,.]+) 秒后自动重试$/, 'Retrying automatically in about $1 seconds'],
     [/^第 ([\d,.]+) 台服务器：(.+)$/, 'Server $1: $2'],
     [/^已解析 ([\d,.]+) 台服务器候选(.+)$/, 'Parsed $1 server candidates$2'],

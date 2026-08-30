@@ -1297,6 +1297,9 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn(".update-notice", self.styles)
         self.assertIn(".update-notice.update-check-failed", self.styles)
         self.assertIn("下载官方安装包、校验 SHA-256", self.javascript)
+        self.assertIn("result.replacement_available", self.javascript)
+        self.assertIn("修复构建", self.javascript)
+        self.assertIn("repair build available", self.localization)
 
 
 if __name__ == "__main__":

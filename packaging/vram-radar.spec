@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import os
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -19,7 +20,25 @@ if release_tag != stable_tag and re.fullmatch(
     raise ValueError("VRAM_RADAR_RELEASE_TAG must match the project version or its macOS beta channel")
 build_info = project_root / "work" / "build-metadata" / "_build_info.json"
 build_info.parent.mkdir(parents=True, exist_ok=True)
-build_info.write_text(json.dumps({"release_tag": release_tag}) + "\n", encoding="utf-8")
+source_commit = os.environ.get("GITHUB_SHA", "").strip().lower()
+if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+    try:
+        source_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip().lower()
+    except (OSError, subprocess.SubprocessError):
+        source_commit = ""
+if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+    source_commit = ""
+build_info.write_text(
+    json.dumps({"release_tag": release_tag, "source_commit": source_commit}) + "\n",
+    encoding="utf-8",
+)
 is_macos = sys.platform == "darwin"
 macos_target_arch = os.environ.get("VRAM_RADAR_MACOS_TARGET_ARCH", "").strip() or None
 if macos_target_arch not in {None, "arm64", "x86_64", "universal2"}:

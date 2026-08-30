@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from . import __version__
-from .build_info import current_release_tag
+from .build_info import current_build_commit, current_release_tag
 
 
 LATEST_RELEASE_API = "https://api.github.com/repositories/1347320362/releases/latest"
@@ -21,6 +21,7 @@ _VERSION_PATTERN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-macos-beta\.(\d+))?$")
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_ASSET_BYTES = 250 * 1024 * 1024
 _SHA256_PATTERN = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
+_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def _version_tuple(value: str) -> tuple[int, int, int, int, int]:
@@ -106,6 +107,7 @@ def check_latest_release(
     current_version: str = __version__,
     *,
     current_tag: str | None = None,
+    current_commit: str | None = None,
     timeout_seconds: float = 4.0,
     opener: Callable[..., Any] = urlopen,
     platform_name: str = sys.platform,
@@ -113,6 +115,9 @@ def check_latest_release(
     """Check stable updates, plus newer macOS betas for a packaged beta build."""
 
     installed_tag = current_tag or current_release_tag()
+    installed_commit = current_commit if current_commit is not None else current_build_commit()
+    if not isinstance(installed_commit, str) or _COMMIT_PATTERN.fullmatch(installed_commit) is None:
+        installed_commit = None
     installed = _version_tuple(installed_tag)
     beta_channel = installed[3] == 0
     request = Request(
@@ -149,24 +154,43 @@ def check_latest_release(
                 raise ValueError("unexpected release response")
             tag_name, release_url, latest = release
             published_at = payload.get("published_at") if isinstance(payload.get("published_at"), str) else None
+        release_payload = (
+            next(
+                (
+                    item
+                    for item in payload
+                    if isinstance(item, dict) and item.get("tag_name") == tag_name
+                ),
+                {},
+            )
+            if beta_channel
+            else payload
+        )
+        latest_commit_value = release_payload.get("target_commitish") if isinstance(release_payload, dict) else None
+        latest_commit = (
+            latest_commit_value.lower()
+            if isinstance(latest_commit_value, str)
+            and _COMMIT_PATTERN.fullmatch(latest_commit_value.lower())
+            else None
+        )
+        replacement_available = bool(
+            latest == installed
+            and installed_commit is not None
+            and latest_commit is not None
+            and latest_commit != installed_commit
+        )
         return {
             "ok": True,
-            "update_available": latest > installed,
+            "update_available": latest > installed or replacement_available,
+            "replacement_available": replacement_available,
             "current_version": installed_tag.removeprefix("v"),
             "latest_version": tag_name.removeprefix("v"),
+            "current_build": installed_commit,
+            "latest_build": latest_commit,
             "release_url": release_url,
             "published_at": published_at,
             "asset": _trusted_asset(
-                next(
-                    (
-                        item
-                        for item in payload
-                        if isinstance(item, dict) and item.get("tag_name") == tag_name
-                    ),
-                    {},
-                )
-                if beta_channel
-                else payload,
+                release_payload,
                 tag_name,
                 platform_name=platform_name,
             ),

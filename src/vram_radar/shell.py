@@ -45,7 +45,7 @@ from .models import (
     require_optional_ssh_token,
     require_optional_remote_directory,
 )
-from .build_info import current_release_tag
+from .build_info import current_build_commit, current_release_tag
 from .server_catalog import (
     canonical_local_path,
     profile_from_server_config,
@@ -479,12 +479,12 @@ class ActivationServer:
             pass
 
 
-def request_existing_instance(
+def _request_existing_instance_process(
     path: Path,
     *,
     action: str = "show",
     timeout_seconds: float = 3.0,
-) -> bool:
+) -> int | None:
     normalized_action = action.strip().lower()
     if normalized_action not in {"show", "exit"}:
         raise ValueError("existing-instance action must be show or exit")
@@ -496,15 +496,84 @@ def request_existing_instance(
                 raise ValueError("unsupported activation schema")
             port = int(document["port"])
             nonce = str(document["nonce"])
-            if not 1 <= port <= 65535 or len(nonce) < 16:
+            pid = int(document["pid"])
+            if not 1 <= port <= 65535 or len(nonce) < 16 or pid <= 0:
                 raise ValueError("invalid activation endpoint")
             with socket.create_connection(("127.0.0.1", port), timeout=0.5) as connection:
                 message = nonce if normalized_action == "show" else f"{nonce} EXIT"
                 connection.sendall(message.encode("utf-8") + b"\n")
                 connection.settimeout(1)
-                return connection.recv(32).strip() == b"OK"
+                if connection.recv(32).strip() == b"OK":
+                    return pid
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
             time.sleep(0.1)
+    return None
+
+
+def request_existing_instance(
+    path: Path,
+    *,
+    action: str = "show",
+    timeout_seconds: float = 3.0,
+) -> bool:
+    return _request_existing_instance_process(
+        path,
+        action=action,
+        timeout_seconds=timeout_seconds,
+    ) is not None
+
+
+def _wait_for_process_exit(pid: int, timeout_seconds: float = 15.0) -> bool:
+    """Wait for the exact authenticated desktop process to release its image.
+
+    Installer-driven replacement must not infer shutdown from the activation
+    endpoint disappearing: native WebView and tray teardown can continue after
+    that file is removed, leaving the executable locked and a same-version
+    reinstall only partially applied.
+    """
+
+    if pid <= 0 or pid == os.getpid():
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        synchronize = 0x00100000
+        wait_object_0 = 0
+        wait_timeout = 258
+        error_invalid_parameter = 87
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(synchronize, False, pid)
+        if not handle:
+            # ERROR_INVALID_PARAMETER means the PID no longer exists. Access
+            # denial or any other failure cannot prove shutdown, so Setup must
+            # stop rather than replace a possibly locked executable.
+            return ctypes.get_last_error() == error_invalid_parameter
+        try:
+            result = kernel32.WaitForSingleObject(
+                handle,
+                max(1, int(max(0.1, timeout_seconds) * 1000)),
+            )
+            if result == wait_object_0:
+                return True
+            if result == wait_timeout:
+                return False
+            return False
+        finally:
+            kernel32.CloseHandle(handle)
+    deadline = time.monotonic() + max(0.1, timeout_seconds)
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.1)
     return False
 
 
@@ -2588,6 +2657,7 @@ class AppApi:
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "scope": "server" if server_id is not None else "profile",
             "release": current_release_tag(),
+            "build_commit": current_build_commit(),
             "platform": "windows" if sys.platform == "win32" else (
                 "macos" if sys.platform == "darwin" else "other"
             ),
@@ -3014,11 +3084,14 @@ def main(argv: list[str] | None = None) -> int:
         except ConfigError as exc:
             parser.error(str(exc))
         activation_path = storage_paths(args.home).runtime / f"{profile.id}.activation.json"
-        if request_existing_instance(activation_path, action="exit", timeout_seconds=1):
-            deadline = time.monotonic() + 8
-            while activation_path.exists() and time.monotonic() < deadline:
-                time.sleep(0.1)
-        return 0
+        existing_pid = _request_existing_instance_process(
+            activation_path,
+            action="exit",
+            timeout_seconds=1,
+        )
+        if existing_pid is None:
+            return 0
+        return 0 if _wait_for_process_exit(existing_pid) else 1
 
     try:
         requested_profile = Profile.empty(args.profile)

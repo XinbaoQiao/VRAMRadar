@@ -159,7 +159,13 @@ This release is not signed with an Apple Developer ID and is not notarized becau
 This installer-enabled release adds a confirmed one-click Windows update path:
 it accepts only the exact official Release asset, verifies GitHub's
 SHA-256 digest, preserves the previous installation for rollback, and restarts
-the same executable path after success. Because `v0.6.1` does not yet contain
+the same executable path after success. Repair builds published under the same
+visible tag are distinguished by their exact source commit, so an installed
+`v0.7.0` can still offer a newer `v0.7.0` repair. During a manual in-place
+reinstall, Setup waits for the authenticated running instance to exit before it
+replaces files and recreates the Start-menu and desktop shortcuts; if that
+process does not exit, installation stops without partially updating the app.
+Because `v0.6.1` does not yet contain
 the independent updater, installing that first updater-enabled version is a
 one-time manual bootstrap. On macOS, the app downloads and verifies the archive
 but asks the user to replace the `.app` manually until Developer ID signing and

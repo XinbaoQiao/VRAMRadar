@@ -26,6 +26,7 @@ from vram_radar.shell import (
     build_runtime,
     main,
     request_existing_instance,
+    _wait_for_process_exit,
     _copy_text_to_system_clipboard,
     webview_start_options,
     window_frontend_is_ready,
@@ -2348,12 +2349,14 @@ class ShellApiTests(unittest.TestCase):
         }
         api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
 
-        result = api.get_redacted_diagnostics()
-        legacy = api.get_diagnostics()
+        with patch("vram_radar.shell.current_build_commit", return_value="a" * 40):
+            result = api.get_redacted_diagnostics()
+            legacy = api.get_diagnostics()
         serialized = json.dumps(result, ensure_ascii=False)
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["diagnostics"]["schema_version"], 2)
+        self.assertEqual(result["diagnostics"]["build_commit"], "a" * 40)
         self.assertEqual(result["diagnostics"]["total_gpus"], 4)
         self.assertEqual(result["diagnostics"]["servers"][0]["label"], "server_1")
         self.assertTrue(result["diagnostics"]["servers"][0]["identity_file_configured"])
@@ -2593,7 +2596,7 @@ class ShellApiTests(unittest.TestCase):
 
     def test_quit_existing_short_circuits_before_runtime_or_server_discovery(self):
         with tempfile.TemporaryDirectory() as temporary, patch(
-            "vram_radar.shell.request_existing_instance", return_value=False
+            "vram_radar.shell._request_existing_instance_process", return_value=None
         ) as request, patch("vram_radar.shell.build_runtime") as build:
             result = main(["--profile", "local", "--home", temporary, "--quit-existing"])
 
@@ -2601,6 +2604,48 @@ class ShellApiTests(unittest.TestCase):
         request.assert_called_once()
         self.assertEqual(request.call_args.kwargs["action"], "exit")
         build.assert_not_called()
+
+    def test_quit_existing_waits_for_the_authenticated_process_to_exit(self):
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.shell._request_existing_instance_process", return_value=4321
+        ) as request, patch(
+            "vram_radar.shell._wait_for_process_exit", return_value=True
+        ) as wait, patch("vram_radar.shell.build_runtime") as build:
+            result = main(["--profile", "local", "--home", temporary, "--quit-existing"])
+
+        self.assertEqual(result, 0)
+        request.assert_called_once()
+        wait.assert_called_once_with(4321)
+        build.assert_not_called()
+
+    def test_quit_existing_fails_closed_when_native_teardown_does_not_finish(self):
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.shell._request_existing_instance_process", return_value=4321
+        ), patch("vram_radar.shell._wait_for_process_exit", return_value=False), patch(
+            "vram_radar.shell.build_runtime"
+        ) as build:
+            result = main(["--profile", "local", "--home", temporary, "--quit-existing"])
+
+        self.assertEqual(result, 1)
+        build.assert_not_called()
+
+    def test_exact_process_wait_observes_real_child_exit_and_timeout(self):
+        child = subprocess.Popen(
+            [os.sys.executable, "-c", "import time; time.sleep(0.2)"],
+            close_fds=True,
+        )
+        self.assertTrue(_wait_for_process_exit(child.pid, timeout_seconds=5))
+        child.wait(timeout=1)
+
+        child = subprocess.Popen(
+            [os.sys.executable, "-c", "import time; time.sleep(10)"],
+            close_fds=True,
+        )
+        try:
+            self.assertFalse(_wait_for_process_exit(child.pid, timeout_seconds=0.1))
+        finally:
+            child.terminate()
+            child.wait(timeout=5)
 
     def test_invalid_activation_endpoint_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

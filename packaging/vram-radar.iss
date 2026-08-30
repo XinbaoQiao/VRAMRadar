@@ -32,6 +32,8 @@ CloseApplications=yes
 RestartApplications=yes
 
 [InstallDelete]
+Type: files; Name: "{group}\VRAM Radar.lnk"; Check: not IsValidationInstall
+Type: files; Name: "{autodesktop}\VRAM Radar.lnk"; Check: not IsValidationInstall
 Type: filesandordirs; Name: "{app}\_internal"
 Type: files; Name: "{app}\VRAMRadar.exe"
 Type: files; Name: "{app}\VRAMRadarAskPass.exe"
@@ -115,5 +117,30 @@ begin
 
   InstalledExecutable := ExpandConstant('{app}\{#MyAppExeName}');
   if FileExists(InstalledExecutable) then
-    Exec(InstalledExecutable, '--quit-existing', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  begin
+    if not Exec(
+      InstalledExecutable,
+      '--quit-existing',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    ) then
+    begin
+      Result :=
+        'VRAM Radar could not request the existing application to close.' + #13#10 +
+        'Please exit VRAM Radar from its notification-area menu, then run Setup again.' + #13#10#13#10 +
+        '无法请求当前 VRAM Radar 退出。请先在任务栏通知区域右键退出，再重新运行安装程序。';
+      exit;
+    end;
+    if ResultCode <> 0 then
+    begin
+      Result :=
+        'VRAM Radar is still running, so Setup stopped before replacing any application files.' + #13#10 +
+        'Please exit VRAM Radar from its notification-area menu, then run Setup again.' + #13#10#13#10 +
+        'VRAM Radar 仍在运行；安装器已在替换文件前停止。' +
+        '请先在任务栏通知区域右键退出，再重新运行安装程序。';
+      exit;
+    end;
+  end;
 end;

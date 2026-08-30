@@ -32,21 +32,30 @@ def wait_for(path: Path, timeout: float = 30.0) -> None:
 def wait_for_process_exit(pid: int, timeout: float = 20.0) -> None:
     deadline = time.monotonic() + timeout
     if os.name == "nt":
+        from ctypes import wintypes
+
         synchronize = 0x00100000
         wait_object_0 = 0
         wait_timeout = 258
-        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(synchronize, False, pid)
         if not handle:
             return
         try:
             remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-            result = ctypes.windll.kernel32.WaitForSingleObject(handle, remaining_ms)
+            result = kernel32.WaitForSingleObject(handle, remaining_ms)
             if result == wait_object_0:
                 return
             if result != wait_timeout:
                 raise OSError("could not wait for updated process")
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            kernel32.CloseHandle(handle)
     else:
         while time.monotonic() < deadline:
             try:
@@ -83,6 +92,54 @@ def validate(installer: Path) -> None:
         marker = install_root / ".vram-radar-installed"
         if not executable.is_file() or not updater.is_file() or not marker.is_file():
             raise RuntimeError("installed bundle is missing the executable, updater, or marker")
+
+        # Exercise the ordinary same-version Setup path while the desktop is
+        # running. This is distinct from the independent updater below: Setup
+        # launches the installed executable with --quit-existing, which must
+        # now wait for the authenticated process itself to exit before any
+        # bundle file is deleted or copied. A disposable VRAM_RADAR_HOME keeps
+        # the validation away from the maintainer's Profile and servers while
+        # preserving the default Profile identity used by interactive Setup.
+        manual_home = root / "manual-reinstall-home"
+        manual_environment = os.environ.copy()
+        manual_environment["VRAM_RADAR_HOME"] = str(manual_home)
+        original_marker = marker.read_bytes()
+        marker.write_bytes(b"stale same-version install marker")
+        manual_process = subprocess.Popen(
+            [str(executable), "--no-auto-import"],
+            close_fds=True,
+            env=manual_environment,
+        )
+        manual_activation = manual_home / "runtime" / "default.activation.json"
+        try:
+            wait_for(manual_activation)
+            completed_reinstall = subprocess.run(
+                [
+                    str(installer),
+                    "/VERYSILENT",
+                    "/SUPPRESSMSGBOXES",
+                    "/NORESTART",
+                    f"/DIR={install_root}",
+                    "/TASKS=",
+                    "/VRAMRADARVALIDATION=1",
+                ],
+                check=False,
+                timeout=180,
+                env=manual_environment,
+            )
+            if completed_reinstall.returncode != 0:
+                raise RuntimeError(
+                    f"same-version packaged reinstall exited with {completed_reinstall.returncode}"
+                )
+            wait_for_process_exit(manual_process.pid)
+            if marker.read_bytes() != original_marker:
+                raise RuntimeError("same-version packaged reinstall did not replace the install marker")
+            if manual_activation.exists():
+                raise RuntimeError("same-version packaged reinstall left the old activation endpoint")
+        finally:
+            if manual_process.poll() is None:
+                manual_process.terminate()
+                manual_process.wait(timeout=10)
 
         process = subprocess.Popen(
             [str(executable), "--profile", profile, "--home", str(home), "--no-auto-import"],

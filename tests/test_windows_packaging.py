@@ -34,6 +34,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.assertIn('WorkingDir: "{app}"', line)
             self.assertIn('AppUserModelID: "VRAMRadar.Desktop"', line)
             self.assertNotIn("MyAppVersion", line)
+        self.assertIn('Name: "{group}\\VRAM Radar.lnk"; Check: not IsValidationInstall', self.manifest)
+        self.assertIn('Name: "{autodesktop}\\VRAM Radar.lnk"; Check: not IsValidationInstall', self.manifest)
 
     def test_upgrade_cleanup_is_scoped_to_replaceable_bundle_files(self) -> None:
         self.assertIn("[InstallDelete]", self.manifest)
@@ -47,6 +49,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("function PrepareToInstall", self.manifest)
         self.assertIn("--quit-existing", self.manifest)
         self.assertIn("ewWaitUntilTerminated", self.manifest)
+        self.assertIn("if ResultCode <> 0 then", self.manifest)
+        self.assertIn("still running, so Setup stopped before replacing", self.manifest)
         self.assertIn("installed-marker.txt", self.manifest)
         self.assertIn(".vram-radar-installed", self.manifest)
 
@@ -70,6 +74,9 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("/VRAMRADARVALIDATION=1", validator)
         self.assertIn('"validation_mode": True', validator)
         self.assertIn('command.append("/VRAMRADARVALIDATION=1")', helper)
+        self.assertIn('manual_environment["VRAM_RADAR_HOME"]', validator)
+        self.assertIn("same-version packaged reinstall", validator)
+        self.assertIn("wait_for_process_exit(manual_process.pid)", validator)
 
     def test_windows_bundle_contains_notification_area_lifecycle(self) -> None:
         tray_source = (ROOT / "src" / "vram_radar" / "tray.py").read_text(encoding="utf-8")
@@ -97,6 +104,9 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", self.build_script)
         self.assertIn('"/DMyAppVersion=$Version"', self.build_script)
         self.assertIn("VRAMRadar-Setup-$Version.exe", self.build_script)
+        spec = (ROOT / "packaging" / "vram-radar.spec").read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("GITHUB_SHA"', spec)
+        self.assertIn('"source_commit": source_commit', spec)
 
     def test_mit_license_is_shipped_and_presented_by_setup(self) -> None:
         spec = (ROOT / "packaging" / "vram-radar.spec").read_text(encoding="utf-8")

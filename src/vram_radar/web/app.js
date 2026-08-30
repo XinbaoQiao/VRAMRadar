@@ -3033,7 +3033,10 @@ async function checkForUpdates({interactive = false} = {}) {
       : latestUpdateAction === 'verified_download'
         ? '更新包会先校验 SHA-256，再在 Finder 中显示。'
         : '当前版本需要从 GitHub Release 手动安装。';
-    ui.updateNotice.innerHTML = `<div><div class="notice-title">发现 VRAM Radar ${escapeHtml(result.latest_version)}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。${actionCopy}</div></div><button class="button primary install-latest-update" type="button">${actionLabel}</button>`;
+    const releaseTitle = result.replacement_available
+      ? `发现 VRAM Radar ${escapeHtml(result.latest_version)} 的修复构建`
+      : `发现 VRAM Radar ${escapeHtml(result.latest_version)}`;
+    ui.updateNotice.innerHTML = `<div><div class="notice-title">${releaseTitle}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。${actionCopy}</div></div><button class="button primary install-latest-update" type="button">${actionLabel}</button>`;
     ui.updateNotice.hidden = false;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {

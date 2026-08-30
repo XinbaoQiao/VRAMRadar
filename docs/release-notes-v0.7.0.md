@@ -22,6 +22,10 @@ existing stable installation and shortcut identity.
 - If installation or the launch probe fails, the updater restores and relaunches
   the previous version. Profiles, credentials, caches, and logs remain outside
   the replaceable installation directory.
+- Same-tag repair builds are compared by exact source commit, so a newer
+  `v0.7.0` repair can notify an older `v0.7.0` installation. Manual in-place
+  Setup now waits for the authenticated old process to exit before replacement
+  and recreates both stable shortcuts; failure stops before a partial update.
 - macOS downloads are also SHA-256 verified and revealed in Finder. Replacing
   the `.app` remains manual until Developer ID signing and notarization are
   configured.
@@ -130,6 +134,9 @@ do not disable platform security globally.
   是否能启动，并使用同一份本地 Profile 自动重启。
 - 安装或启动探测失败时，自动恢复并重新启动旧版本。Profile、凭据、缓存和日志
   位于安装目录之外，不参与替换。
+- 同一版号下的修复包会按精确源码提交比较，因此较新的 `v0.7.0` 仍可提醒旧的
+  `v0.7.0`。手动覆盖安装会等待已认证的旧进程真正退出，再替换文件并重建两个
+  稳定快捷方式；退出失败会在部分更新发生前停止。
 - macOS 更新包同样会校验 SHA-256 并在 Finder 中定位；在配置 Developer ID 签名
   和公证之前，替换 `.app` 仍需用户手动完成。
 

@@ -61,6 +61,59 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertFalse(result["update_available"])
 
+    def test_same_tag_replacement_prompts_when_exact_release_commit_changed(self):
+        installed_commit = "1" * 40
+        replacement_commit = "2" * 40
+
+        def opener(_request, *, timeout):
+            self.assertEqual(timeout, 4.0)
+            return FakeResponse(
+                {
+                    "tag_name": "v0.7.0",
+                    "html_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.7.0",
+                    "target_commitish": replacement_commit,
+                    "draft": False,
+                    "prerelease": False,
+                }
+            )
+
+        result = check_latest_release(
+            "0.7.0",
+            current_tag="v0.7.0",
+            current_commit=installed_commit,
+            opener=opener,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["update_available"])
+        self.assertTrue(result["replacement_available"])
+        self.assertEqual(result["current_build"], installed_commit)
+        self.assertEqual(result["latest_build"], replacement_commit)
+
+    def test_same_tag_does_not_prompt_without_an_exact_changed_commit(self):
+        def opener(_request, *, timeout):
+            self.assertEqual(timeout, 4.0)
+            return FakeResponse(
+                {
+                    "tag_name": "v0.7.0",
+                    "html_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.7.0",
+                    "target_commitish": "main",
+                    "draft": False,
+                    "prerelease": False,
+                }
+            )
+
+        result = check_latest_release(
+            "0.7.0",
+            current_tag="v0.7.0",
+            current_commit="1" * 40,
+            opener=opener,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["update_available"])
+        self.assertFalse(result["replacement_available"])
+
     def test_untrusted_release_url_fails_closed(self):
         def opener(_request, *, timeout):
             self.assertEqual(timeout, 4.0)

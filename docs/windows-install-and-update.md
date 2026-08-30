@@ -72,6 +72,17 @@ For an installer-managed copy with the update executor:
    automatically restarts VRAM Radar from the same shortcut target.
 4. If installation fails, it restores and relaunches the previous version.
 
+The packaged build records its exact source commit. If the Release keeps the
+same visible tag but points at a different exact commit, the app presents it as
+a repair build instead of treating the equal version string as current.
+
+A normal manual in-place reinstall uses the same atomic boundary: Setup sends
+an authenticated exit request to the existing instance and waits for that exact
+process to finish before deleting or replacing application files. It then
+removes and recreates the stable Start-menu and desktop shortcuts. If the
+process cannot be stopped, Setup fails before replacement rather than leaving a
+mixed old/new installation.
+
 `v0.6.1` predates the update executor. Upgrading from that version to the first
 updater-enabled release therefore requires one normal manual installer run.
 Later installer-managed releases can use the one-click path.
