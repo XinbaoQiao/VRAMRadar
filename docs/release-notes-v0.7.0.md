@@ -34,6 +34,12 @@ the one-click path.
 
 ### Configuration reliability and large-fleet usability
 
+- Windows OpenSSH discovery now supports a user `.ssh` directory backed by a
+  Junction. When Python reports `WinError 448`, VRAM Radar follows only the
+  target reported by the Windows kernel, limits the reparse chain, and keeps
+  every unrelated path failure fail-closed. This prevents a valid imported
+  server list from becoming entirely unreachable after startup merely because
+  `%USERPROFILE%\.ssh` points to another local drive.
 - Favorite servers can now use one persistent GPU availability alert. The app
   sends a native system notification when a whole GPU becomes idle or when any
   GPU reaches an optional per-device free-VRAM threshold. Hidden-window refresh
@@ -118,6 +124,12 @@ do not disable platform security globally.
 之后，Windows 正式安装版即可使用一键更新。
 
 ### 配置可靠性与大规模服务器体验
+
+- Windows OpenSSH 自动发现现已支持由 Junction 指向其他本地目录的用户
+  `.ssh` 文件夹。Python 遇到 `WinError 448` 时，显存雷达只跟随 Windows
+  内核返回的重解析目标并限制跳转次数；其他路径异常仍然默认拒绝继续处理。
+  这可避免 `%USERPROFILE%\.ssh` 指向其他磁盘时，已经正确导入的服务器在
+  启动后全部显示不可达。
 
 - 收藏服务器现在可以启用持久 GPU 可用提醒：整张 GPU 空闲，或任意单卡达到
   可选的最低空闲显存阈值时发送原生系统通知。窗口收起后仍会检测；缓存或离线数据
