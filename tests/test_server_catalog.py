@@ -97,10 +97,12 @@ class ServerCatalogTests(unittest.TestCase):
                 candidates = server_config_candidates(include_openssh=True)
                 existing = resolve_server_configs(include_openssh=True)
                 servers, warnings = import_openssh_config(config)
+            expected_config = original_resolve(config)
+            expected_fragment = original_resolve(fragment)
 
-        self.assertIn(config, candidates)
-        self.assertIn(config, existing)
-        self.assertIn(fragment, candidates)
+        self.assertIn(expected_config, candidates)
+        self.assertIn(expected_config, existing)
+        self.assertIn(expected_fragment, candidates)
         self.assertEqual([server.ssh_alias for server in servers], ["junction-gpu"])
         self.assertTrue(any("Include" in warning for warning in warnings))
 
