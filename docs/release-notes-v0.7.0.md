@@ -43,10 +43,10 @@ the one-click path.
   address, user, port, optional identity, and non-interactive safety options.
   Conditional or dynamic configurations fall back to the safe executable
   alias command instead of freezing guessed fields.
-- The Mini Navigator now uses a narrower responsive layout lane rather than
-  covering dashboard content. It reserves exactly its expanded width on either
-  desktop edge and becomes an in-flow row above the main content in compact
-  windows.
+- The collapsed Mini Navigator now reserves only its compact rail and gutter,
+  rather than the full expanded panel width. Expanding it does not reflow or
+  further squeeze the dashboard; compact windows still place it in an in-flow
+  row above the main content.
 - The complete desktop interface can now switch between Simplified Chinese and
   English in Settings. The choice is stored with the local Profile and also
   updates native Windows notification-area actions; existing Profiles retain
@@ -125,8 +125,8 @@ do not disable platform security globally.
 - “复制 SSH”现在生成可直接粘贴进 OpenSSH config 的 `Host` 配置块，包含已验证的
   地址、用户、端口、可选私钥和非交互安全选项；条件式或动态配置会回退到安全的
   可执行别名命令，不会固化猜测字段。
-- Mini Navigator 现在使用更窄的响应式独立布局，不再覆盖仪表盘内容；在桌面窗口
-  左右两侧都会预留与展开宽度一致的空间，紧凑窗口中则作为主内容上方的正常布局行。
+- Mini Navigator 收起时现在只预留窄轨道和间距，不再按完整展开面板宽度挤压主界面；
+  展开不会再次触发布局变化，紧凑窗口中仍作为主内容上方的正常布局行。
 - 设置中可在简体中文和英文之间切换完整桌面界面；语言选择随本机 Profile
   持久化，并同步更新 Windows 通知区域菜单。已有 Profile 默认继续使用简体中文，
   只有用户主动切换后才会改变。

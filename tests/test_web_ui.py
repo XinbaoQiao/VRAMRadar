@@ -540,8 +540,10 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("scroll-margin-top: 84px", self.styles)
         self.assertIn("@media (max-width: 900px)", self.styles)
         self.assertIn("--navigator-panel-width: clamp(206px, 17vw, 224px)", self.styles)
+        self.assertIn("--navigator-rail-width: 40px", self.styles)
         self.assertIn(".app-shell:has(.server-navigator:not([hidden]))", self.styles)
-        self.assertIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-panel-width)", self.styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-rail-width)", self.styles)
+        self.assertNotIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-panel-width)", self.styles)
         self.assertIn("position: sticky", self.styles)
         self.assertNotIn(".server-navigator { position: fixed", self.styles)
 

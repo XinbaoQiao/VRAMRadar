@@ -80,7 +80,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 ### Built for large fleets and clusters
 
 - Keep the Mini Navigator collapsed by default and expand it on pointer hover or keyboard focus.
-- Give the navigator a narrow responsive lane instead of overlaying the dashboard; compact windows move it into an in-flow row above the main content.
+- Reserve only the collapsed navigator rail and its small gutter, so the hidden panel does not squeeze the dashboard; compact windows move it into an in-flow row above the main content.
 - Search and filter by favorites, recent servers, available capacity, your jobs, or attention state.
 - Drag the navigator between the left and right edges; the preference survives restarts and application updates.
 - Render at most 50 server cards per main page and 80 navigator items per window.

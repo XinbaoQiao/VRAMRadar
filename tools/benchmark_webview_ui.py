@@ -476,17 +476,25 @@ BENCHMARK_JAVASCRIPT = r"""
 
     const appShell = document.querySelector('.app-shell');
     const mainContent = document.querySelector('main');
-    ui.serverNavigator.classList.add('dragging');
+    const appBounds = appShell.getBoundingClientRect();
+    ui.serverNavigator.classList.remove('dragging');
     applyServerNavigatorSide('right');
     forceLayout(appShell);
-    const rightMainBounds = mainContent.getBoundingClientRect();
-    const rightNavigatorBounds = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
-    const rightNavigatorGap = rightNavigatorBounds.left - rightMainBounds.right;
+    const rightCollapsedMainBounds = mainContent.getBoundingClientRect();
+    const rightRailBounds = ui.serverNavigator.getBoundingClientRect();
+    const rightCollapsedTrackWidth = appBounds.right - rightCollapsedMainBounds.right;
+    ui.serverNavigator.classList.add('dragging');
+    forceLayout(appShell);
+    const rightExpandedMainBounds = mainContent.getBoundingClientRect();
+    const expandedPanelBounds = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
+    ui.serverNavigator.classList.remove('dragging');
     applyServerNavigatorSide('left');
     forceLayout(appShell);
-    const leftMainBounds = mainContent.getBoundingClientRect();
-    const leftNavigatorBounds = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
-    const leftNavigatorGap = leftMainBounds.left - leftNavigatorBounds.right;
+    const leftCollapsedMainBounds = mainContent.getBoundingClientRect();
+    const leftCollapsedTrackWidth = leftCollapsedMainBounds.left - appBounds.left;
+    ui.serverNavigator.classList.add('dragging');
+    forceLayout(appShell);
+    const leftExpandedMainBounds = mainContent.getBoundingClientRect();
     applyServerNavigatorSide('right');
     ui.serverNavigator.classList.remove('dragging');
 
@@ -646,8 +654,10 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
-      navigator_right_does_not_overlap_main: rightNavigatorGap >= -0.5,
-      navigator_left_does_not_overlap_main: leftNavigatorGap >= -0.5,
+      navigator_right_collapsed_track_is_compact: rightCollapsedTrackWidth <= 50.5 && rightCollapsedTrackWidth >= rightRailBounds.width,
+      navigator_left_collapsed_track_is_compact: leftCollapsedTrackWidth <= 50.5 && leftCollapsedTrackWidth >= rightRailBounds.width,
+      navigator_expansion_does_not_reflow_main: Math.abs(rightExpandedMainBounds.width - rightCollapsedMainBounds.width) < 0.5
+        && Math.abs(leftExpandedMainBounds.width - leftCollapsedMainBounds.width) < 0.5,
       directory_fixture_has_160_entries: directoryEntries.length === 160,
       directory_initially_skips_cached_children: firstRootNodes === 80 && firstFileNodes === 0,
       directory_expand_materializes_cached_children: expandedFileNodes === 80 && expandedModuleNodes > firstModuleNodes,
@@ -688,9 +698,12 @@ BENCHMARK_JAVASCRIPT = r"""
         metrics_delta: metricDelta(repeatMetricsAfter, repeatMetricsBefore),
       },
       navigator_layout: {
-        panel_width_px: round(rightNavigatorBounds.width),
-        right_side_gap_px: round(rightNavigatorGap),
-        left_side_gap_px: round(leftNavigatorGap),
+        collapsed_rail_width_px: round(rightRailBounds.width),
+        expanded_panel_width_px: round(expandedPanelBounds.width),
+        right_collapsed_track_width_px: round(rightCollapsedTrackWidth),
+        left_collapsed_track_width_px: round(leftCollapsedTrackWidth),
+        right_expansion_main_layout_shift_px: round(rightExpandedMainBounds.width - rightCollapsedMainBounds.width),
+        left_expansion_main_layout_shift_px: round(leftExpandedMainBounds.width - leftCollapsedMainBounds.width),
       },
       directory_module: {
         entry_count: directoryEntries.length,

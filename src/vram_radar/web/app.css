@@ -58,8 +58,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .ui-icon, .badge-icon, .task-group-chevron, .owner-icon { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 .app-shell { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
-.app-shell:has(.server-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) calc(var(--navigator-panel-width) + var(--navigator-gutter)); }
-.app-shell:has(.server-navigator[data-side="left"]:not([hidden])) { grid-template-columns: calc(var(--navigator-panel-width) + var(--navigator-gutter)) minmax(0, 1fr); }
+.app-shell:has(.server-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) calc(var(--navigator-rail-width) + var(--navigator-gutter)); }
+.app-shell:has(.server-navigator[data-side="left"]:not([hidden])) { grid-template-columns: calc(var(--navigator-rail-width) + var(--navigator-gutter)) minmax(0, 1fr); }
 .titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 66px; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px 18px; background: var(--surface); color: var(--text); border-bottom: 1px solid var(--border-strong); }
 .brand { min-width: 0; display: flex; align-items: center; gap: 11px; }
 .brand-mark { width: 42px; height: 42px; display: grid; place-items: center; color: var(--text); }
