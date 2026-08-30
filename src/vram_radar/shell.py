@@ -569,6 +569,17 @@ def _wait_for_process_exit(pid: int, timeout_seconds: float = 15.0) -> bool:
             kernel32.CloseHandle(handle)
     deadline = time.monotonic() + max(0.1, timeout_seconds)
     while time.monotonic() < deadline:
+        # A test/launcher may own the target as a direct child. On POSIX an
+        # exited child remains addressable by kill(pid, 0) until it is reaped,
+        # so observe that terminal state first. For the normal unrelated
+        # desktop process, waitpid raises ChildProcessError and polling remains
+        # read-only.
+        try:
+            exited_pid, _status = os.waitpid(pid, getattr(os, "WNOHANG", 1))
+            if exited_pid == pid:
+                return True
+        except ChildProcessError:
+            pass
         try:
             os.kill(pid, 0)
         except OSError:

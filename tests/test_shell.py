@@ -2647,6 +2647,15 @@ class ShellApiTests(unittest.TestCase):
             child.terminate()
             child.wait(timeout=5)
 
+    def test_posix_process_wait_recognizes_and_reaps_an_exited_owned_child(self):
+        with patch("vram_radar.shell.sys.platform", "darwin"), patch(
+            "vram_radar.shell.os.waitpid", return_value=(4321, 0)
+        ) as waitpid, patch("vram_radar.shell.os.kill") as kill:
+            self.assertTrue(_wait_for_process_exit(4321, timeout_seconds=0.1))
+
+        waitpid.assert_called_once_with(4321, getattr(os, "WNOHANG", 1))
+        kill.assert_not_called()
+
     def test_invalid_activation_endpoint_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             endpoint = Path(temporary) / "local.activation.json"
