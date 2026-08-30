@@ -240,13 +240,14 @@
           </details>
           </div>
         </details>
-        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p>常用信息直接显示；密码、端口、用户名和私钥放在每台服务器的第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动左侧手柄排序；使用键盘时，聚焦手柄后按上下方向键。连接与登录细节仍放在第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
           <span id="server-editor-page-status" class="server-editor-page-status" aria-live="polite"></span>
           <span class="server-editor-page-actions"><button id="server-editor-previous-page" class="button compact-button" type="button">上一页</button><button id="server-editor-next-page" class="button compact-button" type="button">下一页</button></span>
         </div>
         <div id="server-editor-list" class="server-editor-list"></div>
+        <div id="server-order-status" class="sr-only" role="status" aria-live="polite"></div>
         <div id="settings-error" class="form-error" role="alert" hidden></div>
       </div>
       <footer class="dialog-footer">
@@ -263,15 +264,13 @@
   <template id="server-editor-template">
     <details class="server-editor">
       <summary class="server-editor-head">
-        <span class="server-editor-title"><span class="server-position" aria-hidden="true">1</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
+        <span class="server-editor-title"><span class="server-drag-handle" role="button" tabindex="0" draggable="true" title="拖动排序；也可按上下方向键" aria-label="拖动服务器排序" aria-describedby="server-order-instructions"><svg viewBox="0 0 16 20" aria-hidden="true" focusable="false"><circle cx="5" cy="4" r="1.25"></circle><circle cx="11" cy="4" r="1.25"></circle><circle cx="5" cy="10" r="1.25"></circle><circle cx="11" cy="10" r="1.25"></circle><circle cx="5" cy="16" r="1.25"></circle><circle cx="11" cy="16" r="1.25"></circle></svg></span><span class="server-position" aria-hidden="true">01</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
         <span class="summary-action"><span class="when-closed">编辑</span><span class="when-open">收起</span></span>
       </summary>
       <div class="server-editor-body">
         <div class="server-editor-actions">
           <button class="test-server-connection button" type="button">测试连接</button>
           <button class="toggle-server-enabled button" type="button" aria-pressed="true">暂停监控</button>
-          <button class="move-server-up button order-button" type="button" title="向上移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 14 5-5 5 5"></path></svg><span>上移</span></button>
-          <button class="move-server-down button order-button" type="button" title="向下移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"></path></svg><span>下移</span></button>
           <button class="remove-server button danger" type="button">移除</button>
         </div>
       <div class="field-grid">

@@ -141,11 +141,11 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn('<section class="module-section">', self.javascript)
         self.assertNotIn("GPU 集群状态", self.javascript)
         for style in (
-            ".server-name { margin: 0; font-family: var(--display-font); font-size: 21px",
+            ".server-name { margin: 0; font-family: var(--display-font); font-size: 20px",
             ".cluster-heading h4 { margin: 0; font-family: var(--display-font); font-size: 16px",
             ".task-owner-heading h5 { margin: 0; font-family: var(--display-font); font-size: 14.5px",
             ".task-period-head h6 { margin: 0; font-family: var(--display-font); font-size: 13px",
-            ".cluster-module { margin: 10px 14px 0",
+            ".cluster-module { margin: 8px 12px 0",
             ".task-owner-stack { display: grid; gap: 8px; margin-left: 5px",
         ):
             self.assertIn(style, self.styles)
@@ -199,7 +199,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
-            ".server-head { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(360px, auto)",
+            ".server-head { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(340px, auto)",
             ".account-overview { grid-column: 2; min-width: 0; display: flex",
             ".server-head-controls { grid-column: 3; min-width: 0; display: flex",
             ".server-status { display: inline-flex",
@@ -220,20 +220,51 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertNotIn("server.ssh_alias", account_presentation + server_header)
 
-    def test_server_order_can_be_changed_and_saved_from_settings(self):
-        for selector in ("move-server-up", "move-server-down", "server-position"):
+    def test_server_order_uses_direct_dragging_with_keyboard_fallback(self):
+        for selector in ("server-drag-handle", "server-position", "server-order-status"):
             self.assertIn(selector, self.markup)
+        self.assertIn('draggable="true"', self.markup)
+        self.assertIn("聚焦手柄后按上下方向键", self.markup)
+        self.assertNotIn("move-server-up", self.markup)
+        self.assertNotIn("move-server-down", self.markup)
         for text in (
             "function refreshServerEditorOrder",
             "function moveServerEditor",
-            "[settingsServerDrafts[index], settingsServerDrafts[target]]",
+            "function reorderServerDraft",
+            "function setupServerEditorDrag",
+            "settingsServerDrafts.splice",
+            "'dragstart'",
+            "'dragover'",
+            "'drop'",
+            "'ArrowUp'",
+            "'ArrowDown'",
+            "focusDragHandle: true",
             "const SERVER_EDITOR_PAGE_SIZE = 20",
             "function renderServerEditorPage",
             "querySelectorAll('.server-editor')",
         ):
             self.assertIn(text, self.javascript)
+        self.assertIn("const sortable = !settingsServerQuery", self.javascript)
         self.assertIn(".server-editor-actions", self.styles)
-        self.assertIn(".order-button:disabled", self.styles)
+        self.assertIn(".server-drag-handle", self.styles)
+        self.assertIn(".server-editor.drag-over-before", self.styles)
+        self.assertNotIn(".order-button", self.styles)
+
+    def test_global_layout_density_keeps_one_clear_visual_hierarchy(self):
+        for contract in (
+            "--font-body: 15px",
+            ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 62px",
+            ".button { min-height: 36px",
+            "main { grid-column: 1; width: 100%; max-width: 1320px",
+            ".capacity-metric { min-height: 174px",
+            ".server-card { display: grid; grid-template-columns: 46px",
+            ".server-head { display: grid; grid-template-columns:",
+            "dialog { width: min(1020px",
+            ".dialog-content { min-width: 0; padding: 16px",
+            ".server-editor-list { display: grid; gap: 8px; }",
+        ):
+            self.assertIn(contract, self.styles)
+        self.assertIn(".first-run-benefits::before { content: none; }", self.styles)
 
     def test_automatic_catalog_action_discovers_and_imports_in_one_step(self):
         self.assertIn("自动发现并导入", self.markup)
@@ -357,7 +388,8 @@ class WebUiContractTests(unittest.TestCase):
             "function invalidServerDraft",
             "function revealInvalidServerDraft",
             "settingsServerDrafts = []",
-            "index === settingsServerDrafts.length - 1",
+            "const sortable = !settingsServerQuery",
+            "function reorderServerDraft",
             "服务器 ID 与前面的服务器重复",
         ):
             self.assertIn(contract, self.javascript)
@@ -534,11 +566,15 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertNotIn("server.host", search_index)
         self.assertNotIn("ssh_alias", search_index)
-        self.assertNotIn("addEventListener('keydown'", self.javascript)
+        navigator_events = self.javascript[
+            self.javascript.index("ui.serverNavigatorDrag.addEventListener('pointerdown'"):
+            self.javascript.index("ui.previousServer.addEventListener('click'")
+        ]
+        self.assertNotIn("addEventListener('keydown'", navigator_events)
         self.assertNotIn('id="server-navigator-position" class="server-navigator-position" aria-live=', self.markup)
         self.assertIn('id="server-navigator-status" class="sr-only" role="status" aria-live="polite"', self.markup)
         self.assertIn('已定位到服务器 ${server.display_name}', self.javascript)
-        self.assertIn("scroll-margin-top: 84px", self.styles)
+        self.assertIn("scroll-margin-top: 78px", self.styles)
         self.assertIn("@media (max-width: 900px)", self.styles)
         self.assertIn("--navigator-panel-width: clamp(206px, 17vw, 224px)", self.styles)
         self.assertIn("--navigator-rail-width: 40px", self.styles)
@@ -735,14 +771,14 @@ class WebUiContractTests(unittest.TestCase):
         self.assertLess(editor_template.index('<details class="ssh-key-setup">'), body_end)
         self.assertIn('<details class="server-editor-more">', self.markup)
         self.assertIn("登录与高级设置", self.markup)
-        self.assertIn("密码、端口、用户名和私钥放在每台服务器的第二层设置中", self.markup)
+        self.assertIn("连接与登录细节仍放在第二层设置中", self.markup)
         self.assertIn('data-server-editor-name', self.markup)
         self.assertIn('data-auth-overview', self.markup)
         self.assertIn("refreshEditorName", self.javascript)
         self.assertIn("authOverview.textContent", self.javascript)
         for selector in (".settings-section", ".server-editor-more", ".server-editor-more-body"):
             self.assertIn(selector, self.styles)
-        self.assertIn("if (editor) editor.open = true", self.javascript)
+        self.assertIn("if (editor && !options.focusDragHandle) editor.open = true", self.javascript)
 
     def test_server_editor_exposes_config_source_and_preserves_hidden_advanced_fields(self):
         self.assertIn('data-field="ssh_config_file"', self.markup)
@@ -1264,13 +1300,13 @@ class WebUiContractTests(unittest.TestCase):
             "--display-font:",
             "--mono-font:",
             "--data-font: var(--mono-font)",
-            "--font-body: 16px",
+            "--font-body: 15px",
             "font-family: var(--ui-font)",
             "code, pre, kbd, samp { font-family: var(--mono-font); }",
             "html::-webkit-scrollbar",
             "scrollbar-color: var(--scrollbar-thumb) transparent",
             "scrollbar-gutter: stable",
-            ".dialog-content { min-width: 0; padding: 20px; overflow-x: hidden; overflow-y: auto; }",
+            ".dialog-content { min-width: 0; padding: 16px; overflow-x: hidden; overflow-y: auto; }",
             ".notice-copy, .error-copy, .form-error, .toast",
             "overflow-wrap: anywhere",
             ".account-home strong { max-width: min(620px, 62vw); overflow: visible",

@@ -19,6 +19,7 @@ const ui = {
   editorPageStatus: document.getElementById('server-editor-page-status'),
   editorPreviousPage: document.getElementById('server-editor-previous-page'),
   editorNextPage: document.getElementById('server-editor-next-page'),
+  serverOrderStatus: document.getElementById('server-order-status'),
   profileName: document.getElementById('profile-name'),
   refreshSeconds: document.getElementById('refresh-seconds'),
   language: document.getElementById('ui-language'),
@@ -102,6 +103,7 @@ let settingsServerDrafts = [];
 let settingsServerQuery = '';
 let settingsServerPageOffset = 0;
 let settingsSaveInFlight = false;
+let draggedServerDraftIndex = -1;
 let pendingIgnoredSshAliases = new Set();
 let dashboardDisclosureMode = 'default';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -2251,14 +2253,34 @@ function refreshServerEditorOrder() {
   editors.forEach(editor => {
     const index = serverDraftIndexFromEditor(editor);
     const position = index + 1;
-    editor.querySelector('.server-position').textContent = number(position);
-    const up = editor.querySelector('.move-server-up');
-    const down = editor.querySelector('.move-server-down');
-    up.disabled = index <= 0;
-    down.disabled = index < 0 || index === settingsServerDrafts.length - 1;
-    up.setAttribute('aria-label', `将第 ${position} 台服务器向上移动`);
-    down.setAttribute('aria-label', `将第 ${position} 台服务器向下移动`);
+    editor.querySelector('.server-position').textContent = String(position).padStart(2, '0');
+    const handle = editor.querySelector('.server-drag-handle');
+    const sortable = !settingsServerQuery && settingsServerDrafts.length > 1 && index >= 0;
+    handle.draggable = sortable;
+    handle.tabIndex = sortable ? 0 : -1;
+    handle.setAttribute('aria-disabled', String(!sortable));
+    handle.setAttribute('aria-label', settingsServerQuery
+      ? '清除搜索后可排序'
+      : settingsServerDrafts.length <= 1
+        ? '仅一台服务器，无需排序'
+        : `拖动第 ${position} 台服务器排序；按上下方向键微调`);
   });
+}
+
+function announceServerOrder(index) {
+  const draft = settingsServerDrafts[index];
+  if (!draft) return;
+  const name = String(draft.display_name || draft.ssh_alias || draft.id || '服务器');
+  ui.serverOrderStatus.textContent = `${name} 已移动到第 ${number(index + 1)} 位`;
+}
+
+function reorderServerDraft(sourceIndex, insertionIndex) {
+  if (sourceIndex < 0 || sourceIndex >= settingsServerDrafts.length) return -1;
+  const boundedInsertion = Math.max(0, Math.min(insertionIndex, settingsServerDrafts.length));
+  const [draft] = settingsServerDrafts.splice(sourceIndex, 1);
+  const adjustedInsertion = sourceIndex < boundedInsertion ? boundedInsertion - 1 : boundedInsertion;
+  settingsServerDrafts.splice(adjustedInsertion, 0, draft);
+  return adjustedInsertion;
 }
 
 function moveServerEditor(editor, direction) {
@@ -2266,11 +2288,78 @@ function moveServerEditor(editor, direction) {
   const index = serverDraftIndexFromEditor(editor);
   const target = index + direction;
   if (!settingsServerDrafts[index] || !settingsServerDrafts[target]) return;
-  [settingsServerDrafts[index], settingsServerDrafts[target]] = [settingsServerDrafts[target], settingsServerDrafts[index]];
+  const movedIndex = reorderServerDraft(index, direction > 0 ? target + 1 : target);
   settingsServerQuery = '';
   ui.editorSearch.value = '';
-  settingsServerPageOffset = Math.floor(target / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
-  renderServerEditorPage({focusDraftIndex: target});
+  settingsServerPageOffset = Math.floor(movedIndex / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
+  renderServerEditorPage({focusDraftIndex: movedIndex, focusDragHandle: true});
+  announceServerOrder(movedIndex);
+}
+
+function clearServerEditorDropIndicators() {
+  ui.editorList.querySelectorAll('.server-editor').forEach(editor => {
+    editor.classList.remove('drag-over-before', 'drag-over-after');
+  });
+}
+
+function clearServerEditorDraggingState() {
+  ui.editorList.querySelectorAll('.server-editor.dragging').forEach(editor => editor.classList.remove('dragging'));
+}
+
+function setupServerEditorDrag(editor) {
+  const handle = editor.querySelector('.server-drag-handle');
+  handle.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    event.stopPropagation();
+    moveServerEditor(editor, event.key === 'ArrowUp' ? -1 : 1);
+  });
+  handle.addEventListener('dragstart', event => {
+    if (handle.getAttribute('aria-disabled') === 'true') {
+      event.preventDefault();
+      return;
+    }
+    syncVisibleServerDrafts();
+    draggedServerDraftIndex = serverDraftIndexFromEditor(editor);
+    editor.classList.add('dragging');
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(editor.dataset.originalId || draggedServerDraftIndex));
+    }
+  });
+  handle.addEventListener('dragend', () => {
+    draggedServerDraftIndex = -1;
+    clearServerEditorDropIndicators();
+    clearServerEditorDraggingState();
+  });
+  editor.addEventListener('dragover', event => {
+    if (draggedServerDraftIndex < 0 || settingsServerQuery) return;
+    const targetIndex = serverDraftIndexFromEditor(editor);
+    if (targetIndex < 0 || targetIndex === draggedServerDraftIndex) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    const after = event.clientY >= editor.getBoundingClientRect().top + editor.getBoundingClientRect().height / 2;
+    clearServerEditorDropIndicators();
+    editor.classList.add(after ? 'drag-over-after' : 'drag-over-before');
+  });
+  editor.addEventListener('drop', event => {
+    if (draggedServerDraftIndex < 0 || settingsServerQuery) return;
+    event.preventDefault();
+    syncVisibleServerDrafts();
+    const targetIndex = serverDraftIndexFromEditor(editor);
+    const after = event.clientY >= editor.getBoundingClientRect().top + editor.getBoundingClientRect().height / 2;
+    const movedIndex = reorderServerDraft(draggedServerDraftIndex, targetIndex + (after ? 1 : 0));
+    draggedServerDraftIndex = -1;
+    clearServerEditorDropIndicators();
+    clearServerEditorDraggingState();
+    settingsServerPageOffset = Math.floor(movedIndex / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
+    renderServerEditorPage({focusDraftIndex: movedIndex, focusDragHandle: true});
+    announceServerOrder(movedIndex);
+  });
 }
 
 function sshAliasKey(value) {
@@ -2531,8 +2620,7 @@ function addServerEditor(server = {}, options = {}) {
   editor.querySelector('[data-field="backend"]').addEventListener('change', refreshCapabilities);
   editor.querySelector('.test-server-connection').addEventListener('click', () => void testServerEditorConnection(editor));
   editor.querySelector('.toggle-server-enabled').addEventListener('click', () => void toggleEditorEnabled(editor));
-  editor.querySelector('.move-server-up').addEventListener('click', () => moveServerEditor(editor, -1));
-  editor.querySelector('.move-server-down').addEventListener('click', () => moveServerEditor(editor, 1));
+  setupServerEditorDrag(editor);
   editor.querySelector('.remove-server').addEventListener('click', () => {
     syncVisibleServerDrafts();
     const wasSaved = (currentProfile?.servers || []).some(item => item.id === editor.dataset.originalId);
@@ -2586,9 +2674,9 @@ function renderServerEditorPage(options = {}) {
   refreshServerEditorOrder();
   if (Number.isInteger(options.focusDraftIndex)) {
     const editor = ui.editorList.querySelector(`[data-draft-index="${options.focusDraftIndex}"]`);
-    if (editor) editor.open = true;
+    if (editor && !options.focusDragHandle) editor.open = true;
     editor?.scrollIntoView({behavior: 'smooth', block: 'center'});
-    editor?.querySelector('[data-field="display_name"]')?.focus({preventScroll: true});
+    editor?.querySelector(options.focusDragHandle ? '.server-drag-handle' : '[data-field="display_name"]')?.focus({preventScroll: true});
   }
 }
 

@@ -29,6 +29,18 @@ the configuration-state and Harness-catalog gaps found during the 0.7.0 review.
 - Genuine offline, authentication, Host Key, and invalid-configuration failures
   keep their existing actionable error states.
 
+### Direct ordering and global interface polish
+
+- Added servers can now be reordered directly by dragging the handle at the
+  left of each row. Keyboard users can focus the same handle and press Up or
+  Down; search temporarily disables ordering so the result is unambiguous.
+- Removed the repetitive move-up and move-down controls and tightened the full
+  application layout—not only Settings—with more consistent spacing, type
+  hierarchy, button weight, color, and visual emphasis.
+- Server, GPU, process, task, setup, and update details remain available; the
+  polish reduces decoration and redundant actions rather than hiding useful
+  information.
+
 ### Server catalog compatibility
 
 - Portable Harness `servers.toml` versions 2 and 3 are accepted. The current
@@ -73,6 +85,15 @@ security globally.
 - 新保存的服务器在建立第一份 SSH、后端和 GPU 有效快照期间显示“正在配置中”
   及进度说明，不再在验证尚未结束时使用错误面板。
 - 真正的网络、认证、Host Key 和无效配置问题仍保留原有可操作错误状态。
+
+### 直接排序与全局界面微调
+
+- “已添加的服务器”现在可直接拖动每行左侧手柄排序；键盘用户聚焦同一手柄后可按
+  上下方向键。搜索期间会暂时禁用排序，避免局部结果中的顺序含义不清。
+- 移除了重复的“上移 / 下移”操作，并统一微调整个应用，而不只是设置页：布局密度、
+  留白、字体层级、按钮权重、配色和视觉重点现在更一致。
+- 服务器、GPU、进程、任务、配置与更新等有效信息仍完整保留；此次调整减少的是装饰
+  和冗余操作，不会以隐藏重要内容换取简洁。
 
 ### 服务器 catalog 兼容性
 

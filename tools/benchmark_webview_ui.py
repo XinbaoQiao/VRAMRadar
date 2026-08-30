@@ -605,7 +605,41 @@ BENCHMARK_JAVASCRIPT = r"""
     firstPassword.value = 'benchmark-secret';
     firstPassword.dispatchEvent(new Event('input', {bubbles: true}));
     const detachedFirstEditor = editors[0];
-    const firstPageLastDownDisabled = editors.at(-1).querySelector('.move-server-down').disabled;
+    const firstPageHandlesSortable = editors.every(editor =>
+      editor.querySelector('.server-drag-handle')?.getAttribute('aria-disabled') === 'false'
+    );
+    const firstDraftIdBeforeReorder = settingsServerDrafts[0].id;
+    const secondDraftIdBeforeReorder = settingsServerDrafts[1].id;
+    const dragTransfer = new DataTransfer();
+    const dragTargetBounds = editors[1].getBoundingClientRect();
+    editors[0].querySelector('.server-drag-handle').dispatchEvent(new DragEvent('dragstart', {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: dragTransfer,
+    }));
+    editors[1].dispatchEvent(new DragEvent('dragover', {
+      bubbles: true,
+      cancelable: true,
+      clientY: dragTargetBounds.bottom - 1,
+      dataTransfer: dragTransfer,
+    }));
+    editors[1].dispatchEvent(new DragEvent('drop', {
+      bubbles: true,
+      cancelable: true,
+      clientY: dragTargetBounds.bottom - 1,
+      dataTransfer: dragTransfer,
+    }));
+    const directDragEventsReorder = settingsServerDrafts[0].id === secondDraftIdBeforeReorder
+      && settingsServerDrafts[1].id === firstDraftIdBeforeReorder
+      && ui.editorList.querySelector('.server-editor [data-field="id"]')?.value === secondDraftIdBeforeReorder;
+    reorderServerDraft(1, 0);
+    settingsServerPageOffset = 0;
+    renderServerEditorPage();
+    const helperMovedIndex = reorderServerDraft(0, 2);
+    const directReorderHelperWorks = helperMovedIndex === 1
+      && settingsServerDrafts[0].id === secondDraftIdBeforeReorder
+      && settingsServerDrafts[1].id === firstDraftIdBeforeReorder;
+    reorderServerDraft(helperMovedIndex, 0);
     const settingsDomNodes = ui.dialog.querySelectorAll('*').length;
     ui.editorNextPage.click();
     const secondPageEditors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
@@ -616,9 +650,13 @@ BENCHMARK_JAVASCRIPT = r"""
     settingsServerPageOffset = 100;
     renderServerEditorPage();
     const finalPageEditors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
-    const finalPageLastDownDisabled = finalPageEditors.at(-1).querySelector('.move-server-down').disabled;
+    const finalPageHandlesSortable = finalPageEditors.every(editor =>
+      editor.querySelector('.server-drag-handle')?.getAttribute('aria-disabled') === 'false'
+    );
     ui.editorSearch.value = 'synthetic-119';
     ui.editorSearch.dispatchEvent(new Event('input', {bubbles: true}));
+    const searchedHandlesDisabled = [...ui.editorList.querySelectorAll('.server-drag-handle')]
+      .every(handle => handle.getAttribute('aria-disabled') === 'true');
     const searchedIds = [...ui.editorList.querySelectorAll(':scope > .server-editor')]
       .map(editor => editor.querySelector('[data-field="id"]')?.value || '');
     const collectedProfile = collectProfile();
@@ -678,9 +716,12 @@ BENCHMARK_JAVASCRIPT = r"""
       settings_editor_body_owns_all_controls: editorBodiesOwnAllControls,
       settings_primary_groups_start_collapsed: primarySettingsGroupsStartCollapsed,
       settings_first_page_ids_remain_unique: new Set(editorIds).size === 20,
-      settings_first_page_boundary_allows_cross_page_move: firstPageLastDownDisabled === false,
+      settings_first_page_handles_are_directly_sortable: firstPageHandlesSortable,
+      settings_drag_event_chain_reorders_directly: directDragEventsReorder,
+      settings_direct_reorder_helper_preserves_identity: directReorderHelperWorks,
       settings_second_page_is_distinct: secondPageIds.length === 20 && secondPageIds[0] !== editorIds[0],
-      settings_final_global_item_disables_move_down: finalPageLastDownDisabled === true,
+      settings_final_page_handles_remain_sortable: finalPageHandlesSortable,
+      settings_search_disables_ambiguous_reordering: searchedHandlesDisabled,
       settings_detached_editor_sync_uses_stable_identity: detachedEditorSyncUsesStableIdentity,
       settings_stale_close_event_preserves_open_session: staleClosePreservesOpenSession,
       settings_search_renders_only_match: searchedIds.length === 1 && searchedIds[0] === 'synthetic-119',

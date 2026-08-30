@@ -86,6 +86,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 - Drag the navigator between the left and right edges; the preference survives restarts and application updates.
 - Render at most 50 server cards per main page and 80 navigator items per window.
 - Search server settings and render only 20 editable forms per page; closing Settings releases those form nodes.
+- Reorder added servers directly by dragging the Settings handle; keyboard users can focus the same handle and press Up or Down.
 - For Slurm clusters above 64 nodes or 256 GPUs, show model, partition, and capacity summaries before loading 75 node rows at a time.
 
 ### Start from existing SSH configuration
