@@ -57,6 +57,7 @@ class ServerCatalogTests(unittest.TestCase):
                 encoding="utf-8",
             )
             original_resolve = Path.resolve
+            original_readlink = os.readlink
 
             def resolve(path: Path, strict: bool = False) -> Path:
                 try:
@@ -72,7 +73,7 @@ class ServerCatalogTests(unittest.TestCase):
 
             def readlink(path: str | Path) -> str:
                 if Path(path) != ssh_link:
-                    raise OSError("not a reparse point")
+                    return original_readlink(path)
                 return str(ssh_target)
 
             environment = {
