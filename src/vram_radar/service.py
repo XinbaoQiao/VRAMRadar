@@ -316,6 +316,101 @@ def recommend_resources(
     }
 
 
+def favorite_resource_matches(
+    snapshot: dict[str, Any],
+    favorite_server_ids: tuple[str, ...] | list[str] | set[str],
+    min_memory_gib: float = 0,
+) -> list[dict[str, Any]]:
+    """Find live favorites with an idle GPU or enough free VRAM.
+
+    Direct SSH considers a GPU idle only when the stable process sample has no
+    allocation on it, at least 95% of its memory is free, and utilization is at
+    most 5%. Slurm uses the scheduler's free-GPU count. A positive memory
+    threshold is an additional OR condition. Stale or cached payloads never
+    qualify because only ``online`` runtime state is accepted.
+    """
+
+    required_memory = _memory_requirement(min_memory_gib)
+    favorites = {str(server_id) for server_id in favorite_server_ids}
+    if not favorites:
+        return []
+    matches: list[dict[str, Any]] = []
+    for server in snapshot.get("servers", []):
+        if (
+            str(server.get("server_id") or "") not in favorites
+            or server.get("connection", {}).get("state") != "online"
+        ):
+            continue
+        view_kind = server.get("view_kind")
+        idle_units = 0
+        memory_units = 0
+        best_free_memory = 0.0
+        if view_kind == "live-memory":
+            processes = server.get("processes") or {}
+            occupied_indices = {
+                str(allocation.get("gpu_index"))
+                for process in processes.get("active", [])
+                if isinstance(process, dict)
+                for allocation in process.get("allocations", [])
+                if isinstance(allocation, dict) and allocation.get("gpu_index") is not None
+            }
+            process_sample_supported = processes.get("supported") is True
+            for gpu in server.get("gpus", []):
+                if not isinstance(gpu, dict):
+                    continue
+                try:
+                    free_memory = max(0.0, float(gpu.get("memory_free_gib") or 0))
+                    total_memory = max(0.0, float(gpu.get("memory_total_gib") or 0))
+                    utilization = gpu.get("utilization_percent")
+                    utilization_ok = utilization is None or float(utilization) <= 5
+                except (TypeError, ValueError):
+                    continue
+                raw_gpu_index = gpu.get("gpu_index")
+                gpu_index = "" if raw_gpu_index is None else str(raw_gpu_index)
+                idle = bool(
+                    process_sample_supported
+                    and gpu_index not in occupied_indices
+                    and total_memory > 0
+                    and free_memory >= total_memory * 0.95
+                    and utilization_ok
+                )
+                memory_match = required_memory > 0 and free_memory >= required_memory
+                idle_units += int(idle)
+                memory_units += int(memory_match)
+                if idle or memory_match:
+                    best_free_memory = max(best_free_memory, free_memory)
+        elif view_kind == "scheduler":
+            rows = server.get("nodes") or server.get("node_groups") or []
+            for row in rows:
+                if not isinstance(row, dict) or _node_has_issue(row):
+                    continue
+                try:
+                    free_units = max(0, int(row.get("free_gpus") or 0))
+                    per_gpu_memory = _per_gpu_memory(row)
+                except (TypeError, ValueError):
+                    continue
+                if free_units < 1:
+                    continue
+                idle_units += free_units
+                if required_memory > 0 and per_gpu_memory >= required_memory:
+                    memory_units += free_units
+                best_free_memory = max(best_free_memory, per_gpu_memory)
+        if idle_units < 1 and memory_units < 1:
+            continue
+        matches.append(
+            {
+                "server_id": str(server.get("server_id") or ""),
+                "display_name": str(server.get("display_name") or server.get("server_id") or ""),
+                "backend": str(server.get("backend") or ""),
+                "idle_units": idle_units,
+                "memory_units": memory_units,
+                "available_memory_gib": round(best_free_memory, 2),
+            }
+        )
+    matches.sort(key=lambda item: (-item["available_memory_gib"], item["server_id"]))
+    return matches
+
+
 def _aggregate_node_groups(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
     task_ids: dict[tuple[str, str, str], set[str]] = {}

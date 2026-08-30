@@ -28,6 +28,19 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("document.documentElement.lang = language", self.localization)
         self.assertIn("english_interface_has_no_untranslated_chinese", (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"))
 
+    def test_favorite_gpu_alert_settings_are_persistent_localized_and_progressive(self):
+        self.assertIn('id="favorite-alert-enabled"', self.markup)
+        self.assertIn('id="favorite-alert-min-memory"', self.markup)
+        self.assertIn('type="number" min="0" max="1000" step="0.5"', self.markup)
+        self.assertIn("favorite_alert_enabled: ui.favoriteAlertEnabled.checked", self.javascript)
+        self.assertIn(
+            "favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0)",
+            self.javascript,
+        )
+        self.assertIn("ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked", self.javascript)
+        self.assertIn("Notify me when favorite GPUs are available", self.localization)
+        self.assertIn("Leave empty: notify only for idle GPUs", self.localization)
+
     def test_task_time_columns_are_unambiguous(self):
         self.assertIn("运行时长", self.javascript)
         self.assertIn("提交时间", self.javascript)

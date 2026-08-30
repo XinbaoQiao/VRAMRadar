@@ -90,6 +90,8 @@ class ModelStorageTests(unittest.TestCase):
         self.assertEqual(profile.close_behavior, "tray")
         self.assertEqual(profile.ui_language, "zh-CN")
         self.assertEqual(profile.favorite_server_ids, ())
+        self.assertFalse(profile.favorite_alert_enabled)
+        self.assertEqual(profile.favorite_alert_min_memory_gib, 0.0)
         self.assertEqual(profile.ignored_ssh_aliases, ())
         self.assertEqual(profile.saved_views, ())
 
@@ -132,6 +134,8 @@ class ModelStorageTests(unittest.TestCase):
             PROFILE,
             close_behavior="exit",
             favorite_server_ids=["gpu-1", "temporarily-missing"],
+            favorite_alert_enabled=True,
+            favorite_alert_min_memory_gib=18.5,
             saved_views=[
                 {
                     "id": "eight-h100",
@@ -152,6 +156,8 @@ class ModelStorageTests(unittest.TestCase):
 
         self.assertEqual(profile.close_behavior, "exit")
         self.assertEqual(profile.favorite_server_ids, ("gpu-1", "temporarily-missing"))
+        self.assertTrue(profile.favorite_alert_enabled)
+        self.assertEqual(profile.favorite_alert_min_memory_gib, 18.5)
         self.assertEqual(profile.saved_views[0]["gpu_count"], 8)
         self.assertEqual(profile.saved_views[0]["min_memory_gib"], 70.0)
         self.assertEqual(Profile.from_dict(serialized), profile)
@@ -163,6 +169,12 @@ class ModelStorageTests(unittest.TestCase):
             Profile.from_dict(dict(PROFILE, favorite_server_ids=["unsafe/id"]))
         with self.assertRaisesRegex(ConfigError, "must be unique"):
             Profile.from_dict(dict(PROFILE, favorite_server_ids=["gpu-1", "gpu-1"]))
+        with self.assertRaisesRegex(ConfigError, "favorite_alert_enabled"):
+            Profile.from_dict(dict(PROFILE, favorite_alert_enabled="yes"))
+        for value in (True, float("nan"), -1, 1001):
+            with self.subTest(favorite_alert_min_memory_gib=value):
+                with self.assertRaisesRegex(ConfigError, "favorite_alert_min_memory_gib"):
+                    Profile.from_dict(dict(PROFILE, favorite_alert_min_memory_gib=value))
 
     def test_saved_views_are_bounded_and_reject_unsafe_or_oversized_fields(self):
         base = {

@@ -5,6 +5,7 @@ from ctypes import wintypes
 import importlib
 import logging
 from pathlib import Path
+import subprocess
 import sys
 import threading
 import time
@@ -28,6 +29,29 @@ _REDRAW_WINDOW_AND_CHILDREN = 0x0001 | 0x0004 | 0x0080 | 0x0100
 
 _hidden_notification_lock = threading.Lock()
 _hidden_notification_sent = False
+
+
+def show_macos_notification(title: str, message: str) -> bool:
+    """Display one macOS notification without interpolating user text into AppleScript."""
+
+    script = (
+        "on run argv\n"
+        "display notification (item 2 of argv) with title (item 1 of argv)\n"
+        "end run"
+    )
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/osascript", "-e", script, "--", str(title), str(message)],
+            close_fds=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return completed.returncode == 0
+    except (OSError, subprocess.SubprocessError) as exc:
+        logging.getLogger("vram_radar").warning("failed to show a macOS notification: %s", exc)
+        return False
 
 
 class _WindowRect(ctypes.Structure):

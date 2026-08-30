@@ -338,6 +338,8 @@ class Profile:
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
     favorite_server_ids: tuple[str, ...] = ()
+    favorite_alert_enabled: bool = False
+    favorite_alert_min_memory_gib: float = 0.0
     saved_views: tuple[dict[str, Any], ...] = ()
     schema_version: int = 1
 
@@ -410,6 +412,19 @@ class Profile:
         )
         if len(favorites) != len(set(favorites)):
             raise ConfigError("profile favorite_server_ids must be unique")
+        favorite_alert_enabled = raw.get("favorite_alert_enabled", False)
+        if not isinstance(favorite_alert_enabled, bool):
+            raise ConfigError("profile favorite_alert_enabled must be true or false")
+        favorite_alert_min_memory = raw.get("favorite_alert_min_memory_gib", 0)
+        if (
+            isinstance(favorite_alert_min_memory, bool)
+            or not isinstance(favorite_alert_min_memory, (int, float))
+            or not math.isfinite(float(favorite_alert_min_memory))
+            or not 0 <= float(favorite_alert_min_memory) <= 1000
+        ):
+            raise ConfigError(
+                "profile favorite_alert_min_memory_gib must be between 0 and 1000"
+            )
         saved_view_rows = raw.get("saved_views", [])
         if not isinstance(saved_view_rows, (list, tuple)):
             raise ConfigError("profile saved_views must be an array")
@@ -435,6 +450,8 @@ class Profile:
             close_behavior=close_behavior.strip().lower(),
             ui_language=ui_language.strip(),
             favorite_server_ids=favorites,
+            favorite_alert_enabled=favorite_alert_enabled,
+            favorite_alert_min_memory_gib=float(favorite_alert_min_memory),
             saved_views=saved_views,
         )
 
@@ -451,6 +468,8 @@ class Profile:
             "close_behavior": self.close_behavior,
             "ui_language": self.ui_language,
             "favorite_server_ids": list(self.favorite_server_ids),
+            "favorite_alert_enabled": self.favorite_alert_enabled,
+            "favorite_alert_min_memory_gib": self.favorite_alert_min_memory_gib,
             "saved_views": [dict(view) for view in self.saved_views],
             "servers": [server.to_dict() for server in self.servers],
         }

@@ -11,6 +11,7 @@ from vram_radar.models import Profile
 from vram_radar.service import (
     DashboardService,
     connection_fingerprint,
+    favorite_resource_matches,
     recommend_resources,
 )
 from vram_radar.storage import SnapshotCache, storage_paths
@@ -94,6 +95,114 @@ def scheduler_payload(node_count: int = 1000) -> dict:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_favorite_resource_matches_live_direct_idle_or_memory_threshold(self):
+        snapshot = {
+            "servers": [
+                {
+                    "server_id": "favorite",
+                    "display_name": "Favorite GPU",
+                    "backend": "direct_ssh",
+                    "view_kind": "live-memory",
+                    "connection": {"state": "online"},
+                    "processes": {
+                        "supported": True,
+                        "active": [{"allocations": [{"gpu_index": 1}]}],
+                    },
+                    "gpus": [
+                        {
+                            "gpu_index": 0,
+                            "memory_total_gib": 24,
+                            "memory_free_gib": 24,
+                            "utilization_percent": 0,
+                        },
+                        {
+                            "gpu_index": 1,
+                            "memory_total_gib": 24,
+                            "memory_free_gib": 12,
+                            "utilization_percent": 90,
+                        },
+                    ],
+                },
+                {
+                    "server_id": "not-favorite",
+                    "view_kind": "live-memory",
+                    "connection": {"state": "online"},
+                    "processes": {"supported": True, "active": []},
+                    "gpus": [{"gpu_index": "0", "memory_total_gib": 80, "memory_free_gib": 80}],
+                },
+                {
+                    "server_id": "stale-favorite",
+                    "view_kind": "live-memory",
+                    "connection": {"state": "stale"},
+                    "processes": {"supported": True, "active": []},
+                    "gpus": [{"gpu_index": "0", "memory_total_gib": 80, "memory_free_gib": 80}],
+                },
+            ]
+        }
+
+        matches = favorite_resource_matches(
+            snapshot,
+            {"favorite", "stale-favorite"},
+            min_memory_gib=10,
+        )
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["server_id"], "favorite")
+        self.assertEqual(matches[0]["idle_units"], 1)
+        self.assertEqual(matches[0]["memory_units"], 2)
+        self.assertEqual(matches[0]["available_memory_gib"], 24)
+
+    def test_favorite_resource_requires_stable_process_sample_for_direct_idle(self):
+        snapshot = {
+            "servers": [{
+                "server_id": "favorite",
+                "view_kind": "live-memory",
+                "connection": {"state": "online"},
+                "processes": {"supported": False, "active": []},
+                "gpus": [{
+                    "gpu_index": "0",
+                    "memory_total_gib": 24,
+                    "memory_free_gib": 24,
+                    "utilization_percent": 0,
+                }],
+            }]
+        }
+
+        self.assertEqual(favorite_resource_matches(snapshot, {"favorite"}), [])
+        self.assertEqual(
+            favorite_resource_matches(snapshot, {"favorite"}, min_memory_gib=20)[0]["memory_units"],
+            1,
+        )
+
+    def test_favorite_resource_matches_large_scheduler_groups_and_skips_issues(self):
+        snapshot = {
+            "servers": [{
+                "server_id": "cluster",
+                "display_name": "Large Cluster",
+                "backend": "slurm",
+                "view_kind": "scheduler",
+                "connection": {"state": "online"},
+                "node_groups": [
+                    {
+                        "state": "idle",
+                        "free_gpus": 8,
+                        "free_vram_gib": 640,
+                    },
+                    {
+                        "state": "down",
+                        "free_gpus": 4,
+                        "memory_per_gpu_gib": 80,
+                    },
+                ],
+            }]
+        }
+
+        matches = favorite_resource_matches(snapshot, {"cluster"}, min_memory_gib=70)
+
+        self.assertEqual(matches[0]["idle_units"], 8)
+        self.assertEqual(matches[0]["memory_units"], 8)
+        self.assertEqual(matches[0]["available_memory_gib"], 80)
+
     def test_saved_password_is_loaded_only_for_its_server_query(self):
         secured = Profile.from_dict(
             {

@@ -23,6 +23,8 @@ const ui = {
   refreshSeconds: document.getElementById('refresh-seconds'),
   language: document.getElementById('ui-language'),
   closeBehavior: document.getElementById('close-behavior'),
+  favoriteAlertEnabled: document.getElementById('favorite-alert-enabled'),
+  favoriteAlertMinMemory: document.getElementById('favorite-alert-min-memory'),
   copyDiagnostics: document.getElementById('copy-diagnostics'),
   openLogsDirectory: document.getElementById('open-logs-directory'),
   settingsError: document.getElementById('settings-error'),
@@ -2717,6 +2719,11 @@ function openSettings(options = {}) {
   ui.refreshSeconds.value = currentProfile?.refresh_seconds || 15;
   ui.language.value = currentProfile?.ui_language === 'en' ? 'en' : 'zh-CN';
   ui.closeBehavior.value = currentProfile?.close_behavior === 'exit' ? 'exit' : 'tray';
+  ui.favoriteAlertEnabled.checked = Boolean(currentProfile?.favorite_alert_enabled);
+  ui.favoriteAlertMinMemory.value = Number(currentProfile?.favorite_alert_min_memory_gib) > 0
+    ? String(currentProfile.favorite_alert_min_memory_gib)
+    : '';
+  ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;
   ui.serverConfigPath.value = currentProfile?.server_config_path || '';
   ui.autoSyncServers.checked = Boolean(currentProfile?.auto_sync_servers);
   pendingIgnoredSshAliases = new Set(currentProfile?.ignored_ssh_aliases || []);
@@ -2819,6 +2826,8 @@ function collectProfile() {
     navigator_side: serverNavigatorSide,
     close_behavior: ui.closeBehavior.value,
     ui_language: ui.language.value,
+    favorite_alert_enabled: ui.favoriteAlertEnabled.checked,
+    favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0),
     servers,
   };
 }
@@ -3226,6 +3235,9 @@ ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
 ui.language.addEventListener('change', () => {
   window.VRAMRadarI18n?.setLanguage(ui.language.value);
+});
+ui.favoriteAlertEnabled.addEventListener('change', () => {
+  ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;
 });
 ui.editorSearch.addEventListener('input', () => {
   syncVisibleServerDrafts();

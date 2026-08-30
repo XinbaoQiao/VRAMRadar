@@ -529,6 +529,12 @@ input, select { width: 100%; min-height: 40px; border: 1px solid var(--border); 
 .settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .settings-section-heading h3 { margin: 0; font-size: 17px; line-height: 1.35; }
 .settings-section-heading p { margin: 3px 0 0; color: var(--muted); font-size: var(--font-small); }
+.favorite-alert-setting { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, .8fr); align-items: center; gap: 13px; margin-top: 12px; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.favorite-alert-setting .check-label { align-items: flex-start; margin: 0; }
+.favorite-alert-setting .check-label input { margin-top: 3px; }
+.favorite-alert-setting .check-label span { display: grid; gap: 2px; }
+.favorite-alert-setting .check-label strong { color: var(--text); font-size: var(--font-small); }
+.favorite-alert-setting .check-label small { color: var(--muted); font-size: var(--font-caption); line-height: 1.45; }
 .local-tools { margin-top: 12px; }
 .local-tools-actions { display: flex; align-items: center; gap: 8px; padding: 10px; border-top: 1px solid var(--border); background: var(--surface); }
 .local-only-badge { display: inline-flex; min-height: 26px; align-items: center; padding: 3px 8px; color: var(--green-text); background: color-mix(in srgb, var(--green) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--green) 28%, var(--border)); border-radius: var(--radius-sm); font-family: var(--data-font); font-size: var(--font-caption); font-weight: 700; white-space: nowrap; }
@@ -683,7 +689,7 @@ details[open] > summary > .summary-action .when-open { display: inline; }
   .first-run-benefits, .onboarding-points { grid-template-columns: 1fr; }
   .first-run-benefits span { min-height: 48px; justify-content: flex-start; }
   .dashboard-intro { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .summary, .field-grid, .matcher-fields, .matcher-more-body { grid-template-columns: 1fr; }
+  .summary, .field-grid, .favorite-alert-setting, .matcher-fields, .matcher-more-body { grid-template-columns: 1fr; }
   .capacity-metric { grid-template-columns: 1fr; }
   .capacity-visual { min-height: 174px; border-top: 1px solid var(--instrument-grid); border-left: 0; }
   .metric-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }

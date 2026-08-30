@@ -54,7 +54,7 @@ from .server_catalog import (
     resolve_server_configs,
 )
 from .secrets import SecretStore
-from .service import DashboardService
+from .service import DashboardService, favorite_resource_matches
 from .ssh_keys import (
     INSTALL_AUTHORIZED_KEY_SCRIPT,
     VERIFY_SSH_KEY_SCRIPT,
@@ -77,6 +77,7 @@ from .tray import (
     configure_windows_native_chrome,
     native_window_is_normal,
     restore_window,
+    show_macos_notification,
 )
 from .updates import check_latest_release
 from .updater import download_verified_asset, schedule_windows_update, windows_update_capability
@@ -699,6 +700,9 @@ class AppApi:
         self._latest_release: dict[str, Any] | None = None
         self._notification_callback: Callable[[str, str], bool] | None = None
         self._tray_controller: WindowsTrayController | None = None
+        self._favorite_alert_state_lock = threading.Lock()
+        self._favorite_alert_active_ids: set[str] = set()
+        self._favorite_alert_monitor_running = False
         self._key_setup_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
         self._profile_revision = 0
@@ -768,6 +772,7 @@ class AppApi:
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = updated_profile
             self._profile_revision += 1
+            self._reset_favorite_alerts_if_changed(old_profile, updated_profile)
             committed_profile = self._desktop_profile(updated_profile)
         except (OSError, ValueError, RuntimeError) as exc:
             if str(exc) == "profile_rollback_failed":
@@ -962,12 +967,16 @@ class AppApi:
             }
 
     def get_status(self, force: bool = False, server_id: str | None = None) -> dict[str, Any]:
-        return self.service.request_refresh(force=bool(force), server_id=server_id or None)
+        snapshot = self.service.request_refresh(force=bool(force), server_id=server_id or None)
+        self._evaluate_favorite_alerts(snapshot)
+        return snapshot
 
     def get_snapshot(self) -> dict[str, Any]:
         """Return the current in-memory state for cheap UI completion polling."""
 
-        return self.service.snapshot()
+        snapshot = self.service.snapshot()
+        self._evaluate_favorite_alerts(snapshot)
+        return snapshot
 
     def dismiss_notice(self, code: str) -> dict[str, Any]:
         """Dismiss one bounded runtime notice without changing saved configuration."""
@@ -982,7 +991,10 @@ class AppApi:
         """Keep collection active while the WebView is hidden without sending its payload."""
 
         snapshot = self.service.request_refresh(force=False)
+        self._evaluate_favorite_alerts(snapshot)
         monitoring = snapshot.get("monitoring") or {}
+        if monitoring.get("in_flight"):
+            self._monitor_background_refresh_for_favorite_alerts()
         return {
             "ok": True,
             "revision": monitoring.get("revision"),
@@ -996,6 +1008,133 @@ class AppApi:
         """Bind the platform notification surface without exposing it to Profile data."""
 
         self._notification_callback = callback
+        if callback is not None:
+            self._evaluate_favorite_alerts(self.service.snapshot())
+        else:
+            with self._favorite_alert_state_lock:
+                self._favorite_alert_active_ids.clear()
+
+    @staticmethod
+    def _favorite_alert_policy(profile: Profile) -> tuple[bool, float, tuple[str, ...]]:
+        return (
+            profile.favorite_alert_enabled,
+            profile.favorite_alert_min_memory_gib,
+            profile.favorite_server_ids,
+        )
+
+    def _reset_favorite_alerts_if_changed(
+        self,
+        old_profile: Profile,
+        new_profile: Profile,
+    ) -> None:
+        if self._favorite_alert_policy(old_profile) == self._favorite_alert_policy(new_profile):
+            return
+        with self._favorite_alert_state_lock:
+            self._favorite_alert_active_ids.clear()
+
+    @staticmethod
+    def _favorite_alert_copy(
+        matches: list[dict[str, Any]],
+        *,
+        language: str,
+        minimum_memory_gib: float,
+    ) -> tuple[str, str]:
+        english = language == "en"
+        rows: list[str] = []
+        for match in matches[:3]:
+            name = str(match.get("display_name") or match.get("server_id") or "GPU")
+            idle_units = max(0, int(match.get("idle_units") or 0))
+            available = max(0.0, float(match.get("available_memory_gib") or 0))
+            available_text = f"{available:.2f}".rstrip("0").rstrip(".")
+            if idle_units:
+                rows.append(
+                    f"{name}: {idle_units} idle GPU(s), up to {available_text} GiB free"
+                    if english
+                    else f"{name}：{idle_units} 张 GPU 空闲，单卡最多可用 {available_text} GiB"
+                )
+            else:
+                threshold_text = f"{minimum_memory_gib:.2f}".rstrip("0").rstrip(".")
+                rows.append(
+                    f"{name}: a GPU reached {threshold_text} GiB free"
+                    if english
+                    else f"{name}：有 GPU 空闲显存达到 {threshold_text} GiB"
+                )
+        remaining = len(matches) - len(rows)
+        if remaining > 0:
+            rows.append(
+                f"{remaining} more favorite server(s) also match"
+                if english
+                else f"另有 {remaining} 台收藏服务器也符合条件"
+            )
+        return (
+            ("Favorite GPUs are available" if english else "收藏 GPU 已可用"),
+            ("; ".join(rows) if english else "；".join(rows)),
+        )
+
+    def _evaluate_favorite_alerts(self, snapshot: dict[str, Any]) -> None:
+        with self._profile_mutation_lock:
+            profile = self.profile
+        monitoring = snapshot.get("monitoring") or {}
+        if not profile.favorite_alert_enabled or monitoring.get("paused") is True:
+            with self._favorite_alert_state_lock:
+                self._favorite_alert_active_ids.clear()
+            return
+        matches = favorite_resource_matches(
+            snapshot,
+            profile.favorite_server_ids,
+            profile.favorite_alert_min_memory_gib,
+        )
+        current_ids = {str(match["server_id"]) for match in matches}
+        callback = self._notification_callback
+        with self._favorite_alert_state_lock:
+            if callback is None:
+                self._favorite_alert_active_ids.clear()
+                return
+            newly_available = [
+                match
+                for match in matches
+                if str(match["server_id"]) not in self._favorite_alert_active_ids
+            ]
+            self._favorite_alert_active_ids = current_ids
+        if not newly_available:
+            return
+        title, message = self._favorite_alert_copy(
+            newly_available,
+            language=profile.ui_language,
+            minimum_memory_gib=profile.favorite_alert_min_memory_gib,
+        )
+        try:
+            if not callback(title, message):
+                logging.getLogger("vram_radar").warning("favorite GPU notification was not shown")
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to show favorite GPU notification")
+
+    def _monitor_background_refresh_for_favorite_alerts(self) -> None:
+        with self._favorite_alert_state_lock:
+            if self._favorite_alert_monitor_running:
+                return
+            self._favorite_alert_monitor_running = True
+
+        def monitor() -> None:
+            try:
+                deadline = time.monotonic() + 3_600
+                while time.monotonic() < deadline:
+                    snapshot = self.service.snapshot()
+                    if not isinstance(snapshot, dict):
+                        return
+                    if not snapshot.get("monitoring", {}).get("in_flight"):
+                        self._evaluate_favorite_alerts(snapshot)
+                        return
+                    time.sleep(0.25)
+            finally:
+                with self._favorite_alert_state_lock:
+                    self._favorite_alert_monitor_running = False
+
+        threading.Thread(
+            target=monitor,
+            name="vram-radar-favorite-alert",
+            daemon=True,
+        ).start()
 
     def bind_tray_controller(
         self,
@@ -1982,7 +2121,14 @@ class AppApi:
             # fields. Local usability preferences have their own endpoints and
             # must not disappear when that profile form is saved.
             persisted_profile = self.profile.to_dict()
-            for preference in ("close_behavior", "ui_language", "favorite_server_ids", "saved_views"):
+            for preference in (
+                "close_behavior",
+                "ui_language",
+                "favorite_server_ids",
+                "favorite_alert_enabled",
+                "favorite_alert_min_memory_gib",
+                "saved_views",
+            ):
                 if preference not in candidate:
                     candidate[preference] = copy.deepcopy(persisted_profile[preference])
             updates = password_updates or {}
@@ -2177,6 +2323,7 @@ class AppApi:
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = profile
             self._profile_revision += 1
+            self._reset_favorite_alerts_if_changed(old_profile, profile)
             tray_controller = self._tray_controller
             if tray_controller is not None:
                 tray_controller.refresh_menu()
@@ -2881,6 +3028,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 shutdown.bind_worker(worker)
                 tray_controller: WindowsTrayController | None = None
+                macos_notification_bound = False
                 if sys.platform == "win32" and not args.gui_smoke:
                     candidate: WindowsTrayController | None = None
 
@@ -2940,6 +3088,9 @@ def main(argv: list[str] | None = None) -> int:
                         api.bind_notification_callback(candidate.notify)
                     except Exception:
                         logging.getLogger("vram_radar").exception("failed to start the Windows notification icon")
+                elif sys.platform == "darwin" and not args.gui_smoke:
+                    api.bind_notification_callback(show_macos_notification)
+                    macos_notification_bound = True
                 non_tray_closing_handler: Callable[[], bool] | None = None
                 if tray_controller is None:
                     non_tray_closing_handler = shutdown.on_closing
@@ -2968,11 +3119,14 @@ def main(argv: list[str] | None = None) -> int:
                         api.bind_notification_callback(None)
                         api.bind_tray_controller(None)
                         tray_controller.stop()
-                    elif non_tray_closing_handler is not None:
-                        try:
-                            window.events.closing -= non_tray_closing_handler
-                        except (ValueError, AttributeError):
-                            pass
+                    else:
+                        if macos_notification_bound:
+                            api.bind_notification_callback(None)
+                        if non_tray_closing_handler is not None:
+                            try:
+                                window.events.closing -= non_tray_closing_handler
+                            except (ValueError, AttributeError):
+                                pass
                     if smoke_worker is not None:
                         smoke_worker.join(timeout=1)
                 if args.gui_smoke and not smoke_result.get("shown"):

@@ -93,6 +93,25 @@ class TrayControllerTests(unittest.TestCase):
         # so each test can independently prove its first-hide behavior.
         tray._hidden_notification_sent = False
 
+    def test_macos_notification_passes_text_as_arguments_not_applescript_source(self):
+        completed = SimpleNamespace(returncode=0)
+        title = 'GPU "Lab"'
+        message = 'A100; do shell script "unsafe"'
+
+        with patch("vram_radar.tray.subprocess.run", return_value=completed) as run:
+            shown = tray.show_macos_notification(title, message)
+
+        self.assertTrue(shown)
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/osascript")
+        self.assertEqual(command[-2:], [title, message])
+        self.assertNotIn(title, command[2])
+        self.assertNotIn(message, command[2])
+
+    def test_macos_notification_failure_is_non_fatal(self):
+        with patch("vram_radar.tray.subprocess.run", side_effect=OSError("missing")):
+            self.assertFalse(tray.show_macos_notification("GPU", "available"))
+
     def test_close_hides_but_native_minimize_remains_in_the_taskbar(self):
         hidden = threading.Event()
         window = Mock()

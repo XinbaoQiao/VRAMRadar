@@ -34,6 +34,11 @@ the one-click path.
 
 ### Configuration reliability and large-fleet usability
 
+- Favorite servers can now use one persistent GPU availability alert. The app
+  sends a native system notification when a whole GPU becomes idle or when any
+  GPU reaches an optional per-device free-VRAM threshold. Hidden-window refresh
+  remains active, cached/offline data never triggers an alert, and each
+  unavailable-to-available transition notifies only once.
 - The complete desktop interface can now switch between Simplified Chinese and
   English in Settings. The choice is stored with the local Profile and also
   updates native Windows notification-area actions; existing Profiles retain
@@ -106,6 +111,9 @@ do not disable platform security globally.
 
 ### 配置可靠性与大规模服务器体验
 
+- 收藏服务器现在可以启用持久 GPU 可用提醒：整张 GPU 空闲，或任意单卡达到
+  可选的最低空闲显存阈值时发送原生系统通知。窗口收起后仍会检测；缓存或离线数据
+  不会触发；每次从不可用变为可用只提醒一次，不会随刷新重复弹出。
 - 设置中可在简体中文和英文之间切换完整桌面界面；语言选择随本机 Profile
   持久化，并同步更新 Windows 通知区域菜单。已有 Profile 默认继续使用简体中文，
   只有用户主动切换后才会改变。

@@ -57,6 +57,50 @@ class ShellApiTests(unittest.TestCase):
         candidate["profile_revision"] = api.get_profile()["profile_revision"]
         return candidate
 
+    @staticmethod
+    def favorite_alert_profile(*, language="zh-CN", minimum_memory_gib=0):
+        return Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "ui_language": language,
+                "favorite_server_ids": ["gpu"],
+                "favorite_alert_enabled": True,
+                "favorite_alert_min_memory_gib": minimum_memory_gib,
+                "servers": [{
+                    "id": "gpu",
+                    "display_name": "A100 Lab",
+                    "backend": "direct_ssh",
+                    "host": "gpu.test",
+                }],
+            }
+        )
+
+    @staticmethod
+    def favorite_alert_snapshot(*, available=True, paused=False, in_flight=False):
+        free_memory = 24 if available else 2
+        return {
+            "monitoring": {"paused": paused, "in_flight": in_flight},
+            "servers": [{
+                "server_id": "gpu",
+                "display_name": "A100 Lab",
+                "backend": "direct_ssh",
+                "view_kind": "live-memory",
+                "connection": {"state": "online"},
+                "processes": {
+                    "supported": True,
+                    "active": [] if available else [{"allocations": [{"gpu_index": "0"}]}],
+                },
+                "gpus": [{
+                    "gpu_index": "0",
+                    "memory_total_gib": 24,
+                    "memory_free_gib": free_memory,
+                    "utilization_percent": 0 if available else 90,
+                }],
+            }],
+        }
+
     def test_status_bridge_starts_a_coalesced_background_refresh(self):
         service = Mock()
         service.request_refresh.return_value = {"monitoring": {"in_flight": True}}
@@ -78,6 +122,7 @@ class ShellApiTests(unittest.TestCase):
             "monitoring": {"revision": 17, "in_flight": True},
             "servers": [{"large": "payload"}],
         }
+        service.snapshot.return_value = {"monitoring": {"in_flight": False}, "servers": []}
         api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=service)
 
         result = api.request_background_refresh()
@@ -472,6 +517,80 @@ class ShellApiTests(unittest.TestCase):
         notify.assert_called_once_with("资源可用", "H100 已空闲")
         self.assertFalse(invalid["ok"])
         self.assertEqual(invalid["code"], "invalid_notification")
+
+    def test_favorite_alert_notifies_once_per_transition_and_resets_after_unavailable(self):
+        service = Mock()
+        service.snapshot.return_value = self.favorite_alert_snapshot(available=False)
+        api = AppApi(
+            self.favorite_alert_profile(language="en"),
+            store=Mock(),
+            paths=Mock(),
+            service=service,
+        )
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = self.favorite_alert_snapshot(available=True)
+        api.get_snapshot()
+        api.get_snapshot()
+        self.assertEqual(notify.call_count, 1)
+        self.assertEqual(notify.call_args.args[0], "Favorite GPUs are available")
+        self.assertIn("A100 Lab", notify.call_args.args[1])
+
+        service.snapshot.return_value = self.favorite_alert_snapshot(available=False)
+        api.get_snapshot()
+        service.snapshot.return_value = self.favorite_alert_snapshot(available=True)
+        api.get_snapshot()
+        self.assertEqual(notify.call_count, 2)
+
+    def test_favorite_alert_is_suppressed_while_monitoring_is_paused(self):
+        service = Mock()
+        service.snapshot.return_value = self.favorite_alert_snapshot(available=True, paused=True)
+        api = AppApi(
+            self.favorite_alert_profile(),
+            store=Mock(),
+            paths=Mock(),
+            service=service,
+        )
+        notify = Mock(return_value=True)
+
+        api.bind_notification_callback(notify)
+        api.get_snapshot()
+
+        notify.assert_not_called()
+
+    def test_hidden_refresh_notifies_after_background_collection_finishes(self):
+        service = Mock()
+        service.request_refresh.return_value = {
+            "monitoring": {"revision": 3, "in_flight": True},
+            "servers": [],
+        }
+        threshold_match = self.favorite_alert_snapshot(available=True)
+        threshold_match["servers"][0]["processes"]["active"] = [
+            {"allocations": [{"gpu_index": "0"}]}
+        ]
+        threshold_match["servers"][0]["gpus"][0]["utilization_percent"] = 90
+        service.snapshot.side_effect = [
+            self.favorite_alert_snapshot(available=False),
+            self.favorite_alert_snapshot(available=False, in_flight=True),
+            threshold_match,
+        ]
+        api = AppApi(
+            self.favorite_alert_profile(minimum_memory_gib=20),
+            store=Mock(),
+            paths=Mock(),
+            service=service,
+        )
+        notified = threading.Event()
+        notify = Mock(side_effect=lambda _title, _message: notified.set() or True)
+        api.bind_notification_callback(notify)
+
+        result = api.request_background_refresh()
+
+        self.assertTrue(result["in_flight"])
+        self.assertTrue(notified.wait(2))
+        self.assertEqual(notify.call_count, 1)
+        self.assertIn("20 GiB", notify.call_args.args[1])
 
     def test_directory_api_validates_server_id_and_delegates_to_service(self):
         service = Mock()
