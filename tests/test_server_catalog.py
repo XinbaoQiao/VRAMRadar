@@ -42,6 +42,68 @@ gpu_types = ["A100-40G"]
 
 
 class ServerCatalogTests(unittest.TestCase):
+    def test_windows_untrusted_junction_uses_kernel_reported_ssh_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            ssh_link = home / ".ssh"
+            ssh_target = root / "managed-ssh"
+            fragment = ssh_target / "config.d" / "gpu.conf"
+            config = ssh_target / "config"
+            fragment.parent.mkdir(parents=True)
+            config.write_text("Include config.d/*.conf\n", encoding="utf-8")
+            fragment.write_text(
+                "Host junction-gpu\n  HostName gpu.example\n",
+                encoding="utf-8",
+            )
+            original_resolve = Path.resolve
+
+            def resolve(path: Path, strict: bool = False) -> Path:
+                try:
+                    path.relative_to(ssh_link)
+                except ValueError:
+                    return original_resolve(path, strict=strict)
+                error = OSError(448, "untrusted mount point", str(path))
+                error.winerror = 448
+                raise error
+
+            def is_junction(path: str | Path) -> bool:
+                return Path(path) == ssh_link
+
+            def readlink(path: str | Path) -> str:
+                if Path(path) != ssh_link:
+                    raise OSError("not a reparse point")
+                return str(ssh_target)
+
+            environment = {
+                "HOME": str(home),
+                "USERPROFILE": str(home),
+                "XDG_CONFIG_HOME": str(root / "xdg"),
+                "APPDATA": "",
+                "LOCALAPPDATA": "",
+                "VRAM_RADAR_SERVERS_CONFIG": "",
+            }
+            with patch("vram_radar.server_catalog.sys.platform", "win32"), patch(
+                "vram_radar.server_catalog.Path.home", return_value=home
+            ), patch("vram_radar.server_catalog.Path.resolve", resolve), patch(
+                "vram_radar.server_catalog.os.path.isjunction", side_effect=is_junction, create=True
+            ), patch("vram_radar.server_catalog.os.readlink", side_effect=readlink), patch(
+                "vram_radar.server_catalog._candidate_roots", return_value=[]
+            ), patch(
+                "vram_radar.server_catalog._remote_ssh_config_candidates", return_value=[]
+            ), patch(
+                "vram_radar.server_catalog._system_ssh_config_candidates", return_value=[]
+            ), patch.dict(os.environ, environment, clear=False):
+                candidates = server_config_candidates(include_openssh=True)
+                existing = resolve_server_configs(include_openssh=True)
+                servers, warnings = import_openssh_config(config)
+
+        self.assertIn(config, candidates)
+        self.assertIn(config, existing)
+        self.assertIn(fragment, candidates)
+        self.assertEqual([server.ssh_alias for server in servers], ["junction-gpu"])
+        self.assertTrue(any("Include" in warning for warning in warnings))
+
     def test_import_maps_server_backends_and_memory(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "servers.toml"

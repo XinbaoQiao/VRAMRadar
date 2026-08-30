@@ -943,6 +943,78 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(notices[0]["severity"], "error")
         self.assertIn("自动同步失败", notices[0]["message"])
 
+    def test_startup_auto_sync_accepts_windows_junction_backed_user_ssh_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile_home = root / "profile-home"
+            user_home = root / "user-home"
+            ssh_link = user_home / ".ssh"
+            ssh_target = root / "managed-ssh"
+            ssh_target.mkdir(parents=True)
+            config = ssh_target / "config"
+            config.write_text(
+                "Host junction-gpu\n  HostName gpu.example\n",
+                encoding="utf-8",
+            )
+            paths = storage_paths(profile_home)
+            ProfileStore(paths).save(
+                Profile.from_dict(
+                    {
+                        "schema_version": 1,
+                        "id": "isolated",
+                        "display_name": "My GPUs",
+                        "server_config_path": str(config),
+                        "auto_sync_servers": True,
+                        "servers": [
+                            {
+                                "id": "junction-gpu",
+                                "display_name": "Junction GPU",
+                                "backend": "direct_ssh",
+                                "ssh_alias": "junction-gpu",
+                                "ssh_config_file": str(config),
+                            }
+                        ],
+                    }
+                )
+            )
+            original_resolve = Path.resolve
+
+            def resolve(path: Path, strict: bool = False) -> Path:
+                try:
+                    path.relative_to(ssh_link)
+                except ValueError:
+                    return original_resolve(path, strict=strict)
+                error = OSError(448, "untrusted mount point", str(path))
+                error.winerror = 448
+                raise error
+
+            def is_junction(path: str | Path) -> bool:
+                return Path(path) == ssh_link
+
+            def readlink(path: str | Path) -> str:
+                if Path(path) != ssh_link:
+                    raise OSError("not a reparse point")
+                return str(ssh_target)
+
+            with patch("vram_radar.server_catalog.sys.platform", "win32"), patch(
+                "vram_radar.server_catalog.Path.home", return_value=user_home
+            ), patch("vram_radar.server_catalog.Path.resolve", resolve), patch(
+                "vram_radar.server_catalog.os.path.isjunction", side_effect=is_junction, create=True
+            ), patch("vram_radar.server_catalog.os.readlink", side_effect=readlink), patch.dict(
+                os.environ,
+                {"HOME": str(user_home), "USERPROFILE": str(user_home)},
+                clear=False,
+            ), patch("vram_radar.shell.configure_logging", return_value=Mock()):
+                _, store, profile, service = build_runtime("isolated", profile_home)
+                persisted = store.load("isolated")
+
+        self.assertEqual(profile.server_config_path, str(config.resolve()))
+        self.assertEqual(profile.servers[0].ssh_config_file, str(config.resolve()))
+        self.assertEqual(persisted, profile)
+        self.assertFalse(
+            any(notice["code"] == "server_catalog_sync_failed" for notice in service.snapshot()["notices"])
+        )
+
     def test_startup_recovers_invalid_catalog_when_one_openssh_source_covers_all_aliases(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

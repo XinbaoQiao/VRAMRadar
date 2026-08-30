@@ -49,6 +49,7 @@ REMOTE_SSH_CONFIG = re.compile(
 )
 EDITOR_ENVIRONMENT = re.compile(r"\$\{env:([^}]+)\}", re.IGNORECASE)
 EDITOR_USER_HOME = re.compile(r"\$\{userHome\}", re.IGNORECASE)
+MAX_WINDOWS_REPARSE_FALLBACKS = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +89,7 @@ class _OpenSSHDependencyProbe:
         self.cacheable = True
 
     def record_file(self, path: Path, metadata: os.stat_result) -> None:
-        resolved = path.resolve()
+        resolved = _canonical_local_path(path)
         key = os.path.normcase(str(resolved))
         self.files[key] = _OpenSSHFileStamp(
             path=str(resolved),
@@ -112,7 +113,7 @@ class _OpenSSHDependencyProbe:
         # false cache miss on every validation.
         root_text = str(user_config_root)
         key = (pattern, os.path.normcase(root_text))
-        match_keys = tuple(os.path.normcase(str(path.resolve())) for path in matches)
+        match_keys = tuple(os.path.normcase(str(_canonical_local_path(path))) for path in matches)
         watch = _OpenSSHIncludeWatch(
             pattern=pattern,
             user_config_root=root_text,
@@ -143,7 +144,7 @@ class _OpenSSHDependencyProbe:
             return None
         return _OpenSSHFingerprintCacheEntry(
             digest=digest,
-            user_config_root=os.path.normcase(str(self.user_config_root.resolve())),
+            user_config_root=os.path.normcase(str(_canonical_local_path(self.user_config_root))),
             files=tuple(self.files[key] for key in sorted(self.files)),
             include_watches=tuple(self.include_watches[key] for key in sorted(self.include_watches)),
         )
@@ -184,8 +185,55 @@ def _expand_local_path(value: str | Path) -> str:
     return raw
 
 
+def _strip_windows_namespace_prefix(value: str) -> str:
+    if value.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + value[8:]
+    if value.startswith("\\??\\UNC\\"):
+        return "\\\\" + value[8:]
+    if value.startswith("\\\\?\\"):
+        return value[4:]
+    if value.startswith("\\??\\"):
+        return value[4:]
+    return value
+
+
+def _canonical_local_path(path: Path, *, reparse_depth: int = 0) -> Path:
+    """Resolve a local path, including a bounded WinError 448 junction fallback.
+
+    Windows can refuse ``Path.resolve`` for a junction-backed ``~/.ssh`` when
+    the packaged executable and the junction target have different trust
+    labels. ``os.readlink`` reads the reparse record itself without traversing
+    that boundary, so use its kernel-reported target and resolve the remaining
+    suffix there. Other errors, ordinary files, and excessive reparse chains
+    remain fail-closed.
+    """
+
+    try:
+        return path.resolve()
+    except OSError as exc:
+        error_code = getattr(exc, "winerror", None) or exc.errno
+        if sys.platform != "win32" or error_code != 448 or reparse_depth >= MAX_WINDOWS_REPARSE_FALLBACKS:
+            raise
+
+    absolute = Path(os.path.abspath(path))
+    is_junction = getattr(os.path, "isjunction", lambda _value: False)
+    for ancestor in (absolute, *absolute.parents):
+        try:
+            if not is_junction(ancestor) and not ancestor.is_symlink():
+                continue
+            target_text = _strip_windows_namespace_prefix(os.readlink(ancestor))
+        except (OSError, ValueError):
+            continue
+        target = Path(target_text)
+        if not target.is_absolute():
+            target = ancestor.parent / target
+        suffix = absolute.relative_to(ancestor)
+        return _canonical_local_path(target / suffix, reparse_depth=reparse_depth + 1)
+    raise OSError(448, "cannot traverse path because it contains an untrusted mount point", str(path))
+
+
 def _resolved(value: str | Path) -> Path:
-    return Path(_expand_local_path(value)).resolve()
+    return _canonical_local_path(Path(_expand_local_path(value)))
 
 
 def _candidate_roots() -> list[Path]:
@@ -356,8 +404,9 @@ def _system_ssh_config_candidates() -> list[Path]:
 
 def _existing_files(directory: Path) -> list[Path]:
     try:
+        directory = _canonical_local_path(directory)
         return sorted(
-            (path.resolve() for path in directory.iterdir() if path.is_file()),
+            (_canonical_local_path(path) for path in directory.iterdir() if path.is_file()),
             key=lambda path: os.path.normcase(str(path)),
         )
     except OSError:
@@ -406,7 +455,7 @@ def server_config_candidates(*, include_openssh: bool = False) -> list[Path]:
         # single canonical form so automatic discovery, existence checks, and
         # persisted selections all refer to the same file on every platform.
         try:
-            resolved = candidate.expanduser().resolve()
+            resolved = _canonical_local_path(candidate.expanduser())
         except (OSError, RuntimeError):
             continue
         key = os.path.normcase(str(resolved))
@@ -552,18 +601,18 @@ def _server_id_from_alias(alias: str, used_ids: set[str]) -> str:
 def _openssh_user_config_root(source: Path) -> Path:
     """Resolve the root OpenSSH uses for relative Include directives."""
 
-    source_key = source.resolve()
-    user_config_root = Path.home() / ".ssh"
+    source_key = _canonical_local_path(source)
+    user_config_root = _canonical_local_path(Path.home() / ".ssh")
     for variable in ("USERPROFILE", "HOME"):
         if configured := os.environ.get(variable):
-            root = (Path(configured).expanduser() / ".ssh").resolve()
+            root = _canonical_local_path(Path(configured).expanduser() / ".ssh")
             try:
                 source_key.relative_to(root)
             except ValueError:
                 continue
             return root
     for system_candidate in _system_ssh_config_candidates():
-        candidate_key = system_candidate.resolve()
+        candidate_key = _canonical_local_path(system_candidate)
         if source_key != candidate_key:
             continue
         return (
@@ -597,7 +646,7 @@ def _resolve_openssh_include_pattern(pattern: str, user_config_root: Path) -> Pa
 def _match_openssh_include(candidate: Path) -> tuple[Path, ...]:
     try:
         return tuple(
-            path.resolve()
+            _canonical_local_path(path)
             for value in sorted(glob.glob(str(candidate)))
             if (path := Path(value)).is_file()
         )
@@ -622,7 +671,7 @@ def _openssh_fingerprint_cache_entry_valid(
     entry: _OpenSSHFingerprintCacheEntry,
 ) -> bool:
     current_root = _openssh_user_config_root(source)
-    if os.path.normcase(str(current_root.resolve())) != entry.user_config_root:
+    if os.path.normcase(str(_canonical_local_path(current_root))) != entry.user_config_root:
         return False
     for expected in entry.files:
         try:
