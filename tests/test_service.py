@@ -12,7 +12,6 @@ from vram_radar.service import (
     DashboardService,
     connection_fingerprint,
     recommend_resources,
-    recommend_server,
 )
 from vram_radar.storage import SnapshotCache, storage_paths
 
@@ -1464,6 +1463,7 @@ class ServiceTests(unittest.TestCase):
                             "gpu_type": "A100-40G",
                             "memory_per_gpu_gib": 40,
                             "free_gpus": 2,
+                            "state": "idle",
                         }
                     ],
                     "connection": {"state": "online"},
@@ -1489,9 +1489,10 @@ class ServiceTests(unittest.TestCase):
             ]
         }
 
-        self.assertEqual(recommend_server(snapshot, 20)["server_id"], "a100")
-        preferred = recommend_server(snapshot, 20, "4090")
-        self.assertEqual(preferred["server_id"], "4090")
+        result = recommend_resources(snapshot, gpu_count=1, min_memory_gib=20)
+        self.assertEqual({item["server_id"] for item in result["candidates"]}, {"a100", "4090"})
+        preferred = recommend_resources(snapshot, gpu_count=1, min_memory_gib=20, gpu_type="4090")
+        self.assertEqual(preferred["candidates"][0]["server_id"], "4090")
         self.assertTrue(preferred["recommendation_only"])
 
     def test_multi_gpu_recommendation_returns_explicit_direct_and_slurm_pools(self):

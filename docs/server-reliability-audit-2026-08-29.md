@@ -21,7 +21,7 @@ VRAM Radar 当前是只读监控和导航工具，不提交作业、不运行用
 - 本地路径：`~`、`$HOME`、`${HOME}`、`$env:...`、`%USERPROFILE%`、OpenSSH `%d`、Windows 与 POSIX 路径。
 - 认证：SSH Key、ssh-agent、系统凭据存储中的密码、密钥优先与密码回退、Host Key、代理链。
 - 采集：Direct SSH、Slurm、目录树、节点分页、缓存、刷新与错误状态。
-- 提交一致性：Profile、运行时状态、系统凭据、自动同步、并发保存、失败回滚、第二实例。
+- 提交一致性：Profile、运行时状态、系统凭据、自动同步、并发保存、本地失败恢复、远端公钥追加后的恢复提示、第二实例。
 - UI 一致性：导入/保存/验证文案、陈旧数据、异步刷新、目录和节点的乱序响应。
 
 没有在本轮连接用户的真实服务器，也没有在 Windows 主机上宣称完成原生 macOS 验证。
@@ -60,13 +60,13 @@ VRAM Radar 当前是只读监控和导航工具，不提交作业、不运行用
 - **修复**：所有 Profile 修改由同一把锁串行化；保存必须携带当前 `profile_revision`；旧版本返回 `profile_changed` 并带回最新 Profile，不覆盖用户新状态；Profile 与 revision 原子读取。
 - **回归测试**：`test_profile_save_requires_the_current_revision`、`test_get_profile_waits_for_atomic_profile_and_revision_commit`、Web UI 的保存单飞与冲突恢复断言。
 
-### REL-05 — Profile、系统凭据和 SSH Key 失败回滚可能被当作普通失败
+### REL-05 — 本地事务失败或 SSH Key 部分完成可能被当作普通失败
 
-- **场景与影响**：密码已写入系统凭据存储后 Profile 写入失败；或公钥已部署、Profile/运行时切换失败，随后本地回滚也失败。继续操作可能使用不确定的凭据或配置状态。
-- **严重程度**：P1 / 高；本地状态可能分裂，后续认证结果不可预测。
-- **根本原因**：早期错误处理忽略二次回滚失败。
-- **修复**：Profile、运行时、系统凭据和远端新增公钥组成显式事务；能够恢复时返回失败且确认恢复原状；任一回滚不完整时返回 `recovery_required` 和专用错误码，绝不显示成功。生成密钥只有在权威证据证明远端与本地均安全恢复后才删除。
-- **回归测试**：`test_save_reports_recovery_required_when_secret_rollback_fails`、`test_ssh_key_setup_rolls_back_remote_change_when_profile_save_fails`、`test_ssh_key_setup_requires_recovery_when_local_profile_rollback_fails`。
+- **场景与影响**：密码已写入系统凭据存储后 Profile 写入失败；或公钥已经追加到服务器，但所选私钥验证或本地 Profile 保存随后失败。继续操作可能使用不确定的本地凭据状态；若此时自动恢复旧 `authorized_keys`，还可能删除管理员或其他进程的并发写入。
+- **严重程度**：P1 / 高；本地状态可能分裂，错误的远端“回滚”还可能造成其他 SSH Key 数据丢失。
+- **根本原因**：早期错误处理忽略本地二次恢复失败，并把应用不独占的远端 `authorized_keys` 错误建模为可以安全回滚的事务文件。
+- **修复**：Profile、运行时与系统凭据继续使用显式本地事务；本地恢复不完整时返回 `recovery_required` 和专用错误码，绝不显示成功。远端公钥安装改为非替换式追加；一旦追加成功，后续验证或 Profile 保存失败时不再自动改写或删除 `authorized_keys`。应用会保留已追加公钥及其匹配的本地生成密钥，返回 `recovery_required`，并提示用户重试或手动精确移除该公钥。
+- **回归测试**：覆盖系统凭据本地恢复失败、远端追加后验证失败、远端追加后 Profile 保存失败三条路径；后两者必须断言远端公钥与匹配的本地生成密钥均被保留，并返回可操作的恢复提示。
 
 ### REL-06 — 同一服务器 ID 可能继承旧端点缓存
 
@@ -164,13 +164,13 @@ VRAM Radar 当前是只读监控和导航工具，不提交作业、不运行用
 - **修复**：仅在服务器确有 `auth_ref` 时，`identity_passphrase_required` 与 `ssh_agent_refused` 也进入一次密码回退；没有保存密码时保留原始精确错误。
 - **回归测试**：`test_saved_password_falls_back_when_private_key_needs_passphrase_or_agent_refuses`、`test_key_specific_auth_error_is_preserved_without_saved_password`。
 
-### REL-18 — SSH Key 回滚可能误报本地生成密钥已经删除
+### REL-18 — SSH Key 后置失败曾尝试自动撤销远端公钥
 
-- **场景与影响**：远端回滚成功，但本地文件被防病毒、权限或占用阻止删除；界面仍显示“已撤销本地专用密钥”，诊断也返回 `local_key_retained=false`。
-- **严重程度**：P2 / 中；失败恢复状态不真实，并遗留用户不知道的私钥文件。
-- **根本原因**：调用方忽略 `remove_generated_key()` 的布尔结果，提前推导删除成功。
-- **修复**：本地删除结果成为回滚事务的权威输入；删除失败返回 `ssh_key_local_cleanup_failed` 或 `ssh_key_rollback_failed`、`local_key_retained=true`、`recovery_required=true`，回滚阶段明确失败。
-- **回归测试**：`test_ssh_key_setup_does_not_claim_generated_key_cleanup_when_delete_fails`、`test_ssh_key_setup_reports_cleanup_failure_before_remote_deployment`。
+- **场景与影响**：应用追加公钥后验证或保存失败；与此同时管理员、自动化程序或另一个会话也修改了 `authorized_keys`。自动恢复旧文件或按快照删除内容存在覆盖并发修改的窗口；若同时删除本地生成私钥，服务器上还会遗留一个用户无法再使用的公钥。
+- **严重程度**：P1 / 高；可能造成其他 SSH Key 数据丢失，并让失败后的真实认证状态难以恢复。
+- **根本原因**：远端 `authorized_keys` 并非应用独占资源，预先校验 checksum 再替换也无法消除“检查通过到写入之间”的竞争窗口，因此不能把它当作普通可回滚文件。
+- **修复**：远端安装只做非替换式追加，绝不通过替换整个 `authorized_keys` 完成安装。追加成功后的任何后置失败都不自动改写或删除该文件；应用保留新公钥与匹配的本地生成密钥，明确返回 `recovery_required`，并给出重试或手动精确移除该公钥的步骤。
+- **回归测试**：覆盖远端安装期间的并发追加，断言其他写入不会丢失；覆盖验证失败和 Profile 保存失败，断言不会调用远端删除/替换路径，且保留匹配本地密钥和恢复说明。
 
 ### REL-19 — 文档宣称“打开终端”，但后端桥接曾不存在
 

@@ -52,6 +52,13 @@ DIRECTORY_VERSION_PROTOCOL_END = "END|1"
 DIRECTORY_ENTRY_LIMIT = 160
 DIRECTORY_MAX_DEPTH = 1
 MAX_CONCURRENT_DIRECTORY_QUERIES = 2
+# Authentication failures for which a user-saved password is a safe, bounded
+# fallback after the non-interactive key/agent path has been tried once. Keep
+# this policy shared by ordinary collection and SSH Key bootstrap so the two
+# paths cannot drift again.
+PASSWORD_FALLBACK_AUTH_CODES = frozenset(
+    {"auth_failed", "identity_passphrase_required", "ssh_agent_refused"}
+)
 GPU_GRES_RE = re.compile(r"(?:^|,)gpu(?::([^:,()]+))?:(\d+)")
 JOB_GPU_RE = re.compile(r"(?:gres/)?gpu(?::[^:,()=]+)?[:=](\d+)")
 UNAVAILABLE_STATES = (
@@ -143,6 +150,13 @@ def classify_process_error(
     password_auth: bool = False,
 ) -> ConnectorFailure:
     lower = detail.lower()
+    if "vram_radar_key_conflict" in lower:
+        return ConnectorFailure(
+            "ssh_key_remote_conflict",
+            "authorized_keys 在配置期间被其他程序修改；为避免覆盖，已停止本次操作，请重试",
+            retryable=True,
+            state="misconfigured",
+        )
     key_setup_errors = {
         "vram_radar_key_invalid": (
             "ssh_key_invalid",

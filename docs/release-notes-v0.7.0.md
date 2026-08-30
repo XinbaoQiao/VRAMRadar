@@ -32,6 +32,36 @@ existing stable installation and shortcut identity.
 install `v0.7.0` manually once. Installer-managed updates after `v0.7.0` can use
 the one-click path.
 
+### Configuration reliability and large-fleet usability
+
+- Automatic discovery keeps each imported alias attached to its exact OpenSSH
+  source, while `User`, `Port`, `IdentityFile`, `Include`, `ProxyJump`, and
+  `ProxyCommand` remain owned by OpenSSH at connection time. Removing an
+  imported alias records a local ignore decision so startup synchronization
+  does not add it back; newly added aliases are still discovered.
+- Import, Profile save, SSH authentication, backend collection, and monitoring
+  readiness are separate states. A parsed or saved server is not counted as
+  live capacity until the real collector succeeds.
+- Saved passwords are removed when the reviewed host, account, effective port,
+  alias, or OpenSSH source changes unless the user explicitly re-enters the
+  password in that save.
+- Monitoring and one-click SSH Key setup share the same bounded password
+  fallback policy. Public-key installation is non-replacing and append-only:
+  it validates the existing `authorized_keys`, rejects duplicate entries, and
+  never replaces the file.
+- If identity verification or the local Profile save fails after the append,
+  the app does not automatically rewrite or delete `authorized_keys`, because
+  that could erase a concurrent edit. It retains the appended public key and
+  matching generated local key, returns `recovery_required`, and provides retry
+  or exact-key manual-removal guidance.
+- Settings keeps a bounded in-memory draft model and renders only 20 server
+  forms per page. Search, cross-page edits, password isolation, reordering, and
+  close-time DOM cleanup are covered by the 120-server synthetic benchmark.
+- Redacted diagnostics copy a bounded support report to the clipboard. Server
+  details include connection state, local SSH readiness, credential presence,
+  recent error codes, and package/platform facts without exposing hostnames,
+  aliases, usernames, paths, commands, keys, or passwords.
+
 ### Platform security boundary
 
 The Windows installer is not Authenticode signed. The macOS apps are not
@@ -69,6 +99,27 @@ do not disable platform security globally.
 
 `v0.6.1` 不包含独立更新器，因此需要手动安装 `v0.7.0` 一次。从 `v0.7.0`
 之后，Windows 正式安装版即可使用一键更新。
+
+### 配置可靠性与大规模服务器体验
+
+- 自动发现会保留每个别名对应的原始 OpenSSH 配置来源；`User`、`Port`、
+  `IdentityFile`、`Include`、`ProxyJump` 与 `ProxyCommand` 仍由 OpenSSH 在连接时
+  解析。用户删除过的导入别名会被本地记录为忽略项，启动同步不会反复加回；新增别名
+  仍会继续发现。
+- 配置解析、Profile 保存、SSH 认证、后端资源读取和监控就绪是不同状态。服务器只被
+  解析或保存时不会计入实时资源，必须由实际采集器成功验证。
+- 已保存密码所对应的主机、账号、有效端口、别名或 OpenSSH 来源发生变化时，除非用户
+  在同一次保存中重新输入密码，否则系统会移除旧密码引用。
+- 日常监控与一键 SSH Key 配置共用同一套受限密码回退规则。远端公钥安装采用
+  非替换式追加：先校验现有 `authorized_keys` 并拒绝重复项，绝不替换整个文件。
+- 公钥追加后若私钥验证或本地 Profile 保存失败，应用不会自动改写或删除
+  `authorized_keys`，以免误删并发写入的内容。系统会保留已追加公钥及其匹配的本地
+  生成密钥，返回 `recovery_required`，并提示用户重试或手动精确移除该公钥。
+- 设置页使用有界内存草稿，每页只渲染 20 台服务器表单。搜索、跨页修改、密码与
+  Profile 隔离、排序以及关闭后释放 DOM 均由 120 台服务器的合成基准覆盖。
+- “复制诊断”会把有界、脱敏的支持报告写入剪贴板，包含连接状态、本地 SSH 就绪度、
+  凭据是否存在、近期错误代码和包/平台信息，但不包含主机名、别名、用户名、路径、
+  命令、密钥或密码。
 
 ### 平台安全边界
 

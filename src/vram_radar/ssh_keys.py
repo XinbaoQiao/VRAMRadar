@@ -321,9 +321,11 @@ set -eu
 umask 077
 ssh_created=0
 tmp=''
+pin=''
 fail() {
   code="${2:-40}"
   [ -z "${tmp:-}" ] || rm -f "$tmp"
+  [ -z "${pin:-}" ] || rm -f "$pin"
   if [ "${ssh_created:-0}" -eq 1 ]; then rmdir "$HOME/.ssh" 2>/dev/null || true; fi
   printf '%s\n' "$1" >&2
   exit "$code"
@@ -355,61 +357,37 @@ fi
 if [ -e "$auth" ] || [ -L "$auth" ]; then
   auth_existed=1
   [ -f "$auth" ] && [ ! -L "$auth" ] && [ -O "$auth" ] || fail VRAM_RADAR_KEY_UNSAFE_AUTHORIZED_KEYS 45
-  auth_mode=$(stat -c '%a' "$auth" 2>/dev/null || stat -f '%Lp' "$auth" 2>/dev/null) || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  pin=$(mktemp "$ssh_dir/.vram-radar-authorized-keys-pin.XXXXXX") || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  rm -f "$pin" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  ln "$auth" "$pin" || fail VRAM_RADAR_KEY_CONFLICT 46
+  [ -f "$pin" ] && [ ! -L "$pin" ] && [ -O "$pin" ] || fail VRAM_RADAR_KEY_UNSAFE_AUTHORIZED_KEYS 45
+  [ -f "$auth" ] && [ ! -L "$auth" ] && [ -O "$auth" ] && [ "$auth" -ef "$pin" ] || fail VRAM_RADAR_KEY_CONFLICT 46
+  auth_mode=$(stat -c '%a' "$pin" 2>/dev/null || stat -f '%Lp' "$pin" 2>/dev/null) || fail VRAM_RADAR_KEY_WRITE_FAILED 44
   case "$auth_mode" in ''|*[!0-7]*) fail VRAM_RADAR_KEY_WRITE_FAILED 44 ;; esac
   (( (8#$auth_mode & 0022) == 0 )) || fail VRAM_RADAR_KEY_UNSAFE_AUTHORIZED_KEYS 45
-  if awk -v kt="$key_type" -v kb="$key_blob" '{ for (i=1; i<NF; i++) if ($i==kt && $(i+1)==kb) found=1 } END { exit(found ? 0 : 1) }' "$auth"; then
+  if awk -v kt="$key_type" -v kb="$key_blob" '{ for (i=1; i<NF; i++) if ($i==kt && $(i+1)==kb) found=1 } END { exit(found ? 0 : 1) }' "$pin"; then
+    rm -f "$pin" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+    pin=''
     printf 'VRAM_RADAR_KEY_SETUP|already_present|1|1|%s\n' "$auth_mode"
     exit 0
   fi
+  if [ -s "$pin" ]; then printf '\n' >> "$pin" || fail VRAM_RADAR_KEY_WRITE_FAILED 44; fi
+  printf '%s %s\n' "$key_type" "$key_blob" >> "$pin" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  [ -f "$auth" ] && [ ! -L "$auth" ] && [ -O "$auth" ] && [ "$auth" -ef "$pin" ] || fail VRAM_RADAR_KEY_CONFLICT 46
+  final_mode=$(stat -c '%a' "$pin" 2>/dev/null || stat -f '%Lp' "$pin" 2>/dev/null) || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  [ "$final_mode" = "$auth_mode" ] || fail VRAM_RADAR_KEY_CONFLICT 46
+  rm -f "$pin" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  pin=''
+else
+  tmp=$(mktemp "$ssh_dir/.vram-radar-authorized-keys.XXXXXX") || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  printf '%s %s\n' "$key_type" "$key_blob" > "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  chmod "$auth_mode" "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  ln "$tmp" "$auth" || fail VRAM_RADAR_KEY_CONFLICT 46
+  rm -f "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
+  tmp=''
 fi
-tmp=$(mktemp "$ssh_dir/.vram-radar-authorized-keys.XXXXXX") || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-cleanup() { rm -f "$tmp"; }
-trap cleanup EXIT HUP INT TERM
-if [ "$auth_existed" -eq 1 ]; then cat "$auth" > "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44; fi
-if [ -s "$tmp" ]; then printf '\n' >> "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44; fi
-printf '%s %s\n' "$key_type" "$key_blob" >> "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-chmod "$auth_mode" "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-mv -f "$tmp" "$auth" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-trap - EXIT HUP INT TERM
 printf 'VRAM_RADAR_KEY_SETUP|installed|%s|%s|%s\n' "$ssh_existed" "$auth_existed" "$auth_mode"
 """.strip()
 
 
 VERIFY_SSH_KEY_SCRIPT = "printf '%s\\n' 'VRAM_RADAR_KEY_VERIFY|ok'"
-
-
-def rollback_authorized_key_script(
-    *,
-    ssh_existed: bool,
-    auth_existed: bool,
-    auth_mode: str = "600",
-) -> str:
-    if not re.fullmatch(r"[0-7]{3,4}", auth_mode):
-        raise SshKeySetupError("ssh_key_remote_protocol", "服务器返回了无效的 authorized_keys 权限")
-    return rf"""
-set -eu
-umask 077
-fail() {{ printf '%s\n' "$1" >&2; exit "${{2:-40}}"; }}
-[ -n "${{HOME:-}}" ] && [ "$HOME" != "/" ] && [ -d "$HOME" ] && [ -O "$HOME" ] || fail VRAM_RADAR_KEY_UNSAFE_HOME 41
-IFS=' ' read -r key_type key_blob key_extra || fail VRAM_RADAR_KEY_INVALID 42
-[ -n "$key_type" ] && [ -n "$key_blob" ] && [ -z "${{key_extra:-}}" ] || fail VRAM_RADAR_KEY_INVALID 42
-ssh_dir="$HOME/.ssh"
-auth="$ssh_dir/authorized_keys"
-[ -d "$ssh_dir" ] && [ ! -L "$ssh_dir" ] && [ -O "$ssh_dir" ] || fail VRAM_RADAR_KEY_UNSAFE_SSH_DIR 43
-[ -f "$auth" ] && [ ! -L "$auth" ] && [ -O "$auth" ] || fail VRAM_RADAR_KEY_UNSAFE_AUTHORIZED_KEYS 45
-tmp=$(mktemp "$ssh_dir/.vram-radar-authorized-keys.XXXXXX") || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-cleanup() {{ rm -f "$tmp"; }}
-trap cleanup EXIT HUP INT TERM
-awk -v kt="$key_type" -v kb="$key_blob" '{{ keep=1; for (i=1; i<NF; i++) if ($i==kt && $(i+1)==kb) keep=0; if (keep) print }}' "$auth" > "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-chmod {auth_mode} "$tmp" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-if [ {1 if auth_existed else 0} -eq 0 ] && [ ! -s "$tmp" ]; then
-  rm -f "$auth" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-  rm -f "$tmp"
-else
-  mv -f "$tmp" "$auth" || fail VRAM_RADAR_KEY_WRITE_FAILED 44
-fi
-trap - EXIT HUP INT TERM
-if [ {1 if ssh_existed else 0} -eq 0 ]; then rmdir "$ssh_dir" 2>/dev/null || true; fi
-printf '%s\n' 'VRAM_RADAR_KEY_ROLLBACK|ok'
-""".strip()

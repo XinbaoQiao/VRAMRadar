@@ -14,6 +14,11 @@ const ui = {
   form: document.getElementById('settings-form'),
   editorList: document.getElementById('server-editor-list'),
   editorTemplate: document.getElementById('server-editor-template'),
+  editorToolbar: document.getElementById('server-editor-toolbar'),
+  editorSearch: document.getElementById('server-editor-search'),
+  editorPageStatus: document.getElementById('server-editor-page-status'),
+  editorPreviousPage: document.getElementById('server-editor-previous-page'),
+  editorNextPage: document.getElementById('server-editor-next-page'),
   profileName: document.getElementById('profile-name'),
   refreshSeconds: document.getElementById('refresh-seconds'),
   closeBehavior: document.getElementById('close-behavior'),
@@ -90,6 +95,9 @@ let onboardingStep = 1;
 let onboardingDiscoveryStarted = false;
 let serverDiscoveryGeneration = 0;
 let serverEditorSequence = 0;
+let settingsServerDrafts = [];
+let settingsServerQuery = '';
+let settingsServerPageOffset = 0;
 let settingsSaveInFlight = false;
 let pendingIgnoredSshAliases = new Set();
 let dashboardDisclosureMode = 'default';
@@ -122,6 +130,8 @@ const renderedServerCardSignatures = new Map();
 let resourceWatchMatched = false;
 let resourceWatchLastNotificationAt = 0;
 let resourceWatchEvaluation = null;
+let resourceWatchCriteriaRevision = 0;
+let resourceWatchDebounceTimer = null;
 const RESOURCE_WATCH_COOLDOWN_MS = 15 * 60 * 1000;
 const clusterNodePages = new Map();
 const clusterNodeRequestGenerations = new Map();
@@ -129,6 +139,7 @@ const CLUSTER_NODE_PAGE_SIZE = 75;
 const SERVER_FLEET_PAGE_SIZE = 50;
 const LARGE_SERVER_FLEET_THRESHOLD = 100;
 const SERVER_NAVIGATOR_RENDER_LIMIT = 80;
+const SERVER_EDITOR_PAGE_SIZE = 20;
 let serverFleetPageOffset = 0;
 const openClusters = new Set();
 const openTaskGroups = new Set();
@@ -2052,27 +2063,24 @@ async function deleteSavedView(name) {
 }
 
 async function requestResourceRecommendations(criteria) {
-  if (api?.recommend_resources) {
-    const result = await api.recommend_resources(
-      criteria.gpu_count, criteria.min_memory_gib, criteria.gpu_type, criteria.partition, criteria.same_node, criteria.limit,
-    );
-    const candidates = result?.candidates || result?.results || result?.recommendations || (result?.ok && result?.result ? [result.result] : []);
-    const recommendations = candidates.slice(0, criteria.limit).map(candidate => {
-      const allocations = candidate.allocations || [];
-      return {
-        ...candidate,
-        backend: candidate.backend || (allocations.some(allocation => allocation.node) ? 'slurm_ssh' : 'direct_ssh'),
-        available_memory_gib: candidate.available_memory_gib ?? candidate.minimum_memory_gib,
-        gpu_type: candidate.gpu_type || (candidate.gpu_types || []).join(' / '),
-        partition: candidate.partition || (candidate.partitions || []).join(' / '),
-        location: candidate.location || allocations.map(allocation => allocation.location).filter(Boolean).join(' + '),
-        free_units: candidate.free_units ?? candidate.available_units,
-      };
-    });
-    return {...result, recommendations};
-  }
-  const result = await api.recommend_server(criteria.min_memory_gib, criteria.gpu_type);
-  return {...result, recommendations: result?.ok ? [result] : []};
+  if (!api?.recommend_resources) throw new Error('当前桌面组件不支持资源匹配，请重新安装最新版本');
+  const result = await api.recommend_resources(
+    criteria.gpu_count, criteria.min_memory_gib, criteria.gpu_type, criteria.partition, criteria.same_node, criteria.limit,
+  );
+  const candidates = result?.candidates || result?.results || result?.recommendations || (result?.ok && result?.result ? [result.result] : []);
+  const recommendations = candidates.slice(0, criteria.limit).map(candidate => {
+    const allocations = candidate.allocations || [];
+    return {
+      ...candidate,
+      backend: candidate.backend || (allocations.some(allocation => allocation.node) ? 'slurm_ssh' : 'direct_ssh'),
+      available_memory_gib: candidate.available_memory_gib ?? candidate.minimum_memory_gib,
+      gpu_type: candidate.gpu_type || (candidate.gpu_types || []).join(' / '),
+      partition: candidate.partition || (candidate.partitions || []).join(' / '),
+      location: candidate.location || allocations.map(allocation => allocation.location).filter(Boolean).join(' + '),
+      free_units: candidate.free_units ?? candidate.available_units,
+    };
+  });
+  return {...result, recommendations};
 }
 
 function renderRecommendationResult(result, index) {
@@ -2112,9 +2120,12 @@ function clearRecommendation() {
 
 async function evaluateResourceWatch() {
   if (!ui.resourceWatchEnabled.checked || monitoringPaused || resourceWatchEvaluation) return;
+  const criteriaRevision = resourceWatchCriteriaRevision;
+  const criteria = resourceCriteriaFromInputs();
   resourceWatchEvaluation = (async () => {
     try {
-      const result = await requestResourceRecommendations(resourceCriteriaFromInputs());
+      const result = await requestResourceRecommendations(criteria);
+      if (criteriaRevision !== resourceWatchCriteriaRevision) return;
       const matched = Boolean(result?.ok && result.recommendations?.length);
       ui.resourceWatchStatus.textContent = matched ? '当前已有匹配资源' : '等待满足条件';
       const now = Date.now();
@@ -2124,34 +2135,101 @@ async function evaluateResourceWatch() {
       }
       resourceWatchMatched = matched;
     } catch (_error) {
-      ui.resourceWatchStatus.textContent = '提醒检查失败，将在下次刷新重试';
+      if (criteriaRevision === resourceWatchCriteriaRevision) ui.resourceWatchStatus.textContent = '提醒检查失败，将在下次刷新重试';
     } finally {
       resourceWatchEvaluation = null;
+      if (criteriaRevision !== resourceWatchCriteriaRevision && ui.resourceWatchEnabled.checked) void evaluateResourceWatch();
     }
   })();
   await resourceWatchEvaluation;
 }
 
+function scheduleResourceWatchEvaluation() {
+  resourceWatchCriteriaRevision += 1;
+  resourceWatchMatched = false;
+  if (!ui.resourceWatchEnabled.checked) return;
+  ui.resourceWatchStatus.textContent = '正在检查新条件';
+  clearTimeout(resourceWatchDebounceTimer);
+  resourceWatchDebounceTimer = setTimeout(() => void evaluateResourceWatch(), 250);
+}
+
+function serverDraftFromValue(server = {}, options = {}) {
+  return {
+    ...server,
+    _original_id: server.id || '',
+    _original_ssh_alias: server.ssh_alias || '',
+    _imported_candidate: options.importedCandidate === true,
+    _password: '',
+    _clear_password: false,
+  };
+}
+
+function serverDraftIndexFromEditor(editor) {
+  const indexed = Number(editor.dataset.draftIndex);
+  const originalId = String(editor.dataset.originalId || '');
+  const indexedDraft = settingsServerDrafts[indexed];
+  if (indexedDraft && String(indexedDraft._original_id || '') === originalId) return indexed;
+  return settingsServerDrafts.findIndex(draft => String(draft._original_id || '') === originalId);
+}
+
+function syncServerDraftFromEditor(editor) {
+  const draftIndex = serverDraftIndexFromEditor(editor);
+  const draft = settingsServerDrafts[draftIndex];
+  if (!draft) return;
+  editor.dataset.draftIndex = String(draftIndex);
+  editor.querySelectorAll('[data-field]').forEach(input => {
+    const field = input.dataset.field;
+    if (field === 'password') draft._password = input.value;
+    else if (field === 'clear_password') draft._clear_password = Boolean(input.checked);
+    else if (input.type === 'checkbox') draft[field] = input.checked;
+    else if (field === 'port') draft[field] = Number(input.value || 22);
+    else draft[field] = input.value.trim();
+  });
+  draft.enabled = editor.dataset.enabled !== 'false';
+  draft.has_password = Boolean(editor.dataset.hasPassword === 'true');
+  draft.prefer_identity_auth = editor.dataset.preferIdentityAuth === 'true';
+  draft.gpu_memory_gib = JSON.parse(editor.dataset.gpuMemoryGib || '{}');
+}
+
+function syncVisibleServerDrafts() {
+  ui.editorList.querySelectorAll('.server-editor').forEach(syncServerDraftFromEditor);
+}
+
+function filteredServerDraftIndices() {
+  const query = settingsServerQuery.trim().toLowerCase();
+  return settingsServerDrafts.map((_draft, index) => index).filter(index => {
+    if (!query) return true;
+    const draft = settingsServerDrafts[index];
+    return [draft.display_name, draft.id, draft.ssh_alias, draft.host, draft.username]
+      .some(value => String(value || '').toLowerCase().includes(query));
+  });
+}
+
 function refreshServerEditorOrder() {
   const editors = [...ui.editorList.querySelectorAll('.server-editor')];
-  editors.forEach((editor, index) => {
+  editors.forEach(editor => {
+    const index = serverDraftIndexFromEditor(editor);
     const position = index + 1;
     editor.querySelector('.server-position').textContent = number(position);
     const up = editor.querySelector('.move-server-up');
     const down = editor.querySelector('.move-server-down');
-    up.disabled = index === 0;
-    down.disabled = index === editors.length - 1;
+    up.disabled = index <= 0;
+    down.disabled = index < 0 || index === settingsServerDrafts.length - 1;
     up.setAttribute('aria-label', `将第 ${position} 台服务器向上移动`);
     down.setAttribute('aria-label', `将第 ${position} 台服务器向下移动`);
   });
 }
 
 function moveServerEditor(editor, direction) {
-  const sibling = direction < 0 ? editor.previousElementSibling : editor.nextElementSibling;
-  if (!sibling) return;
-  if (direction < 0) ui.editorList.insertBefore(editor, sibling);
-  else ui.editorList.insertBefore(sibling, editor);
-  refreshServerEditorOrder();
+  syncVisibleServerDrafts();
+  const index = serverDraftIndexFromEditor(editor);
+  const target = index + direction;
+  if (!settingsServerDrafts[index] || !settingsServerDrafts[target]) return;
+  [settingsServerDrafts[index], settingsServerDrafts[target]] = [settingsServerDrafts[target], settingsServerDrafts[index]];
+  settingsServerQuery = '';
+  ui.editorSearch.value = '';
+  settingsServerPageOffset = Math.floor(target / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
+  renderServerEditorPage({focusDraftIndex: target});
 }
 
 function sshAliasKey(value) {
@@ -2225,8 +2303,8 @@ async function configureServerSshKey(editor) {
   }
   const targetName = editor.querySelector('[data-server-editor-name]').textContent || '这台服务器';
   const confirmation = mode === 'generate'
-    ? `将为“${targetName}”生成一把独立的 Ed25519 密钥。\n\n私钥只保存在本机且不会覆盖现有密钥；公钥将写入服务器。验证失败时会自动回滚。是否继续？`
-    : `将为“${targetName}”部署所选密钥的公钥。\n\n私钥不会上传；不会覆盖服务器已有密钥。验证失败时会自动回滚本次新增内容。是否继续？`;
+    ? `将为“${targetName}”生成一把独立的 Ed25519 密钥。\n\n私钥只保存在本机且不会覆盖现有密钥；公钥只会追加到服务器，不替换 authorized_keys。若追加后验证或本地保存失败，为避免误删并发修改，应用会保留远端公钥和配套本地私钥，并提示重试或精确手动移除。是否继续？`
+    : `将为“${targetName}”部署所选密钥的公钥。\n\n私钥不会上传；公钥只在无重复项时追加，不替换 authorized_keys。若追加后验证或本地保存失败，应用不会自动改写远端文件，会报告需要恢复并提示重试或精确手动移除。是否继续？`;
   if (!window.confirm(confirmation)) return;
 
   const controls = [...editor.querySelectorAll('.ssh-key-setup-body input, .ssh-key-setup-body button')];
@@ -2248,6 +2326,7 @@ async function configureServerSshKey(editor) {
         editor.querySelector('[data-key-field="private_key_path"]').value = saved.identity_file || '';
         editor.dataset.preferIdentityAuth = String(Boolean(saved.prefer_identity_auth));
       }
+      syncServerDraftFromEditor(editor);
       editor.refreshPasswordState?.();
       editor.querySelector('[data-key-setup-overview]').textContent = '已验证；SSH Key 优先，保存的密码仅作回退';
       showToast('SSH 免密登录已配置并验证');
@@ -2308,6 +2387,7 @@ async function toggleEditorEnabled(editor) {
   }
   clearConnectionTestResult(editor);
   refreshEditorEnabledState(editor);
+  syncServerDraftFromEditor(editor);
 }
 
 function addServerEditor(server = {}, options = {}) {
@@ -2322,25 +2402,35 @@ function addServerEditor(server = {}, options = {}) {
   const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'direct_ssh', ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: false, prefer_identity_auth: false, connect_timeout_seconds: 10};
   const values = {...defaults, ...server};
   usedIds.add(values.id);
+  editor.dataset.draftIndex = String(options.draftIndex ?? settingsServerDrafts.length);
   editor.dataset.gpuMemoryGib = JSON.stringify(values.gpu_memory_gib || {});
   editor.dataset.enabled = String(values.enabled !== false);
   editor.dataset.hasPassword = String(Boolean(values.has_password));
-  editor.dataset.originalId = values.id || '';
-  editor.dataset.originalSshAlias = values.ssh_alias || '';
-  editor.dataset.importedCandidate = String(options.importedCandidate === true);
+  editor.dataset.originalId = values._original_id ?? values.id ?? '';
+  editor.dataset.originalSshAlias = values._original_ssh_alias ?? values.ssh_alias ?? '';
+  editor.dataset.importedCandidate = String(values._imported_candidate === true || options.importedCandidate === true);
   editor.dataset.sshConfigFile = values.ssh_config_file || '';
   editor.dataset.preferIdentityAuth = String(Boolean(values.prefer_identity_auth));
   editor.querySelectorAll('[data-field]').forEach(input => {
     if (input.type === 'checkbox') input.checked = Boolean(values[input.dataset.field]);
     else input.value = values[input.dataset.field] ?? '';
-    input.addEventListener('input', () => clearConnectionTestResult(editor));
-    input.addEventListener('change', () => clearConnectionTestResult(editor));
+    input.addEventListener('input', () => {
+      clearConnectionTestResult(editor);
+      syncServerDraftFromEditor(editor);
+    });
+    input.addEventListener('change', () => {
+      clearConnectionTestResult(editor);
+      syncServerDraftFromEditor(editor);
+    });
   });
   editor.querySelector('[data-field="port"]').addEventListener('input', () => {
     editor.querySelector('[data-field="port_override"]').checked = true;
+    syncServerDraftFromEditor(editor);
   });
   const passwordInput = editor.querySelector('[data-field="password"]');
   const clearControl = editor.querySelector('[data-field="clear_password"]');
+  passwordInput.value = values._password || '';
+  clearControl.checked = Boolean(values._clear_password);
   const passwordStatus = editor.querySelector('[data-password-status]');
   const authOverview = editor.querySelector('[data-auth-overview]');
   const refreshPasswordState = () => {
@@ -2400,11 +2490,14 @@ function addServerEditor(server = {}, options = {}) {
   editor.querySelector('.move-server-up').addEventListener('click', () => moveServerEditor(editor, -1));
   editor.querySelector('.move-server-down').addEventListener('click', () => moveServerEditor(editor, 1));
   editor.querySelector('.remove-server').addEventListener('click', () => {
+    syncVisibleServerDrafts();
     const wasSaved = (currentProfile?.servers || []).some(item => item.id === editor.dataset.originalId);
     const wasImportedCandidate = editor.dataset.importedCandidate === 'true';
     if (wasSaved || wasImportedCandidate) rememberIgnoredSshAlias(editor.dataset.originalSshAlias);
-    editor.remove();
-    refreshServerEditorOrder();
+    const draftIndex = serverDraftIndexFromEditor(editor);
+    if (draftIndex < 0) return;
+    settingsServerDrafts.splice(draftIndex, 1);
+    renderServerEditorPage();
   });
   target.appendChild(fragment);
   refreshEditorEnabledState(editor);
@@ -2414,25 +2507,90 @@ function addServerEditor(server = {}, options = {}) {
 }
 
 function populateServerEditors(servers, options = {}) {
+  settingsServerDrafts = (servers.length ? servers : (options.allowEmpty ? [] : [{}]))
+    .map(server => serverDraftFromValue(server, options));
+  settingsServerQuery = '';
+  settingsServerPageOffset = 0;
+  ui.editorSearch.value = '';
+  renderServerEditorPage();
+}
+
+function renderServerEditorPage(options = {}) {
   ui.editorList.replaceChildren();
+  const indices = filteredServerDraftIndices();
+  const maximumOffset = Math.max(0, Math.floor(Math.max(0, indices.length - 1) / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE);
+  settingsServerPageOffset = Math.min(settingsServerPageOffset, maximumOffset);
+  const visibleIndices = indices.slice(settingsServerPageOffset, settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE);
   const target = document.createDocumentFragment();
-  const usedIds = new Set();
-  const entries = servers.length ? servers : (options.allowEmpty ? [] : [{}]);
-  entries.forEach(server => addServerEditor(server, {
-    ...options,
+  const usedIds = new Set(settingsServerDrafts.map(server => String(server.id || '').trim()).filter(Boolean));
+  visibleIndices.forEach(draftIndex => addServerEditor(settingsServerDrafts[draftIndex], {
     target,
     usedIds,
+    draftIndex,
     deferOrder: true,
   }));
   ui.editorList.appendChild(target);
+  ui.editorToolbar.hidden = (settingsMode === 'onboarding' && onboardingStep !== 3)
+    || (settingsServerDrafts.length <= SERVER_EDITOR_PAGE_SIZE && !settingsServerQuery);
+  const first = indices.length ? settingsServerPageOffset + 1 : 0;
+  const last = Math.min(settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE, indices.length);
+  ui.editorPageStatus.textContent = settingsServerQuery
+    ? `匹配 ${number(indices.length)} 台 · ${number(first)}–${number(last)}`
+    : `${number(first)}–${number(last)} / ${number(settingsServerDrafts.length)}`;
+  ui.editorPreviousPage.disabled = settingsServerPageOffset === 0;
+  ui.editorNextPage.disabled = settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE >= indices.length;
   refreshServerEditorOrder();
+  if (Number.isInteger(options.focusDraftIndex)) {
+    const editor = ui.editorList.querySelector(`[data-draft-index="${options.focusDraftIndex}"]`);
+    editor?.scrollIntoView({behavior: 'smooth', block: 'center'});
+    editor?.querySelector('[data-field="display_name"]')?.focus({preventScroll: true});
+  }
+}
+
+function invalidServerDraft() {
+  syncVisibleServerDrafts();
+  const seenIds = new Set();
+  for (let index = 0; index < settingsServerDrafts.length; index += 1) {
+    const draft = settingsServerDrafts[index];
+    if (!String(draft.display_name || '').trim()) return {index, field: 'display_name', message: '显示名称不能为空'};
+    const serverId = String(draft.id || '').trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(serverId)) {
+      return {index, field: 'id', message: '服务器 ID 格式不正确'};
+    }
+    const serverIdKey = serverId.toLowerCase();
+    if (seenIds.has(serverIdKey)) return {index, field: 'id', message: '服务器 ID 与前面的服务器重复（不区分大小写）'};
+    seenIds.add(serverIdKey);
+    if (!String(draft.ssh_alias || '').trim() && !String(draft.host || '').trim()) {
+      return {index, field: 'ssh_alias', message: 'OpenSSH 别名与主机地址至少填写一个'};
+    }
+    const port = Number(draft.port || 22);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return {index, field: 'port', message: '端口必须在 1 到 65535 之间'};
+  }
+  return null;
+}
+
+function revealInvalidServerDraft(problem) {
+  settingsServerQuery = '';
+  ui.editorSearch.value = '';
+  settingsServerPageOffset = Math.floor(problem.index / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
+  renderServerEditorPage({focusDraftIndex: problem.index});
+  const editor = ui.editorList.querySelector(`[data-draft-index="${problem.index}"]`);
+  const input = editor?.querySelector(`[data-field="${problem.field}"]`);
+  if (input?.closest('.server-editor-more')) input.closest('.server-editor-more').open = true;
+  input?.focus({preventScroll: true});
 }
 
 function addAndFocusServerEditor() {
-  addServerEditor();
-  const editor = ui.editorList.lastElementChild;
-  editor?.scrollIntoView({behavior: 'smooth', block: 'center'});
-  editor?.querySelector('[data-field="display_name"]')?.focus({preventScroll: true});
+  syncVisibleServerDrafts();
+  const usedIds = new Set(settingsServerDrafts.map(server => String(server.id || '').trim()));
+  let generatedIndex = 1;
+  while (usedIds.has(`server-${generatedIndex}`)) generatedIndex += 1;
+  const draftIndex = settingsServerDrafts.length;
+  settingsServerDrafts.push(serverDraftFromValue({id: `server-${generatedIndex}`}));
+  settingsServerQuery = '';
+  ui.editorSearch.value = '';
+  settingsServerPageOffset = Math.floor(draftIndex / SERVER_EDITOR_PAGE_SIZE) * SERVER_EDITOR_PAGE_SIZE;
+  renderServerEditorPage({focusDraftIndex: draftIndex});
 }
 
 function setDetailsOpen(details, open) {
@@ -2492,6 +2650,8 @@ function setOnboardingStep(step) {
   ui.profileSettings.hidden = onboarding && onboardingStep !== 3;
   ui.serverSettingsHeading.hidden = onboarding && onboardingStep !== 3;
   ui.editorList.hidden = onboarding && onboardingStep !== 3;
+  ui.editorToolbar.hidden = (onboarding && onboardingStep !== 3)
+    || (settingsServerDrafts.length <= SERVER_EDITOR_PAGE_SIZE && !settingsServerQuery);
   ui.onboardingBack.hidden = !onboarding || onboardingStep === 1;
   ui.onboardingNext.hidden = !onboarding || onboardingStep === 3;
   ui.onboardingLater.hidden = !onboarding;
@@ -2534,6 +2694,7 @@ function setSettingsMode(mode) {
     ui.importPanel.hidden = false;
     ui.serverSettingsHeading.hidden = false;
     ui.editorList.hidden = false;
+    ui.editorToolbar.hidden = settingsServerDrafts.length <= SERVER_EDITOR_PAGE_SIZE && !settingsServerQuery;
     ui.onboardingLater.hidden = true;
     ui.onboardingBack.hidden = true;
     ui.onboardingNext.hidden = true;
@@ -2616,22 +2777,23 @@ async function importServerConfig() {
 }
 
 function collectProfile() {
-  const servers = [...ui.editorList.querySelectorAll('.server-editor')].map(editor => {
-    const value = field => editor.querySelector(`[data-field="${field}"]`).value.trim();
-    const existingId = editor.dataset.originalId || value('id');
+  syncVisibleServerDrafts();
+  const servers = settingsServerDrafts.map(draft => {
+    const value = field => String(draft[field] ?? '').trim();
+    const existingId = draft._original_id || value('id');
     const existing = currentProfile?.servers?.find(item => item.id === existingId);
     const server = {
       id: value('id'), display_name: value('display_name'), backend: value('backend'), ssh_alias: value('ssh_alias'),
       host: value('host'), port: Number(value('port') || 22), username: value('username'), identity_file: value('identity_file'),
       ssh_config_file: value('ssh_config_file'),
-      port_override: editor.querySelector('[data-field="port_override"]').checked,
-      enabled: editor.dataset.enabled !== 'false',
+      port_override: Boolean(draft.port_override),
+      enabled: draft.enabled !== false,
       connect_timeout_seconds: Number(existing?.connect_timeout_seconds || 10),
-      show_other_user_commands: editor.querySelector('[data-field="show_other_user_commands"]').checked,
+      show_other_user_commands: Boolean(draft.show_other_user_commands),
     };
-    if (existing?.default_work_directory) server.default_work_directory = existing.default_work_directory;
-    if (existing?.prefer_identity_auth || editor.dataset.preferIdentityAuth === 'true') server.prefer_identity_auth = true;
-    if (server.backend === 'slurm_ssh') server.gpu_memory_gib = JSON.parse(editor.dataset.gpuMemoryGib || '{}');
+    if (draft.default_work_directory || existing?.default_work_directory) server.default_work_directory = draft.default_work_directory || existing.default_work_directory;
+    if (draft.prefer_identity_auth || existing?.prefer_identity_auth) server.prefer_identity_auth = true;
+    if (server.backend === 'slurm_ssh') server.gpu_memory_gib = draft.gpu_memory_gib || {};
     return server;
   });
   const activeAliasKeys = new Set(servers.map(server => sshAliasKey(server.ssh_alias)).filter(Boolean));
@@ -2653,11 +2815,12 @@ function collectProfile() {
 }
 
 function collectPasswordUpdates() {
+  syncVisibleServerDrafts();
   const updates = {};
-  [...ui.editorList.querySelectorAll('.server-editor')].forEach(editor => {
-    const serverId = editor.querySelector('[data-field="id"]').value.trim();
-    const enteredValue = editor.querySelector('[data-field="password"]').value;
-    const clearRequested = editor.querySelector('[data-field="clear_password"]').checked;
+  settingsServerDrafts.forEach(draft => {
+    const serverId = String(draft.id || '').trim();
+    const enteredValue = draft._password || '';
+    const clearRequested = Boolean(draft._clear_password);
     if (enteredValue) updates[serverId] = enteredValue;
     else if (clearRequested) updates[serverId] = null;
   });
@@ -2665,10 +2828,11 @@ function collectPasswordUpdates() {
 }
 
 function collectServerRenames() {
+  syncVisibleServerDrafts();
   const renames = {};
-  [...ui.editorList.querySelectorAll('.server-editor')].forEach(editor => {
-    const oldId = editor.dataset.originalId || '';
-    const newId = editor.querySelector('[data-field="id"]').value.trim();
+  settingsServerDrafts.forEach(draft => {
+    const oldId = draft._original_id || '';
+    const newId = String(draft.id || '').trim();
     if (oldId && newId && oldId !== newId) renames[newId] = oldId;
   });
   return renames;
@@ -2724,6 +2888,11 @@ async function saveSettings(event) {
   controls.forEach(control => { control.disabled = true; });
   try {
     const previousProfile = currentProfile;
+    const invalidDraft = invalidServerDraft();
+    if (invalidDraft) {
+      revealInvalidServerDraft(invalidDraft);
+      throw new Error(`第 ${invalidDraft.index + 1} 台服务器：${invalidDraft.message}`);
+    }
     const proposedProfile = collectProfile();
     const result = await api.save_profile(proposedProfile, collectPasswordUpdates(), collectServerRenames());
     if (!result.ok) {
@@ -3021,13 +3190,21 @@ ui.refresh.addEventListener('click', () => refresh(true));
 ui.monitoringToggle.addEventListener('click', toggleMonitoringPaused);
 ui.recommend.addEventListener('click', updateRecommendation);
 [ui.requiredGpuCount, ui.requiredMemory, ui.preferredGpu, ui.preferredPartition].forEach(control => {
-  control.addEventListener('input', clearRecommendation);
+  control.addEventListener('input', () => {
+    clearRecommendation();
+    scheduleResourceWatchEvaluation();
+  });
 });
 [ui.requireSameNode, ui.recommendationLimit].forEach(control => {
-  control.addEventListener('change', clearRecommendation);
+  control.addEventListener('change', () => {
+    clearRecommendation();
+    scheduleResourceWatchEvaluation();
+  });
 });
 ui.resourceWatchEnabled.addEventListener('change', () => {
+  resourceWatchCriteriaRevision += 1;
   resourceWatchMatched = false;
+  clearTimeout(resourceWatchDebounceTimer);
   if (ui.resourceWatchEnabled.checked) {
     ui.resourceWatchStatus.textContent = '正在检查条件';
     void evaluateResourceWatch();
@@ -3038,6 +3215,22 @@ ui.resourceWatchEnabled.addEventListener('change', () => {
 ui.saveView.addEventListener('click', saveCurrentView);
 ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
+ui.editorSearch.addEventListener('input', () => {
+  syncVisibleServerDrafts();
+  settingsServerQuery = ui.editorSearch.value;
+  settingsServerPageOffset = 0;
+  renderServerEditorPage();
+});
+ui.editorPreviousPage.addEventListener('click', () => {
+  syncVisibleServerDrafts();
+  settingsServerPageOffset = Math.max(0, settingsServerPageOffset - SERVER_EDITOR_PAGE_SIZE);
+  renderServerEditorPage();
+});
+ui.editorNextPage.addEventListener('click', () => {
+  syncVisibleServerDrafts();
+  settingsServerPageOffset += SERVER_EDITOR_PAGE_SIZE;
+  renderServerEditorPage();
+});
 ui.serverListPreviousPage.addEventListener('click', () => changeServerFleetPage(-1));
 ui.serverListNextPage.addEventListener('click', () => changeServerFleetPage(1));
 ui.serverNavigatorSearch.addEventListener('input', () => {
@@ -3062,7 +3255,17 @@ document.getElementById('collapse-settings').addEventListener('click', collapseS
 ui.closeSettings.addEventListener('click', () => ui.dialog.close());
 ui.cancelSettings.addEventListener('click', () => ui.dialog.close());
 ui.onboardingLater.addEventListener('click', () => ui.dialog.close());
-ui.dialog.addEventListener('close', invalidateServerDiscovery);
+ui.dialog.addEventListener('close', () => {
+  // Chromium may deliver a close event after callers have already reopened
+  // the same dialog.  Never let that stale event discard the new session's
+  // drafts or invalidate its discovery request.
+  if (ui.dialog.open) return;
+  invalidateServerDiscovery();
+  ui.editorList.replaceChildren();
+  settingsServerDrafts = [];
+  settingsServerQuery = '';
+  settingsServerPageOffset = 0;
+});
 ui.onboardingBack.addEventListener('click', () => setOnboardingStep(onboardingStep - 1));
 ui.onboardingNext.addEventListener('click', () => setOnboardingStep(onboardingStep + 1));
 document.getElementById('add-server').addEventListener('click', addAndFocusServerEditor);

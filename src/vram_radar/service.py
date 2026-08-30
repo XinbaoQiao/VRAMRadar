@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from .connectors import (
     MAX_CONCURRENT_REMOTE_CAPTURES,
+    PASSWORD_FALLBACK_AUTH_CODES,
     ConnectorFailure,
     query_account_directory,
     query_account_directory_version,
@@ -453,83 +454,6 @@ def _accepts_keyword(operation: Callable[..., Any], keyword: str) -> bool:
     )
 
 
-def recommend_server(
-    snapshot: dict[str, Any], required_memory_gib: float = 0, preferred_gpu_type: str = ""
-) -> dict[str, Any]:
-    try:
-        required = float(required_memory_gib)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("所需单卡显存必须是数字") from exc
-    if not 0 <= required <= 1000:
-        raise ValueError("所需单卡显存必须在 0 到 1000 GiB 之间")
-    preferred = str(preferred_gpu_type or "").strip().casefold()
-    candidates: list[dict[str, Any]] = []
-    for server in snapshot.get("servers", []):
-        if server.get("connection", {}).get("state") != "online":
-            continue
-        if server.get("view_kind") == "live-memory":
-            for gpu in server.get("gpus", []):
-                gpu_type = str(gpu.get("gpu_type", ""))
-                available = float(gpu.get("memory_free_gib") or 0)
-                if available < required or (preferred and preferred not in gpu_type.casefold()):
-                    continue
-                candidates.append(
-                    {
-                        "server_id": server["server_id"],
-                        "display_name": server["display_name"],
-                        "backend": server["backend"],
-                        "gpu_type": gpu_type,
-                        "location": f"GPU {gpu.get('gpu_index', '?')}",
-                        "available_memory_gib": available,
-                        "free_units": 1,
-                    }
-                )
-        elif server.get("view_kind") == "scheduler":
-            for node in server.get("nodes", []):
-                free_units = int(node.get("free_gpus") or 0)
-                gpu_type = str(node.get("gpu_type", ""))
-                per_gpu = node.get("memory_per_gpu_gib")
-                if per_gpu is None and free_units:
-                    total_free = node.get("free_vram_gib")
-                    per_gpu = float(total_free) / free_units if total_free is not None else 0
-                available = float(per_gpu or 0)
-                if free_units < 1 or available < required or (preferred and preferred not in gpu_type.casefold()):
-                    continue
-                candidates.append(
-                    {
-                        "server_id": server["server_id"],
-                        "display_name": server["display_name"],
-                        "backend": server["backend"],
-                        "gpu_type": gpu_type,
-                        "location": str(node.get("node") or "Slurm node"),
-                        "partition": str(node.get("partition") or ""),
-                        "available_memory_gib": available,
-                        "free_units": free_units,
-                    }
-                )
-    if not candidates:
-        detail = f"且卡型包含“{preferred_gpu_type.strip()}”" if preferred else ""
-        return {
-            "ok": False,
-            "recommendation_only": True,
-            "reason": f"当前没有在线设备满足单卡至少 {required:g} GiB {detail}".strip(),
-        }
-    candidates.sort(
-        key=lambda item: (-item["available_memory_gib"], -item["free_units"], item["server_id"], item["location"])
-    )
-    best = candidates[0]
-    return {
-        "ok": True,
-        "recommendation_only": True,
-        **best,
-        "reason": (
-            f"在线且满足单卡至少 {required:g} GiB；按单设备可用显存和空闲设备数排序。"
-            "这是只读推荐，不会自动占用 GPU；提交任务前请在服务器调度系统中确认。"
-        ),
-        "candidate_count": len(candidates),
-    }
-
-
 @dataclass
 class RuntimeState:
     server: ServerProfile
@@ -944,12 +868,10 @@ class DashboardService:
             # Password is a fallback only for an authentication rejection.
             # DNS, host-key, proxy and collector failures must retain their
             # original classification and must not cause a second connection.
-            password_fallback_codes = {
-                "auth_failed",
-                "identity_passphrase_required",
-                "ssh_agent_refused",
-            }
-            if identity_failure.code not in password_fallback_codes or not server.auth_ref:
+            if (
+                identity_failure.code not in PASSWORD_FALLBACK_AUTH_CODES
+                or not server.auth_ref
+            ):
                 raise
         getter = getattr(self.secret_store, "get", None)
         if getter is None:
@@ -1412,11 +1334,6 @@ class DashboardService:
                 "notices": [dict(notice) for notice in self._notices],
                 "servers": servers,
             }
-
-    def recommend(self, required_memory_gib: float = 0, preferred_gpu_type: str = "") -> dict[str, Any]:
-        return recommend_server(
-            self.snapshot(include_cluster_nodes=True), required_memory_gib, preferred_gpu_type
-        )
 
     def recommend_many(
         self,

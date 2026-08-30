@@ -71,7 +71,7 @@
             </details>
             <div class="match-actions">
               <button id="recommend-button" class="button primary" type="button">查找可用资源</button>
-              <label class="watch-toggle"><input id="resource-watch-enabled" type="checkbox"><span>有资源时提醒我</span></label>
+              <label class="watch-toggle"><input id="resource-watch-enabled" type="checkbox"><span>本次运行有资源时提醒我</span></label>
               <span id="resource-watch-status" class="resource-watch-status" role="status"></span>
             </div>
             <details class="saved-view-editor">
@@ -232,6 +232,11 @@
           </details>
         </section>
         <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p>常用信息直接显示；密码、端口、用户名和私钥放在每台服务器的第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
+          <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
+          <span id="server-editor-page-status" class="server-editor-page-status" aria-live="polite"></span>
+          <span class="server-editor-page-actions"><button id="server-editor-previous-page" class="button compact-button" type="button">上一页</button><button id="server-editor-next-page" class="button compact-button" type="button">下一页</button></span>
+        </div>
         <div id="server-editor-list" class="server-editor-list"></div>
         <div id="settings-error" class="form-error" role="alert" hidden></div>
       </div>
@@ -292,8 +297,8 @@
           <p class="ssh-key-intro"><strong>SSH Key</strong> 是更方便的服务器登录方式。配置完成后，后续连接通常不需要重复输入密码。</p>
           <ul class="ssh-key-safety">
             <li>私钥始终留在本机；只把公钥写入当前账号的 <code>authorized_keys</code>。</li>
-            <li>不会覆盖已有密钥；会检查重复项、文件类型、所有者和权限。</li>
-            <li>写入后强制使用所选私钥验证；失败会撤销本次新增内容。</li>
+            <li>远端只做非替换式追加；会检查重复项、文件类型、所有者和权限。</li>
+            <li>追加后若验证或本地保存失败，不会自动改写 <code>authorized_keys</code>；会保留匹配密钥并提示重试或精确手动移除。</li>
           </ul>
           <div class="key-mode-options" role="radiogroup" aria-label="SSH Key 来源">
             <label><input type="radio" data-key-mode="existing" checked><span><strong>使用现有密钥</strong><small>推荐；不会修改本地密钥</small></span></label>

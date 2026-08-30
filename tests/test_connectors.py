@@ -1058,6 +1058,13 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(refused.code, "ssh_agent_refused")
         self.assertEqual(refused.state, "auth_required")
 
+    def test_authorized_keys_conflict_is_actionable_and_retryable(self):
+        failure = classify_process_error("VRAM_RADAR_KEY_CONFLICT", returncode=46)
+
+        self.assertEqual(failure.code, "ssh_key_remote_conflict")
+        self.assertTrue(failure.retryable)
+        self.assertIn("其他程序修改", str(failure))
+
     def test_local_proxy_command_missing_is_not_reported_as_remote_collector_success(self):
         failure = classify_process_error(
             "/bin/sh: nc: command not found",

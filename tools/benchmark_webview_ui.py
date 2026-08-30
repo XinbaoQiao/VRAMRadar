@@ -530,9 +530,41 @@ BENCHMARK_JAVASCRIPT = r"""
     const settingsWall = performance.now() - settingsStart;
     const editors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
     const editorIds = editors.map(editor => editor.querySelector('[data-field="id"]')?.value || '');
-    const heapAfterSettings = heap();
+    const firstDisplayName = editors[0].querySelector('[data-field="display_name"]');
+    firstDisplayName.value = 'Edited across pages';
+    firstDisplayName.dispatchEvent(new Event('input', {bubbles: true}));
+    const firstPassword = editors[0].querySelector('[data-field="password"]');
+    firstPassword.value = 'benchmark-secret';
+    firstPassword.dispatchEvent(new Event('input', {bubbles: true}));
+    const detachedFirstEditor = editors[0];
+    const firstPageLastDownDisabled = editors.at(-1).querySelector('.move-server-down').disabled;
     const settingsDomNodes = ui.dialog.querySelectorAll('*').length;
-    if (ui.dialog.open) ui.dialog.close();
+    ui.editorNextPage.click();
+    const secondPageEditors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
+    const secondPageIds = secondPageEditors.map(editor => editor.querySelector('[data-field="id"]')?.value || '');
+    const secondPageFirstBeforeDetachedSync = settingsServerDrafts[20].display_name;
+    firstDisplayName.value = 'Detached editor stays with server zero';
+    syncServerDraftFromEditor(detachedFirstEditor);
+    settingsServerPageOffset = 100;
+    renderServerEditorPage();
+    const finalPageEditors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
+    const finalPageLastDownDisabled = finalPageEditors.at(-1).querySelector('.move-server-down').disabled;
+    ui.editorSearch.value = 'synthetic-119';
+    ui.editorSearch.dispatchEvent(new Event('input', {bubbles: true}));
+    const searchedIds = [...ui.editorList.querySelectorAll(':scope > .server-editor')]
+      .map(editor => editor.querySelector('[data-field="id"]')?.value || '');
+    const collectedProfile = collectProfile();
+    const collectedPasswords = collectPasswordUpdates();
+    const detachedEditorSyncUsesStableIdentity = settingsServerDrafts[0].display_name === 'Detached editor stays with server zero'
+      && settingsServerDrafts[20].display_name === secondPageFirstBeforeDetachedSync;
+    ui.dialog.dispatchEvent(new Event('close'));
+    const staleClosePreservesOpenSession = settingsServerDrafts.length === 120;
+    const heapAfterSettings = heap();
+    if (ui.dialog.open) {
+      ui.dialog.close();
+      ui.dialog.dispatchEvent(new Event('close'));
+    }
+    const closedEditorCount = ui.editorList.querySelectorAll(':scope > .server-editor').length;
 
     const assertions = {
       initial_visible_cards_paginated_to_50: visibleCardsAfterInitial === 50,
@@ -547,8 +579,17 @@ BENCHMARK_JAVASCRIPT = r"""
       directory_collapse_releases_cached_children: collapsedFileNodes === 0 && collapsedModuleNodes === firstModuleNodes,
       directory_updates_preserve_server_card: directoryCardBefore === ui.list.querySelector('.server-card'),
       directory_uses_three_local_repaints: metricDelta(directoryMetricsAfter, directoryMetricsBefore).directoryRepaints === 3,
-      settings_builds_all_120_servers: editors.length === 120,
-      settings_server_ids_remain_unique: new Set(editorIds).size === 120,
+      settings_renders_only_first_20_servers: editors.length === 20,
+      settings_first_page_ids_remain_unique: new Set(editorIds).size === 20,
+      settings_first_page_boundary_allows_cross_page_move: firstPageLastDownDisabled === false,
+      settings_second_page_is_distinct: secondPageIds.length === 20 && secondPageIds[0] !== editorIds[0],
+      settings_final_global_item_disables_move_down: finalPageLastDownDisabled === true,
+      settings_detached_editor_sync_uses_stable_identity: detachedEditorSyncUsesStableIdentity,
+      settings_stale_close_event_preserves_open_session: staleClosePreservesOpenSession,
+      settings_search_renders_only_match: searchedIds.length === 1 && searchedIds[0] === 'synthetic-119',
+      settings_cross_page_edit_is_preserved: collectedProfile.servers.length === 120 && collectedProfile.servers[0].display_name === 'Detached editor stays with server zero',
+      settings_cross_page_password_is_preserved_outside_profile: collectedPasswords['synthetic-000'] === 'benchmark-secret' && !JSON.stringify(collectedProfile).includes('benchmark-secret'),
+      settings_close_releases_editor_dom: closedEditorCount === 0,
     };
     return JSON.stringify({
       ok: Object.values(assertions).every(Boolean),

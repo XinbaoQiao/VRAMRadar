@@ -83,6 +83,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 - Search and filter by favorites, recent servers, available capacity, your jobs, or attention state.
 - Drag the navigator between the left and right edges; the preference survives restarts and application updates.
 - Render at most 50 server cards per main page and 80 navigator items per window.
+- Search server settings and render only 20 editable forms per page; closing Settings releases those form nodes.
 - For Slurm clusters above 64 nodes or 256 GPUs, show model, partition, and capacity summaries before loading 75 node rows at a time.
 
 ### Start from existing SSH configuration
@@ -93,7 +94,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 - Remember imported SSH aliases that you explicitly remove. Later startup and synchronization skip those aliases while still discovering newly added `Host` entries; adding an alias back manually clears the ignore record.
 - OpenSSH import retains only server ID, backend type, alias, and source-config reference. It does not copy usernames, `IdentityFile` values, private keys, or credentials; no local Profile, server address, or user data enters a public package.
 - When discovery finds nothing, show platform-specific paths, commands, and copy buttons in the built-in guide.
-- For any saved server, open the per-server SSH Key guide to reuse an existing key or generate a dedicated Ed25519 key, deploy only its public half, verify the selected identity, and roll back a failed installation.
+- For any saved server, open the per-server SSH Key guide to reuse an existing key or generate a dedicated Ed25519 key, append only its public half without replacing `authorized_keys`, and verify the selected identity. If verification or the local Profile save fails after the append, the app retains the appended public key and matching generated local key, reports recovery as required, and guides the user to retry or remove that exact key manually.
 
 ### Accounts, jobs, and code directories
 
@@ -194,7 +195,8 @@ If no source is found, follow the [Windows and macOS SSH configuration discovery
 - A Profile stores a non-secret reference; passwords never enter the Profile, Git, logs, command-line arguments, or child-process environment.
 - The packaged one-time askpass helper obtains a password through an authenticated private loopback exchange.
 - Before the SSH Key guide is completed, a saved password selects password authentication for that server. After a key is verified, the selected identity is tried first and the OS-stored password remains a local auth-failure fallback.
-- The SSH Key guide never overwrites an existing local key. It sends only a validated public key over SSH stdin, rejects unsafe remote `.ssh` / `authorized_keys` ownership or file types, prevents duplicate entries, and verifies with `IdentitiesOnly=yes` before saving.
+- The SSH Key guide never overwrites an existing local key. It sends only a validated public key over SSH stdin, rejects unsafe remote `.ssh` / `authorized_keys` ownership or file types, prevents duplicate entries, and installs with a non-replacing append instead of replacing `authorized_keys`.
+- After a public key has been appended, a later identity-verification or local Profile-save failure does not trigger an automatic rewrite or deletion of `authorized_keys`, because that could erase a concurrent edit. The app retains the appended public key and its matching generated local key, returns `recovery_required`, and tells the user to retry or remove that exact public key manually.
 - A generated app-specific Ed25519 private key stays under the current user's application configuration directory with restricted permissions. It is intentionally passphrase-free for unattended monitoring; users who require a passphrase should select an existing key and load it through ssh-agent.
 - Verify a server's Host Key outside the app before first use. A changed Host Key is treated as a security error and is not retried automatically.
 - Profiles, server catalogs, caches, logs, locks, and credentials remain on the current user's computer and never enter the public installer or archive.
@@ -210,7 +212,7 @@ If no source is found, follow the [Windows and macOS SSH configuration discovery
 | Desktop runtime | WebView2 / native window | Cocoa / WebKit |
 | Shortcut after update | Stable install path; verified one-click upgrade after the bootstrap release | Replace the `.app` manually |
 | Current signing claim | Unsigned; per-user install avoids UAC | Unsigned and unnotarized; one Finder confirmation required |
-| Update behavior | Check and notify; never auto-install | Check and notify; never auto-install |
+| Update behavior | Check and notify; install only after confirmation, verification, and rollback preparation | Check and notify; verify the archive, then replace the `.app` manually |
 
 More detail:
 

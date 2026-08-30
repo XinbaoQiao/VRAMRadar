@@ -2,6 +2,7 @@ import base64
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import struct
 import tempfile
@@ -15,13 +16,14 @@ from vram_radar.ssh_keys import (
     prepare_existing_key,
     prepare_generated_key,
     remove_generated_key,
-    rollback_authorized_key_script,
 )
 
 
 KEY_TYPE = b"ssh-ed25519"
 PUBLIC_BLOB = base64.b64encode(struct.pack(">I", len(KEY_TYPE)) + KEY_TYPE + b"x" * 32).decode("ascii")
 PUBLIC_LINE = f"ssh-ed25519 {PUBLIC_BLOB}"
+PUBLIC_BLOB_2 = base64.b64encode(struct.pack(">I", len(KEY_TYPE)) + KEY_TYPE + b"y" * 32).decode("ascii")
+PUBLIC_LINE_2 = f"ssh-ed25519 {PUBLIC_BLOB_2}"
 
 
 class SshKeyTests(unittest.TestCase):
@@ -93,21 +95,20 @@ class SshKeyTests(unittest.TestCase):
             self.assertFalse(first.private_path.exists())
             self.assertFalse(first.public_path and first.public_path.exists())
 
-    def test_remote_scripts_are_bounded_to_public_key_and_restore_creation_state(self):
-        rollback = rollback_authorized_key_script(ssh_existed=False, auth_existed=False)
-
-        for script in (INSTALL_AUTHORIZED_KEY_SCRIPT, rollback):
-            self.assertIn("authorized_keys", script)
-            self.assertIn("read -r key_type key_blob", script)
-            self.assertNotIn("PRIVATE-CANARY", script)
-        self.assertIn("[ 0 -eq 0 ]", rollback)
-        self.assertIn("rmdir", rollback)
+    def test_remote_install_is_bounded_append_only_and_never_replaces_authorized_keys(self):
+        self.assertIn("authorized_keys", INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertIn("read -r key_type key_blob", INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertIn("VRAM_RADAR_KEY_CONFLICT", INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertIn('ln "$auth" "$pin"', INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertIn('>> "$pin"', INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertNotIn("mv -f", INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertNotIn("cksum", INSTALL_AUTHORIZED_KEY_SCRIPT)
+        self.assertNotIn("PRIVATE-CANARY", INSTALL_AUTHORIZED_KEY_SCRIPT)
 
     @unittest.skipUnless(shutil.which("bash"), "bash is required for remote-script syntax validation")
     def test_remote_scripts_parse_with_the_system_bash_contract(self):
         for script in (
             INSTALL_AUTHORIZED_KEY_SCRIPT,
-            rollback_authorized_key_script(ssh_existed=True, auth_existed=True, auth_mode="640"),
         ):
             parsed = subprocess.run(
                 [shutil.which("bash") or "bash", "-n", "-c", script],
@@ -118,6 +119,97 @@ class SshKeyTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(parsed.returncode, 0, parsed.stderr.decode(errors="replace"))
+
+    @unittest.skipUnless(shutil.which("bash"), "bash is required for remote conflict validation")
+    def test_remote_install_preserves_a_concurrent_append_to_the_same_authorized_keys_inode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            ssh_dir = home / ".ssh"
+            ssh_dir.mkdir(parents=True)
+            if os.name != "nt":
+                home.chmod(0o700)
+                ssh_dir.chmod(0o700)
+            authorized = ssh_dir / "authorized_keys"
+            authorized.write_text(PUBLIC_LINE + "\n", encoding="ascii")
+            if os.name != "nt":
+                authorized.chmod(0o600)
+            external_line = "ssh-ed25519 EXTERNAL-CONCURRENT-KEY"
+            prefix = f"""
+ln() {{
+  command ln "$@"
+  status=$?
+  if [ "$status" -eq 0 ]; then
+    printf '%s\\n' {shlex.quote(external_line)} >> "$1"
+  fi
+  return "$status"
+}}
+"""
+            environment = dict(os.environ)
+            environment["HOME"] = str(home)
+
+            result = subprocess.run(
+                [shutil.which("bash") or "bash", "-c", prefix + INSTALL_AUTHORIZED_KEY_SCRIPT],
+                input=(PUBLIC_LINE_2 + "\n").encode("ascii"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                timeout=10,
+                check=False,
+            )
+
+            final_text = authorized.read_text(encoding="ascii")
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+            self.assertIn("VRAM_RADAR_KEY_SETUP|installed", result.stdout.decode(errors="replace"))
+            self.assertIn(PUBLIC_LINE, final_text)
+            self.assertIn(external_line, final_text)
+            self.assertIn(PUBLIC_LINE_2, final_text)
+
+    @unittest.skipUnless(shutil.which("bash"), "bash is required for remote conflict validation")
+    def test_remote_install_never_replaces_a_path_changed_after_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            ssh_dir = home / ".ssh"
+            ssh_dir.mkdir(parents=True)
+            if os.name != "nt":
+                home.chmod(0o700)
+                ssh_dir.chmod(0o700)
+            authorized = ssh_dir / "authorized_keys"
+            moved = ssh_dir / "authorized_keys.concurrent"
+            authorized.write_text(PUBLIC_LINE + "\n", encoding="ascii")
+            if os.name != "nt":
+                authorized.chmod(0o600)
+            external_line = "ssh-ed25519 EXTERNAL-REPLACEMENT-KEY"
+            prefix = f"""
+awk() {{
+  command awk "$@"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    mv {shlex.quote(str(authorized))} {shlex.quote(str(moved))}
+    printf '%s\\n' {shlex.quote(external_line)} > {shlex.quote(str(authorized))}
+    chmod 600 {shlex.quote(str(authorized))}
+  fi
+  return "$status"
+}}
+"""
+            environment = dict(os.environ)
+            environment["HOME"] = str(home)
+
+            result = subprocess.run(
+                [shutil.which("bash") or "bash", "-c", prefix + INSTALL_AUTHORIZED_KEY_SCRIPT],
+                input=(PUBLIC_LINE_2 + "\n").encode("ascii"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 46, result.stderr.decode(errors="replace"))
+            self.assertIn("VRAM_RADAR_KEY_CONFLICT", result.stderr.decode(errors="replace"))
+            self.assertEqual(authorized.read_text(encoding="ascii"), external_line + "\n")
+            moved_text = moved.read_text(encoding="ascii")
+            self.assertIn(PUBLIC_LINE, moved_text)
+            self.assertIn(PUBLIC_LINE_2, moved_text)
 
     @unittest.skipIf(os.name == "nt", "POSIX mode check runs on native macOS/Linux validation")
     def test_generated_private_key_has_posix_user_only_permissions(self):

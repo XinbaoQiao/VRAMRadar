@@ -83,6 +83,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
         validator = (ROOT / "tools" / "validate_packaged_tray.py").read_text(encoding="utf-8")
         self.assertIn("SC_MINIMIZE", validator)
         self.assertIn("WM_CLOSE", validator)
+        self.assertIn("HWND_TOPMOST", validator)
+        self.assertIn("HWND_NOTOPMOST", validator)
         self.assertIn('"--quit-existing"', validator)
         self.assertIn('"--no-auto-import"', validator)
 

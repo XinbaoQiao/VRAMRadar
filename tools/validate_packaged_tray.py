@@ -16,6 +16,12 @@ EXECUTABLE = ROOT / "dist" / "VRAMRadar" / "VRAMRadar.exe"
 WM_CLOSE = 0x0010
 WM_SYSCOMMAND = 0x0112
 SC_MINIMIZE = 0xF020
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
 
 
 class WindowRect(ctypes.Structure):
@@ -97,6 +103,16 @@ def window_content_is_painted(window: int) -> bool:
     user32.WindowFromPoint.restype = wintypes.HWND
     user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     user32.GetAncestor.restype = wintypes.HWND
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = wintypes.BOOL
     gdi32.GetPixel.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
     gdi32.GetPixel.restype = wintypes.DWORD
     native_window = wintypes.HWND(window)
@@ -113,9 +129,35 @@ def window_content_is_painted(window: int) -> bool:
     if not user32.ClientToScreen(native_window, ctypes.byref(origin)):
         return False
     user32.SetForegroundWindow(native_window)
+    raised_for_sampling = bool(
+        user32.SetWindowPos(
+            native_window,
+            wintypes.HWND(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+    )
+    if raised_for_sampling:
+        try:
+            ctypes.windll.dwmapi.DwmFlush()
+        except (AttributeError, OSError):
+            pass
     desktop = wintypes.HWND(0)
     device = user32.GetDC(desktop)
     if not device:
+        if raised_for_sampling:
+            user32.SetWindowPos(
+                native_window,
+                wintypes.HWND(HWND_NOTOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
         return False
     colors: set[int] = set()
     loading_color = 0x00171007  # COLORREF for WebView background #071017
@@ -137,6 +179,16 @@ def window_content_is_painted(window: int) -> bool:
                 total_samples += 1
     finally:
         user32.ReleaseDC(desktop, device)
+        if raised_for_sampling:
+            user32.SetWindowPos(
+                native_window,
+                wintypes.HWND(HWND_NOTOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
     return (
         total_samples >= 100
         and len(colors) >= 4

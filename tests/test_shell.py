@@ -1350,6 +1350,71 @@ class ShellApiTests(unittest.TestCase):
             self.assertTrue(result["profile"]["servers"][0]["has_password"])
             self.assertEqual(secrets.values, {"server:local:gpu:login-password": "saved-password"})
 
+    def test_endpoint_change_clears_saved_password_unless_user_reenters_it(self):
+        class FakeSecrets:
+            def __init__(self):
+                self.values = {}
+
+            def get(self, ref):
+                return self.values.get(ref)
+
+            def set(self, ref, value):
+                self.values[ref] = value
+
+            def delete(self, ref):
+                self.values.pop(ref, None)
+
+        class FakeService:
+            secret_store = None
+
+            def replace_profile(self, profile, cache):
+                self.profile = profile
+                self.cache = cache
+
+        original = {
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "My GPUs",
+            "servers": [
+                {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "old.test"}
+            ],
+        }
+        changed = copy.deepcopy(original)
+        changed["servers"][0]["host"] = "new.test"
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            secrets = FakeSecrets()
+            api = AppApi(
+                Profile.empty("local"),
+                store,
+                paths,
+                FakeService(),
+                secret_store=secrets,
+            )  # type: ignore[arg-type]
+            self.assertTrue(
+                api.save_profile(self.versioned_profile(api, original), {"gpu": "old-password"})["ok"]
+            )
+
+            cleared = api.save_profile(self.versioned_profile(api, changed))
+
+            self.assertTrue(cleared["ok"])
+            self.assertFalse(cleared["profile"]["servers"][0]["has_password"])
+            self.assertFalse(secrets.values)
+            self.assertIn("新端点发送旧密码", cleared["warnings"][0])
+
+            rebound = api.save_profile(
+                self.versioned_profile(api, original),
+                {"gpu": "confirmed-password"},
+            )
+
+            self.assertTrue(rebound["ok"])
+            self.assertTrue(rebound["profile"]["servers"][0]["has_password"])
+            self.assertEqual(
+                secrets.values,
+                {"server:local:gpu:login-password": "confirmed-password"},
+            )
+
     def test_profile_removal_fails_closed_when_os_credential_cannot_be_deleted(self):
         class RefusingSecrets:
             def __init__(self):
@@ -1582,7 +1647,63 @@ class ShellApiTests(unittest.TestCase):
             self.assertTrue(remote.call_args_list[2].kwargs["identities_only"])
             secret_store.get.assert_called_once_with("server:local:gpu:login-password")
 
-    def test_ssh_key_setup_rolls_back_new_remote_and_local_key_after_verification_failure(self):
+    def test_ssh_key_setup_uses_saved_password_when_key_needs_unlock_or_agent_refuses(self):
+        for failure_code in ("identity_passphrase_required", "ssh_agent_refused"):
+            with self.subTest(failure_code=failure_code), tempfile.TemporaryDirectory() as temporary:
+                profile = Profile.from_dict(
+                    {
+                        "schema_version": 1,
+                        "id": "local",
+                        "display_name": "Local",
+                        "servers": [
+                            {
+                                "id": "gpu",
+                                "display_name": "GPU",
+                                "backend": "direct_ssh",
+                                "host": "gpu.test",
+                                "auth_ref": "server:local:gpu:login-password",
+                            }
+                        ],
+                    }
+                )
+                paths = storage_paths(Path(temporary))
+                store = ProfileStore(paths)
+                store.save(profile)
+                secret_store = Mock()
+                secret_store.get.return_value = "saved-password"
+                prepared = PreparedSshKey(
+                    private_path=Path(temporary) / "private-key",
+                    public_path=Path(temporary) / "private-key.pub",
+                    public_line="ssh-ed25519 PUBLIC-BLOB",
+                    generated=False,
+                )
+                api = AppApi(profile, store, paths, Mock(), secret_store=secret_store)
+                with (
+                    patch("vram_radar.shell.prepare_existing_key", return_value=prepared),
+                    patch(
+                        "vram_radar.shell.run_remote",
+                        side_effect=[
+                            ConnectorFailure(
+                                failure_code,
+                                "key unavailable",
+                                retryable=False,
+                                state="auth_required",
+                            ),
+                            "VRAM_RADAR_KEY_SETUP|installed|1|1|600\n",
+                            "VRAM_RADAR_KEY_VERIFY|ok\n",
+                        ],
+                    ) as remote,
+                ):
+                    result = api.configure_ssh_key(
+                        "gpu",
+                        {"mode": "existing", "private_key_path": str(prepared.private_path)},
+                    )
+
+                self.assertTrue(result["ok"])
+                self.assertEqual(remote.call_args_list[1].kwargs["password"], "saved-password")
+                self.assertTrue(remote.call_args_list[2].kwargs["identities_only"])
+
+    def test_ssh_key_setup_retains_new_remote_and_local_key_after_verification_failure(self):
         profile = Profile.from_dict(
             {
                 "schema_version": 1,
@@ -1609,20 +1730,22 @@ class ShellApiTests(unittest.TestCase):
                     side_effect=[
                         "VRAM_RADAR_KEY_SETUP|installed|0|0|600\n",
                         ConnectorFailure("auth_failed", "denied", retryable=False, state="auth_required"),
-                        "VRAM_RADAR_KEY_ROLLBACK|ok\n",
                     ],
                 ) as remote,
             ):
                 result = api.configure_ssh_key("gpu", {"mode": "generate"})
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["code"], "ssh_key_verify_failed")
-        self.assertEqual(result["stages"][-1]["id"], "rollback")
-        self.assertEqual(result["stages"][-1]["state"], "passed")
-        self.assertIn("[ 0 -eq 0 ]", remote.call_args_list[2].args[1])
-        remove.assert_called_once_with(prepared)
+        self.assertEqual(result["code"], "ssh_key_recovery_required")
+        self.assertTrue(result["recovery_required"])
+        self.assertTrue(result["local_key_retained"])
+        self.assertEqual(result["stages"][-1]["id"], "recovery")
+        self.assertEqual(result["stages"][-1]["state"], "failed")
+        self.assertIn("未自动重写 authorized_keys", result["stages"][-1]["message"])
+        self.assertEqual(remote.call_count, 2)
+        remove.assert_not_called()
 
-    def test_ssh_key_setup_does_not_claim_generated_key_cleanup_when_delete_fails(self):
+    def test_ssh_key_setup_keeps_generated_key_for_retry_when_remote_key_already_existed(self):
         profile = Profile.from_dict(
             {
                 "schema_version": 1,
@@ -1643,25 +1766,24 @@ class ShellApiTests(unittest.TestCase):
             api = AppApi(profile, store=Mock(), paths=storage_paths(Path(temporary)), service=Mock())
             with (
                 patch("vram_radar.shell.prepare_generated_key", return_value=prepared),
-                patch("vram_radar.shell.remove_generated_key", return_value=False) as remove,
+                patch("vram_radar.shell.remove_generated_key") as remove,
                 patch(
                     "vram_radar.shell.run_remote",
                     side_effect=[
-                        "VRAM_RADAR_KEY_SETUP|installed|0|0|600\n",
+                        "VRAM_RADAR_KEY_SETUP|already_present|1|1|600\n",
                         ConnectorFailure("auth_failed", "denied", retryable=False, state="auth_required"),
-                        "VRAM_RADAR_KEY_ROLLBACK|ok\n",
                     ],
                 ),
             ):
                 result = api.configure_ssh_key("gpu", {"mode": "generate"})
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["code"], "ssh_key_rollback_failed")
-        self.assertTrue(result["recovery_required"])
+        self.assertEqual(result["code"], "ssh_key_verify_failed")
+        self.assertFalse(result["recovery_required"])
         self.assertTrue(result["local_key_retained"])
-        self.assertEqual(result["stages"][-1]["state"], "failed")
-        self.assertIn("本地密钥", result["error"])
-        remove.assert_called_once_with(prepared)
+        self.assertEqual(result["stages"][-1]["state"], "passed")
+        self.assertIn("未改动远端内容", result["stages"][-1]["message"])
+        remove.assert_not_called()
 
     def test_ssh_key_setup_reports_cleanup_failure_before_remote_deployment(self):
         profile = Profile.from_dict(
@@ -1725,7 +1847,7 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result["code"], "key_not_found")
         remote.assert_not_called()
 
-    def test_ssh_key_setup_rolls_back_remote_change_when_profile_save_fails(self):
+    def test_ssh_key_setup_preserves_valid_remote_key_when_profile_save_fails(self):
         profile = Profile.from_dict(
             {
                 "schema_version": 1,
@@ -1753,7 +1875,6 @@ class ShellApiTests(unittest.TestCase):
                     side_effect=[
                         "VRAM_RADAR_KEY_SETUP|installed|1|1|640\n",
                         "VRAM_RADAR_KEY_VERIFY|ok\n",
-                        "VRAM_RADAR_KEY_ROLLBACK|ok\n",
                     ],
                 ) as remote,
             ):
@@ -1763,12 +1884,13 @@ class ShellApiTests(unittest.TestCase):
                 )
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["code"], "profile_save_failed")
-        self.assertIn("chmod 640", remote.call_args_list[2].args[1])
-        self.assertFalse(result["recovery_required"])
+        self.assertEqual(result["code"], "ssh_key_setup_recovery_required")
+        self.assertEqual(remote.call_count, 2)
+        self.assertTrue(result["recovery_required"])
         self.assertEqual(result["stages"][-2]["id"], "profile")
-        self.assertEqual(result["stages"][-1]["id"], "rollback")
-        self.assertEqual(result["stages"][-1]["state"], "passed")
+        self.assertEqual(result["stages"][-1]["id"], "recovery")
+        self.assertEqual(result["stages"][-1]["state"], "failed")
+        self.assertIn("公钥和本地密钥被保留", result["stages"][-1]["message"])
 
     def test_ssh_key_setup_requires_recovery_when_local_profile_rollback_fails(self):
         profile = Profile.from_dict(
@@ -1800,7 +1922,6 @@ class ShellApiTests(unittest.TestCase):
                     side_effect=[
                         "VRAM_RADAR_KEY_SETUP|installed|1|1|600\n",
                         "VRAM_RADAR_KEY_VERIFY|ok\n",
-                        "VRAM_RADAR_KEY_ROLLBACK|ok\n",
                     ],
                 ),
             ):
@@ -1810,9 +1931,9 @@ class ShellApiTests(unittest.TestCase):
                 )
 
         self.assertFalse(result["ok"])
-        self.assertEqual(result["code"], "ssh_key_setup_rollback_failed")
+        self.assertEqual(result["code"], "ssh_key_setup_recovery_required")
         self.assertTrue(result["recovery_required"])
-        self.assertEqual(result["stages"][-1]["id"], "rollback")
+        self.assertEqual(result["stages"][-1]["id"], "recovery")
         self.assertEqual(result["stages"][-1]["state"], "failed")
         self.assertEqual(store.save.call_count, 2)
 

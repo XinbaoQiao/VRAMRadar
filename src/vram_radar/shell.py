@@ -26,6 +26,7 @@ import webbrowser
 from typing import Any, Callable
 
 from .connectors import (
+    PASSWORD_FALLBACK_AUTH_CODES,
     ConnectorFailure,
     resolve_identity_path,
     resolve_ssh_config_path,
@@ -62,7 +63,6 @@ from .ssh_keys import (
     prepare_existing_key,
     prepare_generated_key,
     remove_generated_key,
-    rollback_authorized_key_script,
 )
 from .storage import (
     ProfileStore,
@@ -117,6 +117,22 @@ def _existing_file(path: str | Path) -> bool:
         return Path(path).expanduser().is_file()
     except (OSError, RuntimeError, TypeError, ValueError):
         return False
+
+
+def _authentication_endpoint_identity(server: Any) -> tuple[Any, ...]:
+    """Return the non-secret endpoint identity to which a saved password applies."""
+
+    alias = str(server.ssh_alias or "")
+    effective_port = server.port if not alias or server.port_override else None
+    config_path = resolve_ssh_config_path(server) if server.ssh_config_file else ""
+    return (
+        alias.casefold(),
+        str(server.host or "").casefold(),
+        str(server.username or ""),
+        effective_port,
+        bool(server.port_override),
+        os.path.normcase(config_path),
+    )
 
 
 def _ssh_support_diagnostics(servers: tuple[Any, ...]) -> dict[str, Any]:
@@ -1598,35 +1614,14 @@ class AppApi:
         key_input = (prepared.public_line + "\n").encode("ascii")
         deploy_auth: str | None = None
         remote_added = False
-        ssh_existed = True
-        auth_existed = True
-        auth_mode = "600"
-
-        def rollback_remote_key() -> bool:
-            if not remote_added:
-                return True
-            try:
-                output = run_remote(
-                    server,
-                    rollback_authorized_key_script(
-                        ssh_existed=ssh_existed,
-                        auth_existed=auth_existed,
-                        auth_mode=auth_mode,
-                    ),
-                    **{"password": deploy_auth},
-                    stdin_data=key_input,
-                )
-            except (ConnectorFailure, OSError):
-                return False
-            return "VRAM_RADAR_KEY_ROLLBACK|ok" in output.splitlines()
 
         def cleanup_generated_key(*, safe_to_remove: bool) -> tuple[bool, bool]:
             """Return (local_key_retained, cleanup_succeeded).
 
             Retaining a generated key is intentional while the remote result is
-            uncertain. When deletion is safe and attempted, however, the helper
-            result is authoritative: an unlink failure must never be reported
-            as a completed rollback.
+            uncertain. When deletion is safe and attempted before any remote
+            append, the helper result is authoritative: an unlink failure must
+            never be reported as completed cleanup.
             """
 
             if not prepared.generated:
@@ -1644,7 +1639,7 @@ class AppApi:
                     stdin_data=key_input,
                 )
             except ConnectorFailure as exc:
-                if exc.code != "auth_failed":
+                if exc.code not in PASSWORD_FALLBACK_AUTH_CODES:
                     raise
                 deploy_auth = self._saved_server_password(server)
                 install_output = run_remote(
@@ -1670,9 +1665,6 @@ class AppApi:
                     "服务器没有返回可验证的公钥安装结果，未更新本地配置",
                 )
             remote_added = parts[1] == "installed"
-            ssh_existed = parts[2] == "1"
-            auth_existed = parts[3] == "1"
-            auth_mode = parts[4]
             stages.append(
                 self._key_setup_stage(
                     "public_key",
@@ -1680,7 +1672,7 @@ class AppApi:
                     "passed",
                     "服务器已存在同一公钥，未重复写入"
                     if not remote_added
-                    else "公钥已原子写入 authorized_keys，私钥未传输",
+                    else "公钥已仅追加写入 authorized_keys，未替换现有内容；私钥未传输",
                 )
             )
         except SshKeySetupError as exc:
@@ -1773,64 +1765,65 @@ class AppApi:
                 )
             )
         except (ConnectorFailure, SshKeySetupError) as exc:
-            rolled_back = rollback_remote_key()
             local_retained, cleanup_succeeded = cleanup_generated_key(
-                safe_to_remove=remote_added and rolled_back
+                safe_to_remove=False
             )
-            rollback_succeeded = rolled_back and cleanup_succeeded
+            recovery_required = remote_added or not cleanup_succeeded
             message = (
                 "公钥已写入，但所选私钥验证失败；如私钥带口令，请先加载 ssh-agent"
                 if isinstance(exc, ConnectorFailure) and exc.code == "auth_failed"
                 else str(exc)
             )
+            if remote_added:
+                message += (
+                    "；为避免误删 authorized_keys 中其他程序的并发修改，"
+                    "新增公钥和本地密钥已保留，请修复认证后重试或人工删除该公钥"
+                )
             stages.append(self._key_setup_stage("verification", "免密验证", "failed", message))
             stages.append(
                 self._key_setup_stage(
-                    "rollback",
-                    "失败回滚",
-                    "passed" if rollback_succeeded else "failed",
-                    "已撤销本次新增的远端公钥和本地专用密钥"
-                    if rollback_succeeded and remote_added and prepared.generated
-                    else "已撤销本次新增的远端公钥"
-                    if rollback_succeeded and remote_added
-                    else "服务器原本已有同一公钥，未删除任何现有内容"
-                    if rollback_succeeded
-                    else "远端或本地密钥回滚未完成；本地专用密钥已保留，便于人工恢复",
+                    "recovery",
+                    "安全恢复",
+                    "failed" if recovery_required else "passed",
+                    "未自动重写 authorized_keys；新增公钥和本地密钥已保留，需重试或人工处理"
+                    if remote_added
+                    else "服务器原本已有同一公钥，未改动远端内容；本地密钥已保留便于重试",
                 )
             )
             return {
                 "ok": False,
-                "code": "ssh_key_verify_failed" if rollback_succeeded else "ssh_key_rollback_failed",
-                "error": message if rollback_succeeded else f"{message}；自动回滚未完成，请检查本地密钥和 authorized_keys",
+                "code": "ssh_key_recovery_required" if recovery_required else "ssh_key_verify_failed",
+                "error": message,
                 "stages": stages,
                 "local_key_retained": local_retained,
-                "recovery_required": not rollback_succeeded,
+                "recovery_required": recovery_required,
             }
         except Exception:
-            rolled_back = rollback_remote_key()
             local_retained, cleanup_succeeded = cleanup_generated_key(
-                safe_to_remove=remote_added and rolled_back
+                safe_to_remove=False
             )
-            rollback_succeeded = rolled_back and cleanup_succeeded
+            recovery_required = remote_added or not cleanup_succeeded
             message = "验证 SSH Key 时发生未知错误"
+            if remote_added:
+                message += "；为避免覆盖 authorized_keys 的并发修改，新增公钥和本地密钥已保留"
             stages.append(self._key_setup_stage("verification", "免密验证", "failed", message))
             stages.append(
                 self._key_setup_stage(
-                    "rollback",
-                    "失败回滚",
-                    "passed" if rollback_succeeded else "failed",
-                    "已撤销本次新增内容"
-                    if rollback_succeeded
-                    else "自动回滚未完成，请检查本地密钥和 authorized_keys",
+                    "recovery",
+                    "安全恢复",
+                    "failed" if recovery_required else "passed",
+                    "未自动重写 authorized_keys；请重试或人工检查新增公钥"
+                    if remote_added
+                    else "远端原有内容未改变；本地密钥已保留便于重试",
                 )
             )
             return {
                 "ok": False,
-                "code": "ssh_key_verify_failed" if rollback_succeeded else "ssh_key_rollback_failed",
-                "error": message if rollback_succeeded else f"{message}；自动回滚未完成",
+                "code": "ssh_key_recovery_required" if recovery_required else "ssh_key_verify_failed",
+                "error": message,
                 "stages": stages,
                 "local_key_retained": local_retained,
-                "recovery_required": not rollback_succeeded,
+                "recovery_required": recovery_required,
             }
 
         old_profile = self.profile
@@ -1853,12 +1846,11 @@ class AppApi:
                     self.service.replace_profile(old_profile, SnapshotCache(self.paths, old_profile.id))
                 except Exception:
                     profile_rolled_back = False
-            remote_rolled_back = rollback_remote_key()
             local_retained, cleanup_succeeded = cleanup_generated_key(
-                safe_to_remove=remote_added and remote_rolled_back
+                safe_to_remove=False
             )
             recovery_required = (
-                not profile_rolled_back or not remote_rolled_back or not cleanup_succeeded
+                not profile_rolled_back or remote_added or not cleanup_succeeded
             )
             stages.append(
                 self._key_setup_stage(
@@ -1872,21 +1864,26 @@ class AppApi:
             )
             stages.append(
                 self._key_setup_stage(
-                    "rollback",
-                    "失败回滚",
+                    "recovery",
+                    "安全恢复",
                     "passed" if not recovery_required else "failed",
-                    "本地配置与远端公钥均已恢复"
+                    "本地配置已恢复，服务器原有公钥内容未改变"
                     if not recovery_required
-                    else "自动恢复未完整完成，请按诊断信息检查本地配置和 authorized_keys",
+                    else (
+                        "本地配置已恢复；为避免覆盖 authorized_keys 的并发修改，"
+                        "已验证的新增公钥和本地密钥被保留，请重试保存或人工处理"
+                    )
+                    if profile_rolled_back and remote_added
+                    else "本地配置恢复未完成；密钥已保留，请按诊断信息人工检查",
                 )
             )
             return {
                 "ok": False,
-                "code": "profile_save_failed" if not recovery_required else "ssh_key_setup_rollback_failed",
+                "code": "profile_save_failed" if not recovery_required else "ssh_key_setup_recovery_required",
                 "error": (
-                    "无法保存 SSH Key 配置，已恢复原状态"
+                    "无法保存 SSH Key 配置；本地配置已恢复，远端原有内容未改变"
                     if not recovery_required
-                    else "SSH Key 配置失败且自动恢复未完整完成，请复制诊断并人工检查"
+                    else "SSH Key 配置未完成；为保护 authorized_keys，密钥已安全保留，请重试或复制诊断后人工检查"
                 ),
                 "stages": stages,
                 "local_key_retained": local_retained,
@@ -2089,6 +2086,37 @@ class AppApi:
                         server_config_path=str(sync_source),
                         auto_sync_servers=True,
                     )
+
+            # A saved password belongs to the endpoint the user reviewed. Do
+            # not silently carry it to a different Host/User/Port/config after
+            # a manual edit or catalog synchronization. Supplying a password
+            # in this same save explicitly binds it to the new endpoint.
+            endpoint_changed_ids: list[str] = []
+            rebound_servers = []
+            for new_server in profile.servers:
+                old_server = old_by_id.get(renames.get(new_server.id, new_server.id))
+                endpoint_changed = bool(
+                    old_server is not None
+                    and old_server.auth_ref
+                    and new_server.id not in updates
+                    and _authentication_endpoint_identity(old_server)
+                    != _authentication_endpoint_identity(new_server)
+                )
+                if endpoint_changed:
+                    endpoint_changed_ids.append(new_server.id)
+                    rebound_servers.append(replace(new_server, auth_ref=""))
+                else:
+                    rebound_servers.append(new_server)
+            if endpoint_changed_ids:
+                profile = replace(profile, servers=tuple(rebound_servers))
+                # The settings UI presents the first warning in its compact
+                # success toast.  Put credential invalidation first so a less
+                # important catalog warning cannot hide a required user action.
+                sync_warnings.insert(
+                    0,
+                    "连接地址或账号已变化；为避免向新端点发送旧密码，已移除 "
+                    f"{len(endpoint_changed_ids)} 台服务器的已保存密码，请重新确认后输入"
+                )
 
             secret_operations: dict[str, str | None] = {}
             for server_id, new_value in updates.items():
@@ -2542,12 +2570,6 @@ class AppApi:
             }
         except (ConfigError, OSError) as exc:
             return {"ok": False, "error": str(exc)}
-
-    def recommend_server(self, required_memory_gib: float = 0, preferred_gpu_type: str = "") -> dict[str, Any]:
-        try:
-            return self.service.recommend(required_memory_gib, preferred_gpu_type)
-        except (TypeError, ValueError) as exc:
-            return {"ok": False, "recommendation_only": True, "reason": str(exc)}
 
 def _server_sync_sources(primary: Path | None) -> list[Path]:
     """Return the exact source set shared by save-time and startup synchronization."""

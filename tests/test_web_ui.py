@@ -190,7 +190,9 @@ class WebUiContractTests(unittest.TestCase):
         for text in (
             "function refreshServerEditorOrder",
             "function moveServerEditor",
-            "ui.editorList.insertBefore",
+            "[settingsServerDrafts[index], settingsServerDrafts[target]]",
+            "const SERVER_EDITOR_PAGE_SIZE = 20",
+            "function renderServerEditorPage",
             "querySelectorAll('.server-editor')",
         ):
             self.assertIn(text, self.javascript)
@@ -250,8 +252,8 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript.index("function addServerEditor"):
             self.javascript.index("function addAndFocusServerEditor")
         ]
-        self.assertIn("editor.dataset.originalSshAlias = values.ssh_alias || ''", editor)
-        self.assertIn("editor.dataset.importedCandidate = String(options.importedCandidate === true)", editor)
+        self.assertIn("editor.dataset.originalSshAlias = values._original_ssh_alias ?? values.ssh_alias ?? ''", editor)
+        self.assertIn("values._imported_candidate === true || options.importedCandidate === true", editor)
         self.assertIn("const wasSaved = (currentProfile?.servers || []).some", editor)
         self.assertIn("const wasImportedCandidate = editor.dataset.importedCandidate === 'true'", editor)
         self.assertIn(
@@ -297,7 +299,44 @@ class WebUiContractTests(unittest.TestCase):
         )
         self.assertIn("onboardingStep === 2 && !onboardingDiscoveryStarted", set_step)
         self.assertIn("void discoverServerConfig()", set_step)
-        self.assertIn("ui.dialog.addEventListener('close', invalidateServerDiscovery)", self.javascript)
+        close_handler = self.javascript[self.javascript.index("ui.dialog.addEventListener('close'"):]
+        self.assertIn("if (ui.dialog.open) return", close_handler)
+        self.assertIn("invalidateServerDiscovery()", close_handler)
+        self.assertIn("ui.editorList.replaceChildren()", close_handler)
+
+    def test_server_settings_are_searchable_paged_and_release_closed_editor_dom(self):
+        for identifier in (
+            'id="server-editor-toolbar"',
+            'id="server-editor-search"',
+            'id="server-editor-previous-page"',
+            'id="server-editor-next-page"',
+        ):
+            self.assertIn(identifier, self.markup)
+        for contract in (
+            "const SERVER_EDITOR_PAGE_SIZE = 20",
+            "function filteredServerDraftIndices",
+            "function serverDraftIndexFromEditor",
+            "function syncVisibleServerDrafts",
+            "indices.slice(settingsServerPageOffset, settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE)",
+            "function invalidServerDraft",
+            "function revealInvalidServerDraft",
+            "settingsServerDrafts = []",
+            "index === settingsServerDrafts.length - 1",
+            "服务器 ID 与前面的服务器重复",
+        ):
+            self.assertIn(contract, self.javascript)
+
+    def test_resource_watch_rechecks_changed_criteria_without_stale_notification_state(self):
+        watch = self.javascript[
+            self.javascript.index("async function evaluateResourceWatch"):
+            self.javascript.index("function refreshServerEditorOrder")
+        ]
+        self.assertIn("const criteriaRevision = resourceWatchCriteriaRevision", watch)
+        self.assertIn("criteriaRevision !== resourceWatchCriteriaRevision", watch)
+        self.assertIn("function scheduleResourceWatchEvaluation", watch)
+        self.assertIn("resourceWatchMatched = false", watch)
+        listeners = self.javascript[self.javascript.index("ui.recommend.addEventListener"):]
+        self.assertGreaterEqual(listeners.count("scheduleResourceWatchEvaluation()"), 2)
 
     def test_server_config_guide_is_progressive_and_commands_are_copyable(self):
         for text in (
@@ -700,8 +739,10 @@ class WebUiContractTests(unittest.TestCase):
             "使用现有密钥",
             "生成专用密钥",
             "私钥始终留在本机",
-            "不会覆盖已有密钥",
-            "失败会撤销本次新增内容",
+            "非替换式追加",
+            "不会自动改写",
+            "authorized_keys",
+            "保留匹配密钥",
             "配置并验证",
         ):
             self.assertIn(text, self.markup)
