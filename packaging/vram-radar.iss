@@ -10,6 +10,7 @@ AppId={{1B2F9822-D7AF-47E9-9757-72F98DB2C106}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+LicenseFile=..\LICENSE
 DefaultDirName={localappdata}\Programs\VRAM Radar
 DefaultGroupName=VRAM Radar
 UsePreviousAppDir=yes

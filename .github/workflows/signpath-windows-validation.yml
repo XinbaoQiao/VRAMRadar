@@ -1,0 +1,139 @@
+name: Validate sponsored Windows signing
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_commit:
+        description: Exact full commit SHA to build and sign
+        required: true
+        type: string
+
+concurrency:
+  group: signpath-windows-validation
+  cancel-in-progress: false
+
+jobs:
+  windows-signing:
+    name: Build, sign, and verify Windows x64
+    runs-on: windows-2025
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.target_commit }}
+          persist-credentials: false
+
+      - name: Require approved SignPath configuration
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_BUNDLE_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_BUNDLE_ARTIFACT_CONFIGURATION_SLUG }}
+          SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG }}
+        run: |
+          $required = @(
+            'SIGNPATH_API_TOKEN',
+            'SIGNPATH_ORGANIZATION_ID',
+            'SIGNPATH_PROJECT_SLUG',
+            'SIGNPATH_SIGNING_POLICY_SLUG',
+            'SIGNPATH_BUNDLE_ARTIFACT_CONFIGURATION_SLUG',
+            'SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG'
+          )
+          $missing = @($required | Where-Object { -not (Get-Item "env:$_").Value })
+          if ($missing.Count -gt 0) { throw "Missing approved SignPath configuration: $($missing -join ', ')" }
+          if ('${{ inputs.target_commit }}' -notmatch '^[0-9a-f]{40}$') { throw 'target_commit must be a full lowercase commit SHA' }
+          if ((git rev-parse HEAD).Trim() -ne '${{ inputs.target_commit }}') { throw 'Checked-out source does not match target_commit' }
+
+      - name: Install frozen build environment
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.6"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build unsigned application bundle
+        shell: pwsh
+        run: |
+          uv sync --extra build --frozen
+          choco install innosetup --yes --no-progress
+          .\Build-VramRadar.ps1 -SkipSync
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload unsigned bundle for SignPath
+        id: upload-unsigned-bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: VRAMRadar-unsigned-bundle
+          path: dist/VRAMRadar
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign application bundle through SignPath Foundation
+        uses: SignPath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_BUNDLE_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned-bundle.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-bundle
+
+      - name: Verify signed bundle and build installer
+        shell: pwsh
+        run: |
+          $signedRoot = Get-ChildItem -LiteralPath signed-bundle -Directory -Recurse |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'VRAMRadar.exe') } |
+            Select-Object -First 1
+          if (-not $signedRoot) { throw 'SignPath output does not contain the expected VRAMRadar bundle' }
+          Remove-Item -LiteralPath dist\VRAMRadar -Recurse -Force
+          Copy-Item -LiteralPath $signedRoot.FullName -Destination dist\VRAMRadar -Recurse
+          .\tools\validate_windows_signatures.ps1 -Path dist\VRAMRadar
+          $version = & .\.venv\Scripts\python.exe -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          .\Build-VramRadar-Installer.ps1 -SkipBundle -Version $version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        id: build-installer
+
+      - name: Upload unsigned installer for SignPath
+        id: upload-unsigned-installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: VRAMRadar-unsigned-installer
+          path: dist-installer/VRAMRadar-Setup-${{ steps.build-installer.outputs.version }}.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign installer through SignPath Foundation
+        uses: SignPath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-installer
+
+      - name: Verify and retain signed installer candidate
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -LiteralPath signed-installer -Filter 'VRAMRadar-Setup-*.exe' -File -Recurse | Select-Object -First 1
+          if (-not $installer) { throw 'SignPath output does not contain the expected installer' }
+          .\tools\validate_windows_signatures.ps1 -Path $installer.FullName
+          Copy-Item -LiteralPath $installer.FullName -Destination .
+
+      - name: Upload verified signed candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: VRAMRadar-signed-windows-candidate
+          path: VRAMRadar-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 7

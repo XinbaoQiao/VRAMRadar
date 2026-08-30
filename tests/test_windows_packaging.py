@@ -12,6 +12,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
         cls.build_script = (ROOT / "Build-VramRadar-Installer.ps1").read_text(encoding="utf-8")
         cls.readme = (ROOT / "README.md").read_text(encoding="utf-8")
         cls.guide = (ROOT / "docs" / "windows-install-and-update.md").read_text(encoding="utf-8")
+        cls.signing_workflow = (ROOT / ".github" / "workflows" / "signpath-windows-validation.yml").read_text(encoding="utf-8")
+        cls.signature_validator = (ROOT / "tools" / "validate_windows_signatures.ps1").read_text(encoding="utf-8")
 
     def test_upgrade_identity_and_install_target_are_version_independent(self) -> None:
         self.assertIn("AppId={{1B2F9822-D7AF-47E9-9757-72F98DB2C106}", self.manifest)
@@ -95,6 +97,30 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("Programs\\Inno Setup 6\\ISCC.exe", self.build_script)
         self.assertIn('"/DMyAppVersion=$Version"', self.build_script)
         self.assertIn("VRAMRadar-Setup-$Version.exe", self.build_script)
+
+    def test_mit_license_is_shipped_and_presented_by_setup(self) -> None:
+        spec = (ROOT / "packaging" / "vram-radar.spec").read_text(encoding="utf-8")
+        license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        self.assertIn("MIT License", license_text)
+        self.assertIn('project_root / "LICENSE"', spec)
+        self.assertIn("LicenseFile=..\\LICENSE", self.manifest)
+
+    def test_signpath_validation_is_separate_and_fails_closed(self) -> None:
+        for required in (
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG",
+            "SIGNPATH_BUNDLE_ARTIFACT_CONFIGURATION_SLUG",
+            "SIGNPATH_INSTALLER_ARTIFACT_CONFIGURATION_SLUG",
+        ):
+            self.assertIn(required, self.signing_workflow)
+        self.assertEqual(self.signing_workflow.count("SignPath/github-action-submit-signing-request@"), 2)
+        self.assertIn("Build, sign, and verify Windows x64", self.signing_workflow)
+        self.assertNotIn("release create", self.signing_workflow)
+        self.assertIn("Get-AuthenticodeSignature", self.signature_validator)
+        self.assertIn("TimeStamperCertificate", self.signature_validator)
+        self.assertIn("SignPath Foundation", self.signature_validator)
 
     def test_user_docs_require_the_stable_installer_update_path(self) -> None:
         readme_flat = " ".join(self.readme.split())

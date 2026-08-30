@@ -20,6 +20,7 @@
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-2563EB?logo=windows11&logoColor=white">
   <img alt="macOS Apple Silicon and Intel" src="https://img.shields.io/badge/macOS-Apple_Silicon_%2B_Intel-111827?logo=apple&logoColor=white">
   <img alt="Local first" src="https://img.shields.io/badge/data-local--first-0F766E">
+  <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-3B7C6A">
 </p>
 
 <p align="center">
@@ -142,7 +143,7 @@ Server states are evidence-based: **discovered** means a local entry was parsed,
 
 Download `VRAMRadar-Setup-0.7.0.exe`. This is the recommended download. The installer uses a stable per-user application path, so the normal installation does not request administrator permission and in-place upgrades preserve the Start-menu or desktop shortcut. A custom drive is supported through a user-writable folder such as `D:\Apps\VRAM Radar`; use administrator mode only for protected locations such as `Program Files`. The public Release no longer offers a Windows portable ZIP.
 
-The current package has no Authenticode publisher certificate. If Windows shows SmartScreen, first confirm that the file came from this repository's Latest Release, then choose **More info → Run anyway**. A managed PC may block unsigned software without an override; in that case, ask its administrator rather than weakening system protection.
+The current `v0.7.0` package has no Authenticode publisher certificate. VRAM Radar is applying to the [SignPath Foundation](https://signpath.org/) sponsored open-source program; future Windows downloads will be described as signed only after the exact public installer passes the maintained [signature gate](docs/windows-code-signing.md). Until then, if Windows shows SmartScreen, first confirm that the file came from this repository's Latest Release, then choose **More info → Run anyway**. A managed PC may block unsigned software without an override; in that case, ask its administrator rather than weakening system protection.
 
 ### macOS
 
@@ -261,7 +262,9 @@ No. VRAM Radar is currently a local monitoring and selection aid. Submission, re
 | [Interface design system](docs/design-system.md) | Information hierarchy, typography, cards, SVG, and interaction principles |
 | [Productization design](docs/productization-design.md) | Product boundary and cross-platform desktop architecture |
 | [Windows installation and updates](docs/windows-install-and-update.md) | Installer, shortcut, and notification-area lifecycle |
+| [Windows code signing](docs/windows-code-signing.md) | SignPath Foundation application, trust boundary, and signature gate |
 | [macOS desktop](docs/macos-desktop.md) | Cocoa bundle, Apple Silicon / Intel, and validation path |
+| [Privacy](PRIVACY.md) | Local data, network connections, diagnostics, and removal |
 
 ## Development and validation
 
@@ -305,5 +308,9 @@ Release validation must use an empty temporary Profile with `--no-auto-import`, 
 ## Feedback and contributions
 
 If automatic discovery misses an SSH configuration source, or the app fails to launch on a Windows or macOS environment, open an [Issue](../../issues) with the operating-system version, application version, and the app's **redacted diagnostics**. Never upload passwords, private keys, real server addresses, or an unreviewed full log.
+
+## License
+
+VRAM Radar is open-source software available under the [MIT License](LICENSE).
 
 VRAM Radar is not another infrastructure platform. Its goal is simpler: fewer terminal switches and a faster path to the next usable GPU.

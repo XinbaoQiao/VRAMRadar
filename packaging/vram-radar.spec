@@ -67,6 +67,7 @@ a = Analysis(
         (str(package_root / "web"), "vram_radar/web"),
         (str(package_root / "assets"), "vram_radar/assets"),
         (str(build_info), "vram_radar"),
+        (str(project_root / "LICENSE"), "."),
     ],
     hiddenimports=hidden_imports,
     hookspath=[],

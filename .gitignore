@@ -18,6 +18,7 @@ packaging/app-icon.icns
 /*.md
 !/README.md
 !/README.zh-CN.md
+!/PRIVACY.md
 Start-VramRadar.ps1
 *.lnk
 inputs/

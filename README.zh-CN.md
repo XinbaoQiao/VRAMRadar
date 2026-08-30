@@ -20,6 +20,7 @@
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-2563EB?logo=windows11&logoColor=white">
   <img alt="macOS Apple Silicon and Intel" src="https://img.shields.io/badge/macOS-Apple_Silicon_%2B_Intel-111827?logo=apple&logoColor=white">
   <img alt="Local first" src="https://img.shields.io/badge/data-local--first-0F766E">
+  <img alt="MIT License" src="https://img.shields.io/badge/license-MIT-3B7C6A">
 </p>
 
 <p align="center">
@@ -142,7 +143,7 @@ VRAM Radar 不是对终端工具的重新包装，也不要求你放弃它们。
 
 下载 `VRAMRadar-Setup-0.7.0.exe`。这是 Windows 推荐下载。默认按当前用户安装，不需要管理员权限；安装器会创建稳定的开始菜单 / 桌面快捷方式，后续运行新版安装器会原位升级并保留用户 Profile。可以安装到 `D:\Apps\VRAM Radar` 等当前用户可写目录；只有选择 `Program Files` 等受保护目录时才需要管理员权限。公开 Release 不再提供 Windows 便携 ZIP。
 
-当前 Windows 包没有 Authenticode 发布者证书。如果 SmartScreen 弹出提示，请先确认文件来自本仓库的 Latest Release，再点击 **更多信息 → 仍要运行**。单位管理的电脑可能不允许绕过未签名软件，此时应联系管理员，不要关闭系统安全保护。
+当前 `v0.7.0` Windows 包没有 Authenticode 发布者证书。VRAM Radar 正在申请 [SignPath Foundation](https://signpath.org/) 开源项目免费签名；只有公开安装包通过项目维护的[签名验证门](docs/windows-code-signing.md)后，我们才会把后续版本标为已签名。在此之前，如果 SmartScreen 弹出提示，请先确认文件来自本仓库的 Latest Release，再点击 **更多信息 → 仍要运行**。单位管理的电脑可能不允许绕过未签名软件，此时应联系管理员，不要关闭系统安全保护。
 
 ### macOS
 
@@ -263,7 +264,9 @@ OpenSSH 配置只描述如何连接，不描述远端是否使用 Slurm。VRAM R
 | [界面设计系统](docs/design-system.md) | 信息层级、字体、卡片、SVG 与交互原则 |
 | [产品化设计](docs/productization-design.md) | 功能边界与跨平台桌面架构 |
 | [Windows 安装与更新](docs/windows-install-and-update.md) | 安装器、快捷方式和通知区域生命周期 |
+| [Windows 代码签名](docs/windows-code-signing.md) | SignPath Foundation 申请、信任边界与签名验证门 |
 | [macOS 桌面](docs/macos-desktop.md) | Cocoa 包、Apple Silicon / Intel 和验证方式 |
+| [隐私说明](PRIVACY.md) | 本地数据、网络连接、诊断与删除方式 |
 
 ## 开发与验证
 
@@ -307,5 +310,9 @@ macOS 构建默认使用当前 Python 架构。只有在 Python 和所有原生�
 ## 反馈与参与
 
 如果自动发现遗漏了某种 SSH 配置方式，或某个 Windows / macOS 环境无法启动，请在 [Issues](../../issues) 中提供系统版本、应用版本和应用生成的**脱敏诊断**。不要上传密码、私钥、真实服务器地址或未经检查的完整日志。
+
+## 许可证
+
+VRAM Radar 采用 [MIT License](LICENSE) 开源。
 
 VRAM Radar 的目标不是增加另一套复杂管理平台，而是让每天都要查看 GPU 的人少切几个终端、更快找到下一台可用机器。
