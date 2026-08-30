@@ -179,10 +179,13 @@ ln() {{
             if os.name != "nt":
                 authorized.chmod(0o600)
             external_line = "ssh-ed25519 EXTERNAL-REPLACEMENT-KEY"
+            # Replace the path after the content check, while keeping an expected
+            # nonzero awk status inside an OR-list for legacy macOS Bash + set -e.
             prefix = f"""
+real_awk=$(type -P awk)
 awk() {{
-  command awk "$@"
-  status=$?
+  status=0
+  "$real_awk" "$@" || status=$?
   if [ "$status" -ne 0 ]; then
     mv {shlex.quote(str(authorized))} {shlex.quote(str(moved))}
     printf '%s\\n' {shlex.quote(external_line)} > {shlex.quote(str(authorized))}
