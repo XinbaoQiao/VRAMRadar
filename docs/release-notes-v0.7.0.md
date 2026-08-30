@@ -34,6 +34,21 @@ the one-click path.
 
 ### Configuration reliability and large-fleet usability
 
+- First-use OpenSSH Host Keys now have an explicit **Trust and connect**
+  transition. After user confirmation, VRAM Radar scopes
+  `StrictHostKeyChecking=accept-new` to one bounded attempt, then requires the
+  real GPU collector to succeed before reporting recovery. Changed Host Keys
+  remain blocked and must be verified manually.
+- Host Key recovery reuses the collector result instead of immediately opening
+  a duplicate SSH connection. Saved-password fallback remains available only
+  for classified authentication failures.
+- Settings now opens as a compact hierarchy: interface and alerts, server
+  discovery/import, individual server editors, advanced login fields, and SSH
+  Key setup expand independently. The real WebView benchmark verifies the
+  final DOM hierarchy with 120 synthetic servers.
+- Junction-aware SSH diagnostics now recognize the same canonical Windows
+  `.ssh` config and key paths used by discovery, avoiding false reports that a
+  valid Junction-backed config or key is absent.
 - Windows OpenSSH discovery now supports a user `.ssh` directory backed by a
   Junction. When Python reports `WinError 448`, VRAM Radar follows only the
   target reported by the Windows kernel, limits the reparse chain, and keeps
@@ -125,6 +140,17 @@ do not disable platform security globally.
 
 ### 配置可靠性与大规模服务器体验
 
+- 首次连接遇到未知 OpenSSH Host Key 时，现在会提供明确的“信任并连接”入口。
+  用户确认后，显存雷达只对这一次尝试使用
+  `StrictHostKeyChecking=accept-new`，随后必须由真实 GPU 采集器成功验证，才会
+  显示服务器恢复。已经发生变化的 Host Key 仍然会被阻止，必须人工核对。
+- Host Key 恢复会直接复用已经完成的采集结果，不再紧接着重复发起第二次 SSH；
+  已保存密码仍只会在明确分类的认证失败时作为本地回退。
+- 设置页改为紧凑的多级结构：“界面与提醒”“服务器发现与导入”、每台服务器、
+  高级登录字段以及 SSH Key 配置均可独立展开。真实 WebView 基准使用 120 台
+  合成服务器验证最终 DOM 层级。
+- Junction 感知的 SSH 诊断现在与自动发现使用相同的 Windows 路径规范化逻辑，
+  不再把有效的 Junction 配置文件或私钥误报为不存在。
 - Windows OpenSSH 自动发现现已支持由 Junction 指向其他本地目录的用户
   `.ssh` 文件夹。Python 遇到 `WinError 448` 时，显存雷达只跟随 Windows
   内核返回的重解析目标并限制跳转次数；其他路径异常仍然默认拒绝继续处理。

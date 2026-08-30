@@ -160,8 +160,9 @@
             <article><strong>本机配置</strong><span>密码保存在系统凭据库</span></article>
           </div>
         </section>
-        <section id="profile-settings" class="settings-section profile-settings" aria-labelledby="profile-settings-title">
-          <div class="settings-section-heading"><div><h3 id="profile-settings-title">显示与刷新</h3><p>这些选项只影响这台电脑上的监控界面。</p></div><span class="local-only-badge">仅本机</span></div>
+        <details id="profile-settings" class="settings-section settings-group profile-settings" aria-labelledby="profile-settings-title">
+          <summary class="settings-section-heading"><div><h3 id="profile-settings-title">界面与提醒</h3><p>语言、刷新、关闭方式和收藏通知</p></div><span class="settings-summary-side"><span class="local-only-badge">仅本机</span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></span></summary>
+          <div class="settings-group-body">
           <div class="field-grid profile-fields">
             <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
             <label><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
@@ -176,12 +177,14 @@
             <summary><span><strong>诊断与日志</strong><small>连接异常时使用，复制内容会自动脱敏</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
             <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制脱敏诊断</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
           </details>
-        </section>
-        <section id="import-panel" class="import-panel">
-          <div class="import-intro">
-            <h3>把你平时登录的 GPU 服务器加进来</h3>
-            <p>如果终端里已经能运行 <code>ssh gpu-lab</code>，进入这一步就会自动查找。</p>
           </div>
+        </details>
+        <details id="import-panel" class="import-panel settings-group">
+          <summary class="settings-section-heading import-intro">
+            <div><h3>服务器发现与导入</h3><p>自动读取本机 SSH 配置；检测不到时再查看教程</p></div>
+            <span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span>
+          </summary>
+          <div class="settings-group-body import-panel-body">
           <ol class="import-steps" aria-label="服务器导入步骤">
             <li><span>1</span><div><strong>自动发现</strong><small>本地扫描 SSH 配置，不连接服务器</small></div></li>
             <li><span>2</span><div><strong>检查类型</strong><small>确认每台服务器是 SSH 直连还是 Slurm</small></div></li>
@@ -235,7 +238,8 @@
               <div class="guide-finish"><strong>找到路径以后</strong><ol><li>把完整路径粘贴到上方输入框。</li><li>点击“导入并替换列表”。</li><li>检查服务器类型和登录方式，最后点击“保存并开始验证”。</li></ol></div>
             </div>
           </details>
-        </section>
+          </div>
+        </details>
         <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p>常用信息直接显示；密码、端口、用户名和私钥放在每台服务器的第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
@@ -257,17 +261,19 @@
   </dialog>
 
   <template id="server-editor-template">
-    <section class="server-editor">
-      <div class="server-editor-head">
+    <details class="server-editor">
+      <summary class="server-editor-head">
         <span class="server-editor-title"><span class="server-position" aria-hidden="true">1</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
-        <span class="server-editor-actions">
+        <span class="summary-action"><span class="when-closed">编辑</span><span class="when-open">收起</span></span>
+      </summary>
+      <div class="server-editor-body">
+        <div class="server-editor-actions">
           <button class="test-server-connection button" type="button">测试连接</button>
           <button class="toggle-server-enabled button" type="button" aria-pressed="true">暂停监控</button>
           <button class="move-server-up button order-button" type="button" title="向上移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 14 5-5 5 5"></path></svg><span>上移</span></button>
           <button class="move-server-down button order-button" type="button" title="向下移动"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m7 10 5 5 5-5"></path></svg><span>下移</span></button>
           <button class="remove-server button danger" type="button">移除</button>
-        </span>
-      </div>
+        </div>
       <div class="field-grid">
         <label><span>显示名称</span><input data-field="display_name" required maxlength="80" placeholder="4090 实验服务器"></label>
         <label><span>连接类型</span><select data-field="backend"><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option></select></label>
@@ -324,7 +330,8 @@
           <div class="ssh-key-setup-result connection-test-result" role="status" aria-live="polite" hidden></div>
         </div>
       </details>
-    </section>
+      </div>
+    </details>
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

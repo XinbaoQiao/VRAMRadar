@@ -30,6 +30,7 @@ from vram_radar.shell import (
     webview_start_options,
     window_frontend_is_ready,
     window_smoke_worker,
+    _existing_file,
 )
 
 
@@ -1846,6 +1847,123 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result["stages"][1]["state"], "passed")
         self.assertEqual(result["stages"][2]["id"], "collection")
         self.assertEqual(result["stages"][2]["state"], "failed")
+
+    def test_explicit_host_key_trust_accepts_only_new_key_then_runs_real_probe(self):
+        profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "servers": [
+                    {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"}
+                ],
+            }
+        )
+        service = Mock()
+        service.probe_server.return_value = {"total_gpus": 8}
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+
+        with patch("vram_radar.shell.run_remote", return_value="") as remote:
+            result = api.trust_host_key("gpu")
+
+        self.assertTrue(result["ok"])
+        remote.assert_called_once_with(profile.servers[0], "true", accept_new_host_key=True)
+        service.probe_server.assert_called_once_with("gpu")
+        self.assertNotIn("gpu.test", json.dumps(result))
+
+    def test_changed_host_key_is_never_accepted_by_host_key_trust_flow(self):
+        profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "servers": [
+                    {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"}
+                ],
+            }
+        )
+        service = Mock()
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        changed = ConnectorFailure(
+            "host_key_changed",
+            "服务器 Host Key 已变化，请人工核对指纹",
+            retryable=False,
+            state="security_blocked",
+        )
+
+        with patch("vram_radar.shell.run_remote", side_effect=changed):
+            result = api.trust_host_key("gpu")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "host_key_changed")
+        service.probe_server.assert_not_called()
+
+    def test_host_key_trust_continues_to_real_probe_after_initial_auth_rejection(self):
+        profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "servers": [
+                    {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"}
+                ],
+            }
+        )
+        service = Mock()
+        service.probe_server.return_value = {"total_gpus": 4}
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        auth_rejected = ConnectorFailure(
+            "auth_failed",
+            "服务器拒绝认证",
+            retryable=False,
+            state="auth_required",
+        )
+
+        with patch("vram_radar.shell.run_remote", side_effect=auth_rejected):
+            result = api.trust_host_key("gpu")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["total_gpus"], 4)
+        service.probe_server.assert_called_once_with("gpu")
+
+    def test_host_key_trust_never_reports_success_when_real_collector_still_fails(self):
+        profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "servers": [
+                    {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"}
+                ],
+            }
+        )
+        service = Mock()
+        service.probe_server.side_effect = ConnectorFailure(
+            "command_missing",
+            "服务器缺少 GPU 命令",
+            retryable=False,
+            state="misconfigured",
+        )
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+
+        with patch("vram_radar.shell.run_remote", return_value=""):
+            result = api.trust_host_key("gpu")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "command_missing")
+        self.assertTrue(result["host_key_recorded"])
+
+    def test_junction_safe_file_diagnostics_use_the_canonical_path_on_windows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            existing = Path(temporary) / "config"
+            existing.write_text("Host gpu\n", encoding="utf-8")
+            inaccessible_spelling = Path(temporary) / "junction" / "config"
+            with patch("vram_radar.shell.sys.platform", "win32"), patch(
+                "vram_radar.shell.canonical_local_path", return_value=existing
+            ) as canonical:
+                self.assertTrue(_existing_file(inaccessible_spelling))
+
+        canonical.assert_called_once_with(inaccessible_spelling)
 
     def test_ssh_key_setup_uses_saved_password_only_for_initial_deployment_then_verifies_identity(self):
         profile = Profile.from_dict(

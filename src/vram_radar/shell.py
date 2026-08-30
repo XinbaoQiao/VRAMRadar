@@ -47,6 +47,7 @@ from .models import (
 )
 from .build_info import current_release_tag
 from .server_catalog import (
+    canonical_local_path,
     profile_from_server_config,
     profile_from_server_configs,
     import_server_config,
@@ -149,7 +150,10 @@ def configure_logging(paths: StoragePaths) -> logging.Logger:
 
 def _existing_file(path: str | Path) -> bool:
     try:
-        return Path(path).expanduser().is_file()
+        candidate = Path(path).expanduser()
+        if sys.platform == "win32":
+            candidate = canonical_local_path(candidate)
+        return candidate.is_file()
     except (OSError, RuntimeError, TypeError, ValueError):
         return False
 
@@ -738,6 +742,7 @@ class AppApi:
         self._favorite_alert_active_ids: set[str] = set()
         self._favorite_alert_monitor_running = False
         self._key_setup_lock = threading.Lock()
+        self._host_key_trust_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
         self._profile_revision = 0
         self._automatic_import_enabled = bool(automatic_import_enabled)
@@ -1665,6 +1670,78 @@ class AppApi:
             },
             "stages": stages,
         }
+
+    def trust_host_key(self, server_id: str) -> dict[str, Any]:
+        """Record one previously unknown Host Key, then run the real collector.
+
+        The web UI must obtain an explicit confirmation before calling this
+        method. ``accept-new`` is deliberately scoped to this single attempt:
+        it never accepts a changed key, and all ordinary background refreshes
+        continue to use the user's normal OpenSSH trust policy.
+        """
+
+        try:
+            normalized_id = require_id(
+                server_id.strip() if isinstance(server_id, str) else server_id,
+                "server id",
+            )
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_server_id"}
+        with self._profile_mutation_lock:
+            server = next((item for item in self.profile.servers if item.id == normalized_id), None)
+        if server is None:
+            return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
+        if not server.enabled:
+            return {
+                "ok": False,
+                "error": "这台服务器已停用，请先恢复监控",
+                "code": "server_disabled",
+            }
+        if not self._host_key_trust_lock.acquire(blocking=False):
+            return {
+                "ok": False,
+                "error": "另一台服务器正在核验 Host Key，请稍后再试",
+                "code": "host_key_trust_busy",
+            }
+        try:
+            try:
+                # The first bounded command lets OpenSSH write only an unknown
+                # key to the configured known_hosts file. Authentication may
+                # still fail after the key has been recorded; the monitored
+                # probe below owns password fallback and the final result.
+                run_remote(server, "true", accept_new_host_key=True)
+            except ConnectorFailure as exc:
+                if exc.code not in PASSWORD_FALLBACK_AUTH_CODES:
+                    return {
+                        "ok": False,
+                        "server_id": normalized_id,
+                        "code": exc.code,
+                        "error": str(exc),
+                        "retryable": exc.retryable,
+                    }
+            try:
+                payload = self.service.probe_server(normalized_id)
+            except ConnectorFailure as exc:
+                return {
+                    "ok": False,
+                    "server_id": normalized_id,
+                    "code": exc.code,
+                    "error": str(exc),
+                    "retryable": exc.retryable,
+                    "host_key_recorded": exc.code != "host_key_untrusted",
+                }
+            return {
+                "ok": True,
+                "server_id": normalized_id,
+                "code": "host_key_trusted",
+                "message": "Host Key 已保存，服务器连接和资源读取成功",
+                "summary": {
+                    "backend": server.backend,
+                    "total_gpus": max(0, int(payload.get("total_gpus") or 0)),
+                },
+            }
+        finally:
+            self._host_key_trust_lock.release()
 
     def _saved_server_password(self, server: Any) -> str:
         if not server.auth_ref:

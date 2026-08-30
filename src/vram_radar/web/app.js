@@ -1098,8 +1098,12 @@ function renderError(server) {
     : {message: '尚未取得服务器数据', code: connection.state, retryable: true});
   const retry = formatRetry(connection.retry_at);
   const cached = connection.data_origin === 'cache';
-  const revalidate = disabled ? '' : `<button class="button primary retry-server" type="button" data-server-id="${escapeHtml(server.server_id)}">重新验证</button>`;
-  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。旧快照仅供参考，不计入顶部实时汇总。' : '。当前没有可显示的 GPU 快照。'}</div></div><div class="error-actions">${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
+  const securityBlocked = error.code === 'host_key_untrusted' || error.code === 'host_key_changed';
+  const revalidate = disabled || securityBlocked ? '' : `<button class="button primary retry-server" type="button" data-server-id="${escapeHtml(server.server_id)}">重新验证</button>`;
+  const trustHostKey = error.code === 'host_key_untrusted' && api?.trust_host_key
+    ? `<button class="button primary trust-server-host-key" type="button" data-server-id="${escapeHtml(server.server_id)}">信任并连接</button>`
+    : '';
+  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。旧快照仅供参考，不计入顶部实时汇总。' : '。当前没有可显示的 GPU 快照。'}</div></div><div class="error-actions">${trustHostKey}${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
 }
 
 function serverGlyph(backend) {
@@ -1219,6 +1223,23 @@ async function openServerTerminal(serverId) {
   try {
     const result = await api.open_terminal(serverId);
     if (result?.ok === false) throw new Error(result.error || '无法打开终端');
+  } catch (error) {
+    showToast(error.message || String(error));
+  }
+}
+
+async function trustServerHostKey(serverId) {
+  if (!api?.trust_host_key) return showToast('当前版本暂不支持一键保存 Host Key');
+  const confirmation = localizedText('仅在你确认这是目标服务器时继续。应用会让 OpenSSH 保存尚未记录的新 Host Key；如果已有 Host Key 发生变化，连接仍会被阻止。');
+  if (!window.confirm(confirmation)) return;
+  try {
+    const result = await api.trust_host_key(serverId);
+    if (!result?.ok) throw new Error(result?.error || 'Host Key 保存失败');
+    showToast('Host Key 已保存，服务器已恢复连接');
+    // trust_host_key already runs the exact monitored collector and commits
+    // its result. Reuse that in-memory state instead of opening a second SSH
+    // connection immediately after recovery.
+    if (api?.get_snapshot) render(await api.get_snapshot());
   } catch (error) {
     showToast(error.message || String(error));
   }
@@ -2553,6 +2574,7 @@ function renderServerEditorPage(options = {}) {
   refreshServerEditorOrder();
   if (Number.isInteger(options.focusDraftIndex)) {
     const editor = ui.editorList.querySelector(`[data-draft-index="${options.focusDraftIndex}"]`);
+    if (editor) editor.open = true;
     editor?.scrollIntoView({behavior: 'smooth', block: 'center'});
     editor?.querySelector('[data-field="display_name"]')?.focus({preventScroll: true});
   }
@@ -2669,6 +2691,12 @@ function setOnboardingStep(step) {
   ui.saveSettings.hidden = onboarding && onboardingStep !== 3;
   ui.settingsDisclosureTools.hidden = onboarding && onboardingStep === 1;
   ui.onboardingNext.textContent = onboardingStep === 1 ? '开始设置' : '手动填写或检查';
+  if (onboarding && onboardingStep === 2) ui.importPanel.open = true;
+  if (onboarding && onboardingStep === 3) {
+    ui.profileSettings.open = true;
+    const firstEditor = ui.editorList.querySelector('.server-editor');
+    if (firstEditor) firstEditor.open = true;
+  }
   [...ui.onboardingProgress.querySelectorAll('[data-onboarding-marker]')].forEach(marker => {
     const markerStep = Number(marker.dataset.onboardingMarker);
     marker.classList.toggle('current', markerStep === onboardingStep);
@@ -3088,6 +3116,8 @@ document.addEventListener('click', event => {
   if (toggleServer) void setServerEnabled(toggleServer.dataset.serverId, !serverIsEnabled(toggleServer.dataset.serverId));
   const openTerminal = event.target.closest('.open-terminal');
   if (openTerminal) void openServerTerminal(openTerminal.dataset.serverId);
+  const trustHostKey = event.target.closest('.trust-server-host-key');
+  if (trustHostKey) void trustServerHostKey(trustHostKey.dataset.serverId);
   const copyDiagnostics = event.target.closest('.copy-server-diagnostics');
   if (copyDiagnostics) void copyRedactedDiagnostics(copyDiagnostics.dataset.serverId);
   if (event.target.closest('.open-logs')) void openLogsDirectory();

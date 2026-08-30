@@ -587,6 +587,16 @@ BENCHMARK_JAVASCRIPT = r"""
     forceLayout(ui.dialog);
     const settingsWall = performance.now() - settingsStart;
     const editors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
+    const editorBodiesOwnAllControls = editors.every(editor => {
+      const body = editor.querySelector(':scope > .server-editor-body');
+      return Boolean(
+        body
+        && body.contains(editor.querySelector('[data-field="display_name"]'))
+        && body.contains(editor.querySelector('.server-editor-more'))
+        && body.contains(editor.querySelector('.ssh-key-setup'))
+      );
+    });
+    const primarySettingsGroupsStartCollapsed = !ui.profileSettings.open && !ui.importPanel.open;
     const editorIds = editors.map(editor => editor.querySelector('[data-field="id"]')?.value || '');
     const firstDisplayName = editors[0].querySelector('[data-field="display_name"]');
     firstDisplayName.value = 'Edited across pages';
@@ -665,6 +675,8 @@ BENCHMARK_JAVASCRIPT = r"""
       directory_updates_preserve_server_card: directoryCardBefore === ui.list.querySelector('.server-card'),
       directory_uses_three_local_repaints: metricDelta(directoryMetricsAfter, directoryMetricsBefore).directoryRepaints === 3,
       settings_renders_only_first_20_servers: editors.length === 20,
+      settings_editor_body_owns_all_controls: editorBodiesOwnAllControls,
+      settings_primary_groups_start_collapsed: primarySettingsGroupsStartCollapsed,
       settings_first_page_ids_remain_unique: new Set(editorIds).size === 20,
       settings_first_page_boundary_allows_cross_page_move: firstPageLastDownDisabled === false,
       settings_second_page_is_distinct: secondPageIds.length === 20 && secondPageIds[0] !== editorIds[0],

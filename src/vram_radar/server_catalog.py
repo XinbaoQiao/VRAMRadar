@@ -232,6 +232,12 @@ def _canonical_local_path(path: Path, *, reparse_depth: int = 0) -> Path:
     raise OSError(448, "cannot traverse path because it contains an untrusted mount point", str(path))
 
 
+def canonical_local_path(path: str | Path) -> Path:
+    """Return the bounded junction-aware canonical spelling of a local path."""
+
+    return _canonical_local_path(Path(path).expanduser())
+
+
 def _resolved(value: str | Path) -> Path:
     return _canonical_local_path(Path(_expand_local_path(value)))
 

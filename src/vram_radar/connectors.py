@@ -567,6 +567,7 @@ def ssh_argv(
     *,
     password_auth: bool = False,
     identities_only: bool = False,
+    accept_new_host_key: bool = False,
 ) -> list[str]:
     login = ssh_login_argv(
         server,
@@ -576,6 +577,11 @@ def ssh_argv(
     options = login[1:target_index]
     target = login[target_index + 1]
     options.extend(["-o", "ClearAllForwardings=yes"])
+    if accept_new_host_key:
+        # This is only used after an explicit user confirmation. OpenSSH's
+        # accept-new policy records an unknown key but still refuses a changed
+        # key, preserving the important replacement/MITM safety boundary.
+        options.extend(["-o", "StrictHostKeyChecking=accept-new"])
     if password_auth:
         options.extend(
             [
@@ -754,6 +760,7 @@ def run_remote(
     password: str | None = None,
     stdin_data: bytes | None = None,
     identities_only: bool = False,
+    accept_new_host_key: bool = False,
 ) -> str:
     if stdin_data is not None and len(stdin_data) > MAX_REMOTE_STDIN_BYTES:
         raise ConnectorFailure(
@@ -785,6 +792,7 @@ def run_remote(
         remote_script,
         password_auth=password is not None,
         identities_only=identities_only,
+        accept_new_host_key=accept_new_host_key,
     )
     environment = None
     # Bound aggregate capture memory across refresh, connection-test and folder

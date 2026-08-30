@@ -375,7 +375,7 @@ class WebUiContractTests(unittest.TestCase):
 
     def test_server_config_guide_is_progressive_and_commands_are_copyable(self):
         for text in (
-            "把你平时登录的 GPU 服务器加进来",
+            "服务器发现与导入",
             "自动检测不到？",
             "Windows 教程",
             "macOS 教程",
@@ -592,6 +592,36 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("disabled", error_renderer)
         self.assertNotIn("error.retryable ?", error_renderer)
 
+    def test_unknown_host_key_has_explicit_confirmed_trust_flow(self):
+        error_renderer = self.javascript[
+            self.javascript.index("function renderError"):
+            self.javascript.index("function serverGlyph")
+        ]
+        self.assertIn("error.code === 'host_key_untrusted'", error_renderer)
+        self.assertIn("trust-server-host-key", error_renderer)
+        self.assertIn("信任并连接", error_renderer)
+        trust_flow = self.javascript[
+            self.javascript.index("async function trustServerHostKey"):
+            self.javascript.index("async function copyRedactedDiagnostics")
+        ]
+        self.assertIn("window.confirm(confirmation)", trust_flow)
+        self.assertIn("await api.trust_host_key(serverId)", trust_flow)
+        self.assertIn("render(await api.get_snapshot())", trust_flow)
+        self.assertNotIn("refresh(true, serverId)", trust_flow)
+        self.assertIn("已有 Host Key 发生变化", trust_flow)
+        self.assertIn("const trustHostKey = event.target.closest('.trust-server-host-key')", self.javascript)
+
+    def test_settings_primary_groups_are_collapsed_progressive_disclosures(self):
+        self.assertIn('<details id="profile-settings"', self.markup)
+        self.assertIn('<details id="import-panel"', self.markup)
+        self.assertIn("界面与提醒", self.markup)
+        self.assertIn("服务器发现与导入", self.markup)
+        self.assertIn("settings-group-body", self.markup)
+        self.assertIn("if (onboarding && onboardingStep === 2) ui.importPanel.open = true", self.javascript)
+        self.assertIn("ui.profileSettings.open = true", self.javascript)
+        self.assertIn("if (firstEditor) firstEditor.open = true", self.javascript)
+        self.assertIn(".settings-group > summary", self.styles)
+
     def test_server_navigator_avoids_layout_bound_animation_and_linear_scroll_scans(self):
         for contract in (
             "let serverNavigationCards = []",
@@ -691,6 +721,17 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn(".compact-button", self.styles)
 
     def test_server_editor_keeps_common_fields_visible_and_advanced_fields_nested(self):
+        self.assertIn('<details class="server-editor">', self.markup)
+        self.assertIn('<div class="server-editor-body">', self.markup)
+        editor_template = self.markup[
+            self.markup.index('<template id="server-editor-template">'):
+            self.markup.index('</template>', self.markup.index('<template id="server-editor-template">'))
+        ]
+        body_start = editor_template.index('<div class="server-editor-body">')
+        body_end = editor_template.rindex('</div>')
+        self.assertLess(body_start, editor_template.index('<div class="field-grid">'))
+        self.assertLess(editor_template.index('<details class="server-editor-more">'), body_end)
+        self.assertLess(editor_template.index('<details class="ssh-key-setup">'), body_end)
         self.assertIn('<details class="server-editor-more">', self.markup)
         self.assertIn("登录与高级设置", self.markup)
         self.assertIn("密码、端口、用户名和私钥放在每台服务器的第二层设置中", self.markup)
@@ -700,6 +741,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("authOverview.textContent", self.javascript)
         for selector in (".settings-section", ".server-editor-more", ".server-editor-more-body"):
             self.assertIn(selector, self.styles)
+        self.assertIn("if (editor) editor.open = true", self.javascript)
 
     def test_server_editor_exposes_config_source_and_preserves_hidden_advanced_fields(self):
         self.assertIn('data-field="ssh_config_file"', self.markup)
