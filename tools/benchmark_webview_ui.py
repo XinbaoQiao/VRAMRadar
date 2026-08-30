@@ -474,6 +474,22 @@ BENCHMARK_JAVASCRIPT = r"""
     const repeatMetricsAfter = metricCopy();
     const firstCardAfterRepeatedRender = ui.list.querySelector('.server-card');
 
+    const appShell = document.querySelector('.app-shell');
+    const mainContent = document.querySelector('main');
+    ui.serverNavigator.classList.add('dragging');
+    applyServerNavigatorSide('right');
+    forceLayout(appShell);
+    const rightMainBounds = mainContent.getBoundingClientRect();
+    const rightNavigatorBounds = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
+    const rightNavigatorGap = rightNavigatorBounds.left - rightMainBounds.right;
+    applyServerNavigatorSide('left');
+    forceLayout(appShell);
+    const leftMainBounds = mainContent.getBoundingClientRect();
+    const leftNavigatorBounds = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
+    const leftNavigatorGap = leftMainBounds.left - leftNavigatorBounds.right;
+    applyServerNavigatorSide('right');
+    ui.serverNavigator.classList.remove('dragging');
+
     const directoryRoot = '/srv/benchmark/code';
     const expandedRoot = `${directoryRoot}/project-000`;
     const directoryEntries = [
@@ -630,6 +646,8 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
+      navigator_right_does_not_overlap_main: rightNavigatorGap >= -0.5,
+      navigator_left_does_not_overlap_main: leftNavigatorGap >= -0.5,
       directory_fixture_has_160_entries: directoryEntries.length === 160,
       directory_initially_skips_cached_children: firstRootNodes === 80 && firstFileNodes === 0,
       directory_expand_materializes_cached_children: expandedFileNodes === 80 && expandedModuleNodes > firstModuleNodes,
@@ -668,6 +686,11 @@ BENCHMARK_JAVASCRIPT = r"""
         server_card_dom_identity_preserved: firstCard === firstCardAfterRepeatedRender,
         visible_server_cards: ui.list.querySelectorAll(':scope > .server-card').length,
         metrics_delta: metricDelta(repeatMetricsAfter, repeatMetricsBefore),
+      },
+      navigator_layout: {
+        panel_width_px: round(rightNavigatorBounds.width),
+        right_side_gap_px: round(rightNavigatorGap),
+        left_side_gap_px: round(leftNavigatorGap),
       },
       directory_module: {
         entry_count: directoryEntries.length,

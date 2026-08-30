@@ -156,6 +156,8 @@ class ShellApiTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["shell"], "powershell")
+        self.assertEqual(result["copy_format"], "ssh-command")
+        self.assertEqual(result["copy_text"], result["command"])
         self.assertIn(f"'{Path('C:/SSH&A/config')}'", result["command"])
         self.assertIn("'gpu&whoami'", result["command"])
         quoted_key = str(Path("C:/Keys/user's-key")).replace("'", "''")
@@ -185,6 +187,8 @@ class ShellApiTests(unittest.TestCase):
                             "backend": "direct_ssh",
                             "ssh_alias": "gpu-copy",
                             "ssh_config_file": str(config),
+                            "identity_file": "~/.ssh/id_rsa",
+                            "prefer_identity_auth": True,
                         }
                     ],
                 }
@@ -200,11 +204,53 @@ class ShellApiTests(unittest.TestCase):
             result["endpoint"],
             {"hostname": "192.0.2.81", "user": "researcher", "port": 22022},
         )
-        self.assertIn("'HostName=192.0.2.81'", result["command"])
-        self.assertIn("'-l' 'researcher'", result["command"])
-        self.assertIn("'-p' '22022'", result["command"])
-        self.assertIn("'gpu-copy'", result["command"])
-        self.assertNotIn("secret-must-stay-in-config", result["command"])
+        self.assertEqual(result["copy_format"], "openssh-config")
+        self.assertEqual(
+            result["copy_text"],
+            "Host gpu-copy\n"
+            "  HostName 192.0.2.81\n"
+            "  User researcher\n"
+            "  Port 22022\n"
+            "  IdentityFile ~/.ssh/id_rsa\n"
+            "  IdentitiesOnly yes\n"
+            "  BatchMode yes\n"
+            "  ClearAllForwardings yes",
+        )
+        self.assertNotIn("secret-must-stay-in-config", result["copy_text"])
+
+    def test_direct_server_copy_is_a_complete_openssh_host_block(self):
+        profile = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "local",
+                "display_name": "Local",
+                "servers": [{
+                    "id": "gpu",
+                    "display_name": "GPU",
+                    "backend": "direct_ssh",
+                    "host": "192.0.2.90",
+                    "username": "researcher",
+                    "port": 22022,
+                }],
+            }
+        )
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=Mock())
+
+        with patch("vram_radar.shell.sys.platform", "win32"):
+            result = api.get_ssh_command("gpu")
+
+        self.assertEqual(
+            result["copy_text"],
+            "Host gpu\n"
+            "  HostName 192.0.2.90\n"
+            "  User researcher\n"
+            "  Port 22022\n"
+            "  IdentitiesOnly yes\n"
+            "  BatchMode yes\n"
+            "  ClearAllForwardings yes",
+        )
+        self.assertEqual(result["copy_format"], "openssh-config")
+        self.assertTrue(result["endpoint_complete"])
 
     def test_dynamic_ssh_config_copies_safe_alias_command_with_an_explicit_warning(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -241,6 +287,8 @@ class ShellApiTests(unittest.TestCase):
         popen.assert_not_called()
         self.assertTrue(result["ok"])
         self.assertFalse(result["endpoint_complete"])
+        self.assertEqual(result["copy_format"], "ssh-command")
+        self.assertEqual(result["copy_text"], result["command"])
         self.assertEqual(result["resolution_reason"], "conditional_match")
         self.assertIn("gpu-copy", result["command"])
         self.assertIn("OpenSSH", result["warning"])

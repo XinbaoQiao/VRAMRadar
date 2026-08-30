@@ -80,6 +80,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 ### Built for large fleets and clusters
 
 - Keep the Mini Navigator collapsed by default and expand it on pointer hover or keyboard focus.
+- Give the navigator a narrow responsive lane instead of overlaying the dashboard; compact windows move it into an in-flow row above the main content.
 - Search and filter by favorites, recent servers, available capacity, your jobs, or attention state.
 - Drag the navigator between the left and right edges; the preference survives restarts and application updates.
 - Render at most 50 server cards per main page and 80 navigator items per window.
@@ -108,7 +109,7 @@ The A100/Slurm node table uses fixed column tracks, so longer node names, partit
 
 - Switch the complete interface between Simplified Chinese and English in Settings; the local preference survives restarts and in-place updates.
 - Persist an availability alert for favorite servers: notify when a whole GPU becomes idle or when any GPU reaches your optional minimum free-VRAM threshold. The rule continues while the window is hidden and fires once per availability transition instead of on every refresh.
-- Favorite a server, copy its SSH command, open the system terminal, or pause that server's monitoring. **Copy SSH** includes a statically provable `HostName`, `User`, and `Port` while preserving the owning `-F` configuration and alias; conditional or dynamic configurations fall back to the safe alias command with a clear warning instead of guessed connection details.
+- Favorite a server, copy its SSH configuration, open the system terminal, or pause that server's monitoring. **Copy SSH** produces a paste-ready OpenSSH `Host` block with statically verified `HostName`, `User`, `Port`, optional `IdentityFile`, and non-interactive safety options; conditional or dynamic configurations fall back to the safe executable alias command with a clear warning instead of guessed fields.
 - On Windows, minimize or close to the notification area; its menu exposes status, show, refresh, settings, pause, and exit actions.
 - Check the latest stable GitHub Release after startup and notify only—never silently download or install code.
 - Keep a version-independent Windows installation path, so an in-place upgrade preserves the Start-menu or desktop shortcut.

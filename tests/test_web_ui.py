@@ -41,6 +41,12 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("Notify me when favorite GPUs are available", self.localization)
         self.assertIn("Leave empty: notify only for idle GPUs", self.localization)
 
+    def test_copy_ssh_prefers_an_openssh_config_block_and_localized_feedback(self):
+        self.assertIn("result.copy_text || result.command", self.javascript)
+        self.assertIn("result.copy_format === 'openssh-config'", self.javascript)
+        self.assertIn("SSH Config 配置块已复制", self.javascript)
+        self.assertIn("SSH Config host block copied", self.localization)
+
     def test_task_time_columns_are_unambiguous(self):
         self.assertIn("运行时长", self.javascript)
         self.assertIn("提交时间", self.javascript)
@@ -533,6 +539,11 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn('已定位到服务器 ${server.display_name}', self.javascript)
         self.assertIn("scroll-margin-top: 84px", self.styles)
         self.assertIn("@media (max-width: 900px)", self.styles)
+        self.assertIn("--navigator-panel-width: clamp(206px, 17vw, 224px)", self.styles)
+        self.assertIn(".app-shell:has(.server-navigator:not([hidden]))", self.styles)
+        self.assertIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-panel-width)", self.styles)
+        self.assertIn("position: sticky", self.styles)
+        self.assertNotIn(".server-navigator { position: fixed", self.styles)
 
     def test_server_navigator_task_filter_shows_only_my_current_activity(self):
         navigator = self.javascript[
@@ -1095,13 +1106,15 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn(".server-status-label { display: none; }", self.styles)
         self.assertIn(".server-quick-actions .open-terminal { display: none; }", self.styles)
 
-    def test_ssh_copy_uses_the_backend_canonical_command(self):
+    def test_ssh_copy_uses_the_backend_canonical_copy_payload(self):
         copy_flow = self.javascript[
             self.javascript.index("async function copyServerSshCommand"):
             self.javascript.index("function scheduleRefreshCompletion")
         ]
         self.assertIn("await api.get_ssh_command(serverId)", copy_flow)
-        self.assertIn("await writeClipboard(result.command)", copy_flow)
+        self.assertIn("await writeClipboard(result.copy_text || result.command)", copy_flow)
+        self.assertIn("result.copy_format === 'openssh-config'", copy_flow)
+        self.assertIn("SSH Config 配置块已复制", copy_flow)
         self.assertIn("result.endpoint_complete", copy_flow)
         self.assertIn("完整 SSH 命令已复制（地址、用户与端口已包含）", copy_flow)
         self.assertIn("result.warning", copy_flow)
@@ -1202,7 +1215,9 @@ class WebUiContractTests(unittest.TestCase):
             ".account-home strong { max-width: min(620px, 62vw); overflow: visible",
             ".directory-root strong { min-width: 0; overflow: visible",
             ".title-actions { min-width: 0; display: flex; flex: 1 1 auto",
-            ".server-navigator { top: auto; bottom: max(10px, env(safe-area-inset-bottom))",
+            ".server-navigator, .server-navigator[data-side=\"left\"] { position: relative",
+            ".server-navigator-head, .server-navigator-controls, .server-navigator-list",
+            "grid-row: 3; grid-column: 1",
         ):
             self.assertIn(contract, self.styles)
         self.assertNotIn(".server-navigator { display: none; }", self.styles)

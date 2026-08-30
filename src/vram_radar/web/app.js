@@ -1908,8 +1908,10 @@ async function copyServerSshCommand(serverId) {
   try {
     const result = await api.get_ssh_command(serverId);
     if (!result?.ok || !result.command) throw new Error(result?.error || '无法生成 SSH 命令');
-    await writeClipboard(result.command);
-    if (result.endpoint_complete) {
+    await writeClipboard(result.copy_text || result.command);
+    if (result.copy_format === 'openssh-config') {
+      showToast('SSH Config 配置块已复制');
+    } else if (result.endpoint_complete) {
       showToast('完整 SSH 命令已复制（地址、用户与端口已包含）');
     } else {
       showToast(result.warning || (result.shell === 'powershell'

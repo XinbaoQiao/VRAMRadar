@@ -102,6 +102,40 @@ def _powershell_join(argv: list[str]) -> str:
     return " ".join([argv[0], *quoted])
 
 
+def _openssh_config_value(value: object) -> str:
+    """Quote one bounded Profile value for an OpenSSH configuration line."""
+
+    text = str(value)
+    if re.fullmatch(r"[A-Za-z0-9_@%+=:,./~\\-]+", text):
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _ssh_config_block(server: Any, details: Any) -> str:
+    """Build a paste-ready Host block only from statically verified fields."""
+
+    if not details.endpoint_complete:
+        return ""
+    resolution = details.resolution
+    alias = server.ssh_alias or server.id
+    lines = [
+        f"Host {_openssh_config_value(alias)}",
+        f"  HostName {_openssh_config_value(resolution.hostname)}",
+        f"  User {_openssh_config_value(resolution.user)}",
+        f"  Port {int(resolution.port)}",
+    ]
+    if server.identity_file:
+        lines.append(f"  IdentityFile {_openssh_config_value(server.identity_file)}")
+    lines.extend(
+        (
+            "  IdentitiesOnly yes",
+            "  BatchMode yes",
+            "  ClearAllForwardings yes",
+        )
+    )
+    return "\n".join(lines)
+
+
 def configure_logging(paths: StoragePaths) -> logging.Logger:
     paths.logs.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("vram_radar")
@@ -805,6 +839,7 @@ class AppApi:
         details = ssh_copy_details(server)
         argv = list(details.argv)
         command = _powershell_join(argv) if sys.platform == "win32" else shlex.join(argv)
+        config_block = _ssh_config_block(server, details)
         endpoint = {
             "hostname": details.resolution.hostname,
             "user": details.resolution.user,
@@ -815,6 +850,8 @@ class AppApi:
             "server_id": normalized_id,
             "command": command,
             "shell": "powershell" if sys.platform == "win32" else "posix",
+            "copy_text": config_block or command,
+            "copy_format": "openssh-config" if config_block else "ssh-command",
             "endpoint_complete": details.endpoint_complete,
             "endpoint": endpoint,
             "resolution_status": details.resolution.status,

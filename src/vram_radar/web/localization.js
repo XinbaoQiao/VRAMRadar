@@ -197,6 +197,7 @@
     ['是以后在终端和显存雷达中看到的别名。', 'is the alias shown later in the terminal and VRAM Radar.'],
     ['复制 SSH 配置示例', 'Copy the SSH configuration example'],
     ['使用 VS Code / Cursor Remote-SSH 或其他工具？', 'Using VS Code, Cursor Remote-SSH, or another tool?'],
+    ['SSH Config 配置块已复制', 'SSH Config host block copied'],
     ['在 VS Code、Cursor、VSCodium 或 Windsurf 的设置中搜索 ', 'In VS Code, Cursor, VSCodium, or Windsurf settings, search for '],
     ['在 VS Code、Cursor、VSCodium 或 Windsurf 的设置中搜索', 'In VS Code, Cursor, VSCodium, or Windsurf settings, search for'],
     ['。复制显示的完整路径，粘贴到上方“服务器设置文件路径”，再点击“导入并替换列表”。', '. Copy the full path, paste it into Server configuration file above, and click Import and replace list.'],
