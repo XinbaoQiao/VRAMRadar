@@ -192,6 +192,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn("two files users need to download", self.readme)
         self.assertNotIn("windows-x64-portable", self.workflow)
         self.assertIn("needs: [windows, macos_combined_validate]", self.workflow)
+        self.assertIn("group: stable-release-v2-${{ inputs.release_tag }}", self.workflow)
         self.assertIn("bash tools/package_combined_macos_release.sh native-assets", self.workflow)
         self.assertIn("needs: [windows, macos_combined_validate]", self.workflow)
         self.assertIn("Validate final macOS package on ${{ matrix.arch }}", self.workflow)

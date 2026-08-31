@@ -19,7 +19,9 @@ on:
         type: boolean
 
 concurrency:
-  group: stable-release-${{ inputs.release_tag }}
+  # v2 retires the pre-receipt release lane, whose failed Windows runner can
+  # remain uninterruptible while GitHub finishes force-cancellation.
+  group: stable-release-v2-${{ inputs.release_tag }}
   cancel-in-progress: false
 
 jobs:
@@ -91,6 +93,7 @@ jobs:
           }
 
       - name: Build stable-path installer and release asset
+        timeout-minutes: 12
         shell: pwsh
         run: |
           $version = & .\.venv\Scripts\python.exe -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
