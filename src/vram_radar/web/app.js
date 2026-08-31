@@ -32,7 +32,6 @@ const ui = {
   favoriteAlertEnabled: document.getElementById('favorite-alert-enabled'),
   favoriteAlertMinMemory: document.getElementById('favorite-alert-min-memory'),
   taskCompletionAlertEnabled: document.getElementById('task-completion-alert-enabled'),
-  taskCompletionWatchList: document.getElementById('task-completion-watch-list'),
   checkForUpdates: document.getElementById('check-for-updates'),
   updateCheckStatus: document.getElementById('update-check-status'),
   copyDiagnostics: document.getElementById('copy-diagnostics'),
@@ -133,7 +132,7 @@ let serverNavigatorSide = 'right';
 let serverNavigatorDragState = null;
 let suppressServerNavigatorDragClick = false;
 let favoriteServerIds = new Set();
-let recentServerIds = [];
+let taskWatchesExpanded = false;
 let monitoringPaused = false;
 let profileServerListReference = null;
 let profileServersById = new Map();
@@ -1192,8 +1191,6 @@ function syncProfileConvenienceState(profile) {
   (profile?.servers || []).forEach(server => {
     if (server.favorite === true) favoriteServerIds.add(server.id);
   });
-  const recent = profile?.recent_server_ids || profile?.recent_servers || [];
-  if (Array.isArray(recent) && recent.length) recentServerIds = recent.slice(0, 8);
   monitoringPaused = Boolean(profile?.monitoring_paused ?? profile?.monitoring?.paused);
 }
 
@@ -1215,18 +1212,17 @@ function acceptProfile(candidate) {
   return true;
 }
 
-function renderTaskCompletionWatchList() {
+function renderNavigatorTaskWatches() {
   const watches = currentProfile?.task_completion_watches || [];
-  ui.taskCompletionWatchList.hidden = watches.length === 0;
-  ui.taskCompletionWatchList.innerHTML = watches.length
-    ? `<div class="task-watch-heading"><span>单独关注 ${number(watches.length)} 项</span><button class="clear-task-watches button compact-button" type="button">全部移除</button></div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `任务 ${watch.task_id}` : `PID ${watch.task_id}`)}${watch.owner ? ` · ${escapeHtml(watch.owner)}` : ''}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}" data-task-owner="${escapeHtml(watch.owner || '')}" data-task-owner-scope="${escapeHtml(watch.owner_scope || 'unknown')}">移除</button></div>`).join('')}`
-    : '';
+  if (!watches.length) return `<div class="navigator-watch-empty">${escapeHtml(localizedText('还没有关注任务'))}<small>${escapeHtml(localizedText('可在任务表中逐项关注。'))}</small></div>`;
+  return `<details class="navigator-task-watches"${taskWatchesExpanded ? ' open' : ''}><summary><span>${escapeHtml(localizedText('已关注任务'))}</span><strong>${number(watches.length)}</strong><span class="summary-action"><span class="when-closed">${escapeHtml(localizedText('展开'))}</span><span class="when-open">${escapeHtml(localizedText('收起'))}</span></span></summary><div class="navigator-task-watch-body"><div class="task-watch-heading"><span>${escapeHtml(localizedText('只在任务结束时提醒'))}</span><button class="clear-task-watches button compact-button" type="button">${escapeHtml(localizedText('全部移除'))}</button></div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `${localizedText('任务')} ${watch.task_id}` : `PID ${watch.task_id}`)}${watch.owner ? ` · ${escapeHtml(watch.owner)}` : ''}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}" data-task-owner="${escapeHtml(watch.owner || '')}" data-task-owner-scope="${escapeHtml(watch.owner_scope || 'unknown')}">${escapeHtml(localizedText('移除'))}</button></div>`).join('')}</div></details>`;
 }
 
 function notificationKindLabel(kind) {
   if (kind === 'task_completed') return localizedText('任务完成');
   if (kind === 'favorite_gpu_available') return localizedText('收藏 GPU 可用');
   if (kind === 'resource_available') return localizedText('GPU 条件满足');
+  if (kind === 'update_available') return localizedText('版本更新');
   return localizedText('应用通知');
 }
 
@@ -1243,6 +1239,7 @@ function notificationEventTitle(event) {
   if (event.kind === 'task_completed') return localizedText('任务已完成');
   if (event.kind === 'favorite_gpu_available') return localizedText('收藏 GPU 已可用');
   if (event.kind === 'resource_available') return localizedText('显存雷达：资源可用');
+  if (event.kind === 'update_available') return localizedText('发现新版本');
   return String(event.title || notificationKindLabel(event.kind));
 }
 
@@ -1256,6 +1253,11 @@ function notificationEventMessage(event) {
     return localizedText('收藏服务器已有 GPU 可用。');
   }
   if (event.kind === 'resource_available') return localizedText('你设置的 GPU 条件已有匹配结果。');
+  if (event.kind === 'update_available' && event.latest_version) {
+    return window.VRAMRadarI18n?.language === 'en'
+      ? `VRAM Radar ${event.latest_version} is ready to download.`
+      : `VRAM Radar ${event.latest_version} 已可下载。`;
+  }
   return String(event.message || '');
 }
 
@@ -1264,7 +1266,12 @@ function renderNotificationCenter(snapshot) {
   const readSequence = Number(state.read_sequence || 0);
   const events = [...(state.events || [])].reverse();
   ui.notificationList.innerHTML = events.length
-    ? events.map(event => `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p></article>`).join('')
+    ? events.map(event => {
+      const updateAction = event.kind === 'update_available'
+        ? `<button class="button notification-update-action install-latest-update" type="button">${escapeHtml(localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '查看更新'))}</button>`
+        : '';
+      return `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p>${updateAction}</article>`;
+    }).join('')
     : '<div class="notification-empty">暂无通知</div>';
   ui.markNotificationsRead.disabled = Number(state.unread_count || 0) <= 0;
 }
@@ -1545,7 +1552,6 @@ function serverMatchesNavigator(server) {
   if (serverNavigatorFilter === 'tasks') return serverNavigatorActivityCount(server) > 0;
   if (serverNavigatorFilter === 'issues') return server.connection?.state !== 'online';
   if (serverNavigatorFilter === 'favorites') return favoriteServerIds.has(server.server_id);
-  if (serverNavigatorFilter === 'recent') return recentServerIds.includes(server.server_id);
   return true;
 }
 
@@ -1693,8 +1699,11 @@ function renderServerNavigator(servers) {
     window.cancelAnimationFrame(serverNavigatorSearchFrame);
     serverNavigatorSearchFrame = null;
   }
-  const visible = servers.length > 1;
+  const watches = currentProfile?.task_completion_watches || [];
+  const watchMode = serverNavigatorFilter === 'watches';
+  const visible = servers.length > 1 || watches.length > 0;
   ui.serverNavigator.hidden = !visible;
+  ui.serverNavigator.classList.toggle('watch-mode', watchMode);
   if (!visible) {
     if (lastNavigatorRenderSignature !== 'hidden') ui.serverNavigatorList.replaceChildren();
     lastNavigatorRenderSignature = 'hidden';
@@ -1707,6 +1716,29 @@ function renderServerNavigator(servers) {
     serverNavigatorItems = new Map();
     serverNavigatorPositions = new Map();
     activeServerId = servers[0]?.server_id || '';
+    return;
+  }
+  if (watchMode) {
+    ui.serverNavigatorCount.textContent = `${number(watches.length)} ${localizedText('项')}`;
+    const navigatorHtml = renderNavigatorTaskWatches();
+    const navigatorSignature = JSON.stringify([serverNavigatorFilter, taskWatchesExpanded, navigatorHtml]);
+    if (lastNavigatorRenderSignature !== navigatorSignature) {
+      ui.serverNavigatorList.innerHTML = navigatorHtml;
+      lastNavigatorRenderSignature = navigatorSignature;
+      uiRenderMetrics.navigatorBuilds += 1;
+    }
+    const details = ui.serverNavigatorList.querySelector('.navigator-task-watches');
+    if (details) details.ontoggle = () => { taskWatchesExpanded = details.open; };
+    serverNavigatorVisibleIds = [];
+    serverNavigatorItems = new Map();
+    serverNavigatorPositions = new Map();
+    ui.serverNavigatorEmpty.hidden = true;
+    ui.serverNavigatorPosition.textContent = '—';
+    ui.previousServer.disabled = true;
+    ui.nextServer.disabled = true;
+    ui.serverNavigator.querySelectorAll('[data-server-navigator-filter]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.serverNavigatorFilter === serverNavigatorFilter));
+    });
     return;
   }
   const allMatches = filteredServerEntries(servers);
@@ -1759,7 +1791,6 @@ function navigateToServer(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId));
   if (!card) return;
   setActiveServer(serverId);
-  recentServerIds = [serverId, ...recentServerIds.filter(item => item !== serverId)].slice(0, 8);
   card.scrollIntoView({behavior: 'auto', block: 'start'});
   const server = currentSnapshot?.servers?.find(item => item.server_id === serverId);
   ui.serverNavigatorStatus.textContent = server
@@ -2960,7 +2991,6 @@ function openSettings(options = {}) {
     : '';
   ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;
   ui.taskCompletionAlertEnabled.checked = currentProfile?.task_completion_alert_enabled !== false;
-  renderTaskCompletionWatchList();
   ui.serverConfigPath.value = currentProfile?.server_config_path || '';
   ui.autoSyncServers.checked = Boolean(currentProfile?.auto_sync_servers);
   pendingIgnoredSshAliases = new Set(currentProfile?.ignored_ssh_aliases || []);
@@ -3243,6 +3273,14 @@ async function checkForUpdates({interactive = false} = {}) {
   lastUpdateCheckAt = Date.now();
   try {
     const result = await api.check_for_updates();
+    if (result?.ok && result.update_available) {
+      latestUpdateAction = result.update_action || 'browser';
+    }
+    if (result?.notifications && currentSnapshot) {
+      currentSnapshot.notifications = result.notifications;
+      currentSnapshot.task_completion_alerts = result.task_completion_alerts;
+      renderTaskAlertIndicator(currentSnapshot);
+    }
     if (!result?.ok) {
       showUpdateCheckFailure(result?.error, interactive);
       scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
@@ -3256,28 +3294,16 @@ async function checkForUpdates({interactive = false} = {}) {
       if (interactive) {
         ui.updateCheckStatus.textContent = `已是最新版本 ${result.current_version}`;
         window.setTimeout(() => {
-          if (!updateCheckInFlight) ui.updateCheckStatus.textContent = '无更新时保持静默，仅在发现新版本后显示顶部提示';
+          if (!updateCheckInFlight) ui.updateCheckStatus.textContent = '发现新版本后会进入通知中心';
         }, 4000);
       }
       scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
       return;
     }
     updateAvailableShown = true;
-    latestUpdateAction = result.update_action || 'browser';
     ui.updateNotice.classList.remove('update-check-failed');
-    const actionLabel = latestUpdateAction === 'one_click'
-      ? '安全一键更新'
-      : latestUpdateAction === 'verified_download' ? '下载并校验' : '下载更新';
-    const actionCopy = latestUpdateAction === 'one_click'
-      ? '确认后将下载官方安装包、校验 SHA-256，安装成功后自动重启。'
-      : latestUpdateAction === 'verified_download'
-        ? '更新包会先校验 SHA-256，再在 Finder 中显示。'
-        : '当前版本需要从 GitHub Release 手动安装。';
-    const releaseTitle = result.replacement_available
-      ? `发现 VRAM Radar ${escapeHtml(result.latest_version)} 的修复构建`
-      : `发现 VRAM Radar ${escapeHtml(result.latest_version)}`;
-    ui.updateNotice.innerHTML = `<div><div class="notice-title">${releaseTitle}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。${actionCopy}</div></div><button class="button primary install-latest-update" type="button">${actionLabel}</button>`;
-    ui.updateNotice.hidden = false;
+    ui.updateNotice.replaceChildren();
+    ui.updateNotice.hidden = true;
     if (interactive) ui.updateCheckStatus.textContent = `发现新版本 ${result.latest_version}`;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {
@@ -3332,7 +3358,6 @@ async function toggleTaskCompletionWatch(button) {
     );
     if (!result?.ok) throw new Error(result?.error || '提醒设置保存失败');
     acceptProfile(result.profile);
-    renderTaskCompletionWatchList();
     if (currentSnapshot) render(currentSnapshot);
     showToast(nextWatched ? '已单独关注该任务，结束时会提醒' : '已取消该任务的单独提醒');
   } catch (error) {
@@ -3348,7 +3373,6 @@ async function clearTaskCompletionWatches(button) {
     const result = await api.clear_task_completion_watches();
     if (!result?.ok) throw new Error(result?.error || '无法移除关注任务');
     acceptProfile(result.profile);
-    renderTaskCompletionWatchList();
     if (currentSnapshot) render(currentSnapshot);
     showToast('已移除全部单独关注任务');
   } catch (error) {

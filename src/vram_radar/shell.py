@@ -826,6 +826,9 @@ class AppApi:
         self._favorite_alert_monitor_running = False
         self._task_alert_state_lock = threading.Lock()
         self._notification_persist_lock = threading.Lock()
+        self._native_delivery_lock = threading.Lock()
+        self._native_retry_failures = 0
+        self._native_retry_not_before = 0.0
         self._task_alert_active: dict[str, dict[str, dict[str, str]]] = {}
         self._notification_events: list[dict[str, Any]] = []
         self._notification_sequence = 0
@@ -848,12 +851,16 @@ class AppApi:
         if not isinstance(raw, dict):
             return None
         try:
-            return normalize_task_completion_watch({
+            task = normalize_task_completion_watch({
                 key: raw.get(key)
                 for key in (
                     "server_id", "task_key", "task_kind", "task_id", "label", "owner", "owner_scope"
                 )
             })
+            fingerprint = raw.get("fingerprint")
+            if isinstance(fingerprint, str) and 0 < len(fingerprint.encode("utf-8")) <= 128:
+                task["fingerprint"] = fingerprint
+            return task
         except ConfigError:
             return None
 
@@ -892,6 +899,8 @@ class AppApi:
             for key in (
                 "server_id", "task_key", "task_kind", "task_id", "label", "owner",
                 "owner_scope", "terminal_state", "completed_at", "language",
+                "native_delivery", "event_key", "latest_version", "latest_build",
+                "release_url",
             ):
                 value = raw_event.get(key)
                 if isinstance(value, str) and len(value.encode("utf-8")) <= 512:
@@ -975,6 +984,74 @@ class AppApi:
             self._notification_events = self._notification_events[-128:]
         self._persist_notification_state()
         return created
+
+    def _mark_native_notifications_shown(self, sequences: list[int]) -> None:
+        if not sequences:
+            return
+        targets = set(sequences)
+        changed = False
+        with self._task_alert_state_lock:
+            for event in self._notification_events:
+                if event.get("sequence") in targets and event.get("native_delivery") != "shown":
+                    event["native_delivery"] = "shown"
+                    changed = True
+        if changed:
+            self._persist_notification_state()
+
+    def _deliver_notifications(
+        self,
+        events: list[dict[str, Any]],
+        *,
+        title: str | None = None,
+        message: str | None = None,
+        respect_retry_deadline: bool = False,
+    ) -> bool:
+        pending = [
+            event for event in events
+            if event.get("native_delivery") == "pending"
+            and isinstance(event.get("sequence"), int)
+        ]
+        if not pending:
+            return False
+        with self._native_delivery_lock:
+            if respect_retry_deadline and time.monotonic() < self._native_retry_not_before:
+                return False
+            shown = self._show_native_notification(
+                title or str(pending[-1].get("title") or "VRAM Radar"),
+                message or str(pending[-1].get("message") or ""),
+            )
+            if shown:
+                self._native_retry_failures = 0
+                self._native_retry_not_before = 0.0
+                self._mark_native_notifications_shown([int(event["sequence"]) for event in pending])
+                return True
+            self._native_retry_failures += 1
+            delays = (15.0, 60.0, 300.0, 1_800.0)
+            delay = delays[min(self._native_retry_failures - 1, len(delays) - 1)]
+            self._native_retry_not_before = time.monotonic() + delay
+            return False
+
+    def _retry_pending_native_notifications(self, *, force: bool = False) -> None:
+        with self._task_alert_state_lock:
+            pending = [
+                dict(event) for event in self._notification_events
+                if event.get("native_delivery") == "pending"
+            ]
+        if not pending:
+            return
+        if len(pending) == 1:
+            self._deliver_notifications(pending, respect_retry_deadline=not force)
+            return
+        english = self.profile.ui_language == "en"
+        self._deliver_notifications(
+            pending,
+            title="VRAM Radar",
+            message=(
+                f"You have {len(pending)} pending notifications."
+                if english else f"你有 {len(pending)} 条待处理通知。"
+            ),
+            respect_retry_deadline=not force,
+        )
 
     def _show_native_notification(self, title: str, message: str) -> bool:
         callback = self._notification_callback
@@ -1254,6 +1331,8 @@ class AppApi:
         snapshot = self.service.request_refresh(force=bool(force), server_id=server_id or None)
         self._evaluate_favorite_alerts(snapshot)
         self._evaluate_task_completion_alerts(snapshot)
+        self._retry_pending_native_notifications()
+        self._attach_notification_state(snapshot)
         return snapshot
 
     def get_snapshot(self) -> dict[str, Any]:
@@ -1262,6 +1341,8 @@ class AppApi:
         snapshot = self.service.snapshot()
         self._evaluate_favorite_alerts(snapshot)
         self._evaluate_task_completion_alerts(snapshot)
+        self._retry_pending_native_notifications()
+        self._attach_notification_state(snapshot)
         return snapshot
 
     def dismiss_notice(self, code: str) -> dict[str, Any]:
@@ -1279,6 +1360,7 @@ class AppApi:
         snapshot = self.service.request_refresh(force=False)
         self._evaluate_favorite_alerts(snapshot)
         self._evaluate_task_completion_alerts(snapshot)
+        self._retry_pending_native_notifications()
         monitoring = snapshot.get("monitoring") or {}
         if monitoring.get("in_flight"):
             self._monitor_background_refresh_for_favorite_alerts()
@@ -1296,6 +1378,7 @@ class AppApi:
 
         self._notification_callback = callback
         if callback is not None:
+            self._retry_pending_native_notifications(force=True)
             snapshot = self.service.snapshot()
             self._evaluate_favorite_alerts(snapshot)
             self._evaluate_task_completion_alerts(snapshot)
@@ -1360,6 +1443,13 @@ class AppApi:
             )
             started_at = str(process.get("started_at") or "").strip()
             task_key = f"process:{task_id}:{started_at}" if started_at else f"process:{task_id}"
+            fingerprint_payload = {
+                "name": str(process.get("name") or "").strip(),
+                "command": str(process.get("command_preview") or "").strip(),
+            }
+            fingerprint = hashlib.sha256(
+                json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
             result[task_key] = {
                 "server_id": server_id,
                 "task_key": task_key,
@@ -1368,8 +1458,24 @@ class AppApi:
                 "label": str(process.get("name") or process.get("command_preview") or f"PID {task_id}").strip(),
                 "owner": owner,
                 "owner_scope": owner_scope,
+                "fingerprint": fingerprint,
             }
         return result
+
+    @staticmethod
+    def _task_generation_changed(
+        previous: dict[str, str],
+        current: dict[str, str] | None,
+    ) -> bool:
+        if current is None or previous.get("task_kind") != "process":
+            return False
+        previous_fingerprint = str(previous.get("fingerprint") or "")
+        current_fingerprint = str(current.get("fingerprint") or "")
+        return bool(
+            previous_fingerprint
+            and current_fingerprint
+            and previous_fingerprint != current_fingerprint
+        )
 
     @staticmethod
     def _task_watch_matches(
@@ -1382,7 +1488,17 @@ class AppApi:
         if watched_owner:
             return watched_owner == str(task.get("owner") or "")
         watched_scope = str(watch.get("owner_scope") or "unknown")
-        return watched_scope == "mine" and task.get("owner_scope") == "mine"
+        if watched_scope == "mine":
+            return task.get("owner_scope") == "mine"
+        if watched_scope != "unknown":
+            return False
+        # Some direct-SSH collectors cannot expose process ownership. Those
+        # tasks may still be watched explicitly by their exact, user-selected
+        # identity; they must never become part of automatic owner alerts.
+        return all(
+            str(watch.get(key) or "") == str(task.get(key) or "")
+            for key in ("task_key", "task_kind", "task_id")
+        )
 
     @staticmethod
     def _task_watch_for_task(
@@ -1466,7 +1582,16 @@ class AppApi:
                 if connection.get("state") != "online" or connection.get("data_origin") not in {None, "live"}:
                     continue
                 server_id = str(server.get("server_id") or "")
+                previous = self._task_alert_active.get(server_id)
                 all_current = self._active_tasks(server)
+                processes = server.get("processes")
+                process_sample_supported = (
+                    isinstance(processes, dict) and processes.get("supported") is True
+                )
+                if not process_sample_supported and previous:
+                    for task_key, task in previous.items():
+                        if task.get("task_kind") == "process":
+                            all_current.setdefault(task_key, task)
                 current = {
                     task_key: task
                     for task_key, task in all_current.items()
@@ -1477,14 +1602,14 @@ class AppApi:
                         )
                     )
                 }
-                previous = self._task_alert_active.get(server_id)
                 self._task_alert_active[server_id] = current
                 if previous != current:
                     state_changed = True
                 if previous is None:
                     continue
                 for task_key, task in previous.items():
-                    if task_key in current:
+                    current_task = current.get(task_key)
+                    if current_task is not None and not self._task_generation_changed(task, current_task):
                         continue
                     explicitly_watched = self._task_watch_matches(
                         self._task_watch_for_task(watched, server_id, task), task
@@ -1507,19 +1632,14 @@ class AppApi:
                         "completed_at": completed_at,
                         "watched": explicitly_watched,
                         "language": profile.ui_language,
+                        "native_delivery": "pending",
                     })
                     completed.append(task)
-            for row in events:
-                self._notification_sequence += 1
-                row["sequence"] = self._notification_sequence
-                row["created_at"] = row.get("completed_at") or datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-                self._notification_events.append(row)
-            if events:
-                self._notification_events = self._notification_events[-128:]
-        if state_changed or events:
+        created = self._record_notifications(events)
+        if state_changed and not events:
             self._persist_notification_state()
-        self._attach_notification_state(snapshot)
         if not completed:
+            self._attach_notification_state(snapshot)
             return
         names = "、".join(task["label"] for task in completed[:3])
         remaining = len(completed) - 3
@@ -1530,7 +1650,8 @@ class AppApi:
         message = (
             f"{names} finished." if english else f"{names} 已结束。"
         )
-        self._show_native_notification(title, message)
+        self._deliver_notifications(created, title=title, message=message)
+        self._attach_notification_state(snapshot)
 
     def mark_notifications_read(self) -> dict[str, Any]:
         with self._task_alert_state_lock:
@@ -1696,13 +1817,14 @@ class AppApi:
             language=profile.ui_language,
             minimum_memory_gib=profile.favorite_alert_min_memory_gib,
         )
-        self._record_notifications([{
+        created = self._record_notifications([{
             "kind": "favorite_gpu_available",
             "title": title,
             "message": message,
             "language": profile.ui_language,
+            "native_delivery": "pending",
         }])
-        self._show_native_notification(title, message)
+        self._deliver_notifications(created, title=title, message=message)
 
     def _monitor_background_refresh_for_favorite_alerts(self) -> None:
         with self._favorite_alert_state_lock:
@@ -1857,13 +1979,18 @@ class AppApi:
                 raise ConfigError("notification category is unsupported")
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "invalid_notification"}
-        self._record_notifications([{
+        created = self._record_notifications([{
             "kind": normalized_category,
             "title": normalized_title,
             "message": normalized_message,
             "language": self.profile.ui_language,
+            "native_delivery": "pending",
         }])
-        shown = self._show_native_notification(normalized_title, normalized_message)
+        shown = self._deliver_notifications(
+            created,
+            title=normalized_title,
+            message=normalized_message,
+        )
         return {
             "ok": True,
             "shown": shown,
@@ -3402,6 +3529,36 @@ class AppApi:
             result["update_action"] = "verified_download"
         else:
             result["update_action"] = "browser"
+        if result.get("ok") and result.get("update_available"):
+            latest_version = str(result.get("latest_version") or "").strip()
+            latest_build = str(result.get("latest_build") or "").strip()
+            event_key = f"update_available:{latest_version}:{latest_build}"
+            with self._task_alert_state_lock:
+                already_recorded = any(
+                    event.get("event_key") == event_key
+                    for event in self._notification_events
+                )
+            if not already_recorded:
+                english = self.profile.ui_language == "en"
+                label = latest_version or latest_build or "latest"
+                title = "Update available" if english else "发现新版本"
+                message = (
+                    f"VRAM Radar {label} is ready to download."
+                    if english else f"VRAM Radar {label} 已可下载。"
+                )
+                created = self._record_notifications([{
+                    "kind": "update_available",
+                    "event_key": event_key,
+                    "latest_version": latest_version,
+                    "latest_build": latest_build,
+                    "release_url": str(result.get("release_url") or ""),
+                    "title": title,
+                    "message": message,
+                    "language": self.profile.ui_language,
+                    "native_delivery": "pending",
+                }])
+                self._deliver_notifications(created, title=title, message=message)
+        self._attach_notification_state(result)
         return result
 
     def install_latest_update(self) -> dict[str, Any]:

@@ -440,8 +440,8 @@ BENCHMARK_JAVASCRIPT = r"""
         data_updated_at: now,
       },
       notifications: {
-        unread_count: 1,
-        latest_sequence: 1,
+        unread_count: 2,
+        latest_sequence: 2,
         read_sequence: 0,
         events: [{
           sequence: 1,
@@ -449,6 +449,14 @@ BENCHMARK_JAVASCRIPT = r"""
           title: '任务已完成',
           message: 'synthetic-training 已结束。',
           label: 'synthetic-training',
+          language: 'zh-CN',
+          created_at: now,
+        }, {
+          sequence: 2,
+          kind: 'update_available',
+          title: '发现新版本',
+          message: 'VRAM Radar 0.9.0 已可下载。',
+          latest_version: '0.9.0',
           language: 'zh-CN',
           created_at: now,
         }],
@@ -489,11 +497,13 @@ BENCHMARK_JAVASCRIPT = r"""
     const initialStart = performance.now();
     render(snapshot);
     forceLayout(ui.list);
-    const bellAlwaysVisible = !ui.taskAlertIndicator.hidden && ui.taskAlertCount.textContent === '1';
+    const bellAlwaysVisible = !ui.taskAlertIndicator.hidden && ui.taskAlertCount.textContent === '2';
     ui.taskAlertIndicator.click();
     const notificationCenterOpens = !ui.notificationCenter.hidden
       && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'true'
-      && ui.notificationList.querySelectorAll('.notification-item').length === 1;
+      && ui.notificationList.querySelectorAll('.notification-item').length === 2
+      && ui.notificationList.textContent.includes('0.9.0')
+      && ui.notificationList.querySelectorAll('.notification-update-action').length === 1;
     document.body.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     const notificationCenterCloses = ui.notificationCenter.hidden
       && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'false';
@@ -523,6 +533,14 @@ BENCHMARK_JAVASCRIPT = r"""
     };
     render(snapshot);
     const taskWatchButtonAfterAdd = ui.list.querySelector(`[data-task-key="${taskWatchKey}"]`);
+    document.querySelector('[data-server-navigator-filter="watches"]').click();
+    const watchedPanel = ui.serverNavigatorList.querySelector('.navigator-task-watches');
+    const watchedPanelStartsCollapsed = Boolean(watchedPanel) && !watchedPanel.open;
+    watchedPanel?.querySelector('summary')?.click();
+    const watchedPanelExpands = Boolean(watchedPanel?.open)
+      && watchedPanel.querySelectorAll('.remove-task-watch').length === 1
+      && Boolean(watchedPanel.querySelector('.clear-task-watches'));
+    const watchedManagementIsOutsideSettings = !document.getElementById('task-completion-watch-list');
     currentProfile = {
       ...currentProfile,
       profile_revision: currentProfile.profile_revision + 1,
@@ -793,6 +811,7 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
       task_watch_state_repaints_without_server_refresh: taskWatchStateRepaintsImmediately,
+      watched_tasks_live_in_collapsible_sidebar: watchedPanelStartsCollapsed && watchedPanelExpands && watchedManagementIsOutsideSettings,
       navigator_right_collapsed_track_is_compact: rightCollapsedTrackWidth <= 50.5 && rightCollapsedTrackWidth >= rightRailBounds.width,
       navigator_left_collapsed_track_is_compact: leftCollapsedTrackWidth <= 50.5 && leftCollapsedTrackWidth >= rightRailBounds.width,
       navigator_expansion_does_not_reflow_main: Math.abs(rightExpandedMainBounds.width - rightCollapsedMainBounds.width) < 0.5

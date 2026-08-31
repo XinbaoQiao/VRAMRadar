@@ -647,6 +647,186 @@ class ShellApiTests(unittest.TestCase):
 
         notify.assert_called_once()
 
+    def test_exact_unknown_owner_process_watch_arms_and_notifies_on_disappearance(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "process:7312", "task_kind": "process",
+                "task_id": "7312", "label": "python train.py", "owner_scope": "unknown",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(active: bool) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live"},
+                    "processes": {"supported": True, "active": ([{
+                        "pid": "7312", "name": "python train.py", "owner_scope": "unknown",
+                    }] if active else [])},
+                }],
+            }
+
+        service = Mock()
+        service.snapshot.return_value = snapshot(True)
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = snapshot(False)
+        completed = api.get_snapshot()
+
+        notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
+        event = completed["notifications"]["events"][0]
+        self.assertEqual(event["task_key"], "process:7312")
+        self.assertEqual(event["native_delivery"], "shown")
+
+    def test_unsupported_process_sample_does_not_claim_completion(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "process:7312", "task_kind": "process",
+                "task_id": "7312", "label": "python train.py", "owner_scope": "unknown",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(*, supported: bool, active: bool) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live"},
+                    "processes": {"supported": supported, "active": ([{
+                        "pid": "7312", "name": "python train.py", "owner_scope": "unknown",
+                    }] if active else [])},
+                }],
+            }
+
+        service = Mock()
+        service.snapshot.return_value = snapshot(supported=True, active=True)
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = snapshot(supported=False, active=False)
+        unavailable = api.get_snapshot()
+        notify.assert_not_called()
+        self.assertEqual(unavailable["notifications"]["events"], [])
+
+        service.snapshot.return_value = snapshot(supported=True, active=True)
+        api.get_snapshot()
+        notify.assert_not_called()
+
+        service.snapshot.return_value = snapshot(supported=True, active=False)
+        api.get_snapshot()
+        notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
+
+    def test_pid_reuse_completes_the_previous_process_generation(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "process:7312", "task_kind": "process",
+                "task_id": "7312", "label": "first process", "owner_scope": "unknown",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(name: str) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live"},
+                    "processes": {"supported": True, "active": [{
+                        "pid": "7312", "name": name, "owner_scope": "unknown",
+                    }]},
+                }],
+            }
+
+        service = Mock()
+        service.snapshot.return_value = snapshot("first process")
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = snapshot("replacement process")
+        completed = api.get_snapshot()
+        api.get_snapshot()
+
+        notify.assert_called_once_with("任务已完成", "first process 已结束。")
+        self.assertEqual(completed["notifications"]["events"][0]["label"], "first process")
+
+    def test_pending_native_notification_is_retried_after_callback_becomes_available(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            profile = Profile.empty("local")
+            service = Mock()
+            service.snapshot.return_value = {"monitoring": {"paused": False}, "servers": []}
+            api = AppApi(profile, store=Mock(), paths=paths, service=service)
+
+            queued = api.show_notification("任务已完成", "离线期间任务已结束", "general")
+            self.assertTrue(queued["queued"])
+            self.assertEqual(api.get_snapshot()["notifications"]["events"][0]["native_delivery"], "pending")
+
+            restarted = AppApi(profile, store=Mock(), paths=paths, service=service)
+            notify = Mock(return_value=True)
+            restarted.bind_notification_callback(notify)
+
+            notify.assert_called_once_with("任务已完成", "离线期间任务已结束")
+            durable = NotificationStateStore(paths, profile.id).load()
+            self.assertEqual(durable["events"][0]["native_delivery"], "shown")
+
+    def test_failed_native_notification_remains_pending_until_rebind(self):
+        service = Mock()
+        service.snapshot.return_value = {"monitoring": {"paused": False}, "servers": []}
+        api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=service)
+        failed = Mock(return_value=False)
+        api.bind_notification_callback(failed)
+
+        result = api.show_notification("任务已完成", "稍后补发", "general")
+        self.assertTrue(result["queued"])
+        self.assertEqual(api.get_snapshot()["notifications"]["events"][0]["native_delivery"], "pending")
+
+        recovered = Mock(return_value=True)
+        api.bind_notification_callback(recovered)
+        recovered.assert_called_once_with("任务已完成", "稍后补发")
+        self.assertEqual(api.get_snapshot()["notifications"]["events"][0]["native_delivery"], "shown")
+
+    def test_failed_native_notification_retries_during_same_session(self):
+        service = Mock()
+        service.snapshot.return_value = {"monitoring": {"paused": False}, "servers": []}
+        api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=service)
+        notify = Mock(side_effect=[False, True])
+        api.bind_notification_callback(notify)
+
+        result = api.show_notification("任务已完成", "稍后补发", "general")
+        self.assertTrue(result["queued"])
+        self.assertEqual(notify.call_count, 1)
+
+        api._native_retry_not_before = 0.0
+        retried = api.get_snapshot()
+
+        self.assertEqual(notify.call_count, 2)
+        self.assertEqual(retried["notifications"]["events"][0]["native_delivery"], "shown")
+
     def test_task_completion_is_recovered_after_restart_and_read_state_persists(self):
         profile = Profile.from_dict({
             "schema_version": 1,
@@ -3364,6 +3544,29 @@ class ShellApiTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         open_browser.assert_called_once_with(release_url)
+
+    def test_available_update_enters_notification_center_once(self):
+        service = Mock()
+        service.snapshot.return_value = {"monitoring": {"paused": False}, "servers": []}
+        api = AppApi(Profile.empty("local"), store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+        release = {
+            "ok": True,
+            "update_available": True,
+            "latest_version": "0.9.0",
+            "latest_build": 2,
+            "release_url": "https://github.com/example-org/VRAMRadar/releases/tag/v0.9.0",
+        }
+
+        with patch("vram_radar.shell.check_latest_release", return_value=release):
+            first = api.check_for_updates()
+            second = api.check_for_updates()
+
+        self.assertEqual(first["notifications"]["unread_count"], 1)
+        self.assertEqual(second["notifications"]["unread_count"], 1)
+        self.assertEqual(first["notifications"]["events"][0]["kind"], "update_available")
+        notify.assert_called_once_with("发现新版本", "VRAM Radar 0.9.0 已可下载。")
 
     def test_windows_one_click_update_rechecks_downloads_verifies_and_schedules(self):
         with tempfile.TemporaryDirectory() as temporary:

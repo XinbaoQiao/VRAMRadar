@@ -26,7 +26,7 @@
         <button id="settings-button" class="button settings-button" type="button"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M14 4v6"></path><path d="M4 17h2M10 17h10M8 14v6"></path></svg><span>设置</span></button>
       </div>
       <section id="notification-center" class="notification-center" role="dialog" aria-labelledby="notification-center-title" hidden>
-        <header><div><h2 id="notification-center-title">通知中心</h2><p>任务完成与 GPU 可用消息</p></div><button id="mark-notifications-read" class="button compact-button" type="button">全部已读</button></header>
+        <header><div><h2 id="notification-center-title">通知中心</h2><p>任务完成、版本更新与 GPU 可用消息</p></div><button id="mark-notifications-read" class="button compact-button" type="button">全部已读</button></header>
         <div id="notification-list" class="notification-list" aria-live="polite"><div class="notification-empty">暂无通知</div></div>
       </section>
     </header>
@@ -122,7 +122,7 @@
             <button type="button" data-server-navigator-filter="tasks" aria-pressed="false">任务</button>
             <button type="button" data-server-navigator-filter="issues" aria-pressed="false">异常</button>
             <button type="button" data-server-navigator-filter="favorites" aria-pressed="false">收藏</button>
-            <button type="button" data-server-navigator-filter="recent" aria-pressed="false">最近</button>
+            <button type="button" data-server-navigator-filter="watches" aria-pressed="false">关注任务</button>
           </div>
         </div>
         <div id="server-navigator-list" class="server-navigator-list"></div>
@@ -181,9 +181,8 @@
           <div class="task-completion-setting">
             <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong><small>默认提醒当前账号下的 Slurm 任务与 GPU 进程；也可在任务表中单独关注</small></span></label>
             <p class="task-watch-policy">其他用户的任务不会自动关注；只提醒你在任务表中逐项选择的任务。</p>
-            <div id="task-completion-watch-list" class="task-completion-watch-list" hidden></div>
           </div>
-          <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">无更新时保持静默，仅在发现新版本后显示顶部提示</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
+          <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
           <details class="local-tools">
             <summary><span><strong>诊断与日志</strong><small>连接异常时使用，复制内容会自动脱敏</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
             <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制脱敏诊断</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>

@@ -99,6 +99,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .notification-item-meta time { color: var(--muted); }
 .notification-item strong { font-size: var(--font-small); }
 .notification-item p { margin: 0; color: var(--muted); font-size: var(--font-small); line-height: 1.55; overflow-wrap: anywhere; }
+.notification-update-action { justify-self: start; margin-top: 5px; }
 .notification-empty { padding: 34px 16px; color: var(--muted); text-align: center; font-size: var(--font-small); }
 main { grid-column: 1; width: 100%; max-width: 1320px; margin: 0 auto; padding: 24px 24px 44px; }
 .app-shell:has(.server-navigator[data-side="left"]:not([hidden])) main { grid-column: 2; }
@@ -284,6 +285,16 @@ main { grid-column: 1; width: 100%; max-width: 1320px; margin: 0 auto; padding: 
 .server-navigator-filters button[aria-pressed="true"] { color: var(--cyan-text); background: color-mix(in srgb, var(--cyan) 8%, var(--surface)); border-color: color-mix(in srgb, var(--cyan) 45%, var(--border)); font-weight: 680; }
 .server-navigator-list { width: calc(var(--navigator-panel-width) - 2px); max-height: calc(min(72vh, 640px) - 42px); overflow-x: hidden; overflow-y: auto; }
 .server-navigator:hover .server-navigator-list, .server-navigator:focus-within .server-navigator-list { max-height: calc(min(72vh, 640px) - 210px); }
+.server-navigator.watch-mode .server-navigator-search, .server-navigator.watch-mode .server-navigator-footer { display: none; }
+.server-navigator.watch-mode .server-navigator-list { max-height: calc(min(72vh, 640px) - 118px); }
+.navigator-task-watches { width: calc(var(--navigator-panel-width) - 2px); }
+.navigator-task-watches > summary { min-height: 54px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; list-style: none; cursor: pointer; border-bottom: 1px solid var(--border); }
+.navigator-task-watches > summary::-webkit-details-marker { display: none; }
+.navigator-task-watches > summary > strong { color: var(--cyan-text); font-family: var(--data-font); font-size: var(--font-small); }
+.navigator-task-watches .summary-action { color: var(--muted); font-size: var(--font-caption); }
+.navigator-task-watch-body { padding: 9px 10px; }
+.navigator-watch-empty { width: calc(var(--navigator-panel-width) - 2px); display: grid; gap: 3px; padding: 18px 12px; color: var(--muted); text-align: center; font-size: var(--font-small); }
+.navigator-watch-empty small { font-size: var(--font-caption); }
 .server-navigator-entry { position: relative; width: calc(var(--navigator-panel-width) - 2px); min-height: 64px; overflow: hidden; border-bottom: 1px solid var(--border); }
 .server-navigator-entry:last-child { border-bottom: 0; }
 .server-navigator-entry .server-navigator-item { border-bottom: 0; }
@@ -571,7 +582,6 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .update-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .update-settings-row > div { display: grid; gap: 3px; }
 .update-settings-row small, .task-watch-item small { color: var(--muted); }
-.task-completion-watch-list { margin-top: 9px; border-top: 1px solid var(--border); padding-top: 8px; }
 .task-watch-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; color: var(--muted); font-size: var(--font-small); }
 .task-watch-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
 .task-watch-item > span { display: grid; gap: 2px; min-width: 0; }

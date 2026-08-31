@@ -61,6 +61,10 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.mark_notifications_read", self.javascript)
         self.assertIn("favorite_gpu_available", self.javascript)
         self.assertIn("resource_available", self.javascript)
+        self.assertIn("update_available", self.javascript)
+        self.assertIn("notification-update-action install-latest-update", self.javascript)
+        self.assertIn("发现新版本后会进入通知中心", self.markup)
+        self.assertIn("任务完成、版本更新与 GPU 可用消息", self.markup)
 
     def test_task_watches_support_bulk_removal_and_explicit_other_user_selection(self):
         self.assertIn("api.clear_task_completion_watches", self.javascript)
@@ -69,6 +73,10 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("data-task-owner-scope", self.javascript)
         self.assertNotIn("if (!mine) return '';", self.javascript)
         self.assertIn("其他用户的任务不会自动关注", self.markup)
+        self.assertIn('data-server-navigator-filter="watches"', self.markup)
+        self.assertNotIn('data-server-navigator-filter="recent"', self.markup)
+        self.assertNotIn('id="task-completion-watch-list"', self.markup)
+        self.assertIn("navigator-task-watches", self.javascript)
 
     def test_connection_type_defaults_to_auto_with_manual_fallback(self):
         self.assertIn('<option value="auto">自动识别（推荐）</option>', self.markup)
@@ -1393,6 +1401,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000", self.javascript)
         self.assertIn('id="check-for-updates"', self.markup)
         self.assertIn("ui.updateNotice.hidden = true", self.javascript)
+        self.assertNotIn("ui.updateNotice.hidden = false", self.javascript)
+        self.assertNotIn("ui.updateNotice.innerHTML", self.javascript)
         self.assertNotIn("retry-update-check", self.javascript)
         self.assertNotIn("未能检查更新", self.javascript)
         self.assertIn("checkForUpdates({interactive: true})", self.javascript)
@@ -1400,11 +1410,9 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.install_latest_update()", self.javascript)
         self.assertIn("window.confirm(explanation)", self.javascript)
         self.assertIn(".update-notice", self.styles)
-        self.assertIn("无更新时保持静默", self.markup)
-        self.assertIn("下载官方安装包、校验 SHA-256", self.javascript)
-        self.assertIn("result.replacement_available", self.javascript)
-        self.assertIn("修复构建", self.javascript)
-        self.assertIn("repair build available", self.localization)
+        self.assertIn("发现新版本后会进入通知中心", self.markup)
+        self.assertIn("下载并校验安装包", self.javascript)
+        self.assertIn("notification-update-action", self.javascript)
 
 
 if __name__ == "__main__":
