@@ -210,11 +210,11 @@ def validate_packaged_update_transport(release_tag: str) -> tuple[str, str]:
         raise RuntimeError("packaged macOS update transport returned invalid JSON") from exc
     if result.returncode != 0 or result.stderr or not payload.get("ok"):
         code = payload.get("code") if isinstance(payload, dict) else None
-        allow_final_package_rate_limit = (
-            os.environ.get("VRAM_RADAR_ALLOW_FINAL_PACKAGE_RATE_LIMIT") == "1"
+        allow_rate_limit_with_sibling_proof = (
+            os.environ.get("VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF") == "1"
         )
-        if code == "update_rate_limited" and allow_final_package_rate_limit:
-            return "", "rate-limited-after-native-pass"
+        if code == "update_rate_limited" and allow_rate_limit_with_sibling_proof:
+            return "", "rate-limited-requires-sibling-proof"
         raise RuntimeError(f"packaged macOS update transport failed: {code or 'unknown'}")
     expected_version = release_tag.removeprefix("v")
     if payload.get("current_version") != expected_version:
@@ -261,6 +261,8 @@ def main() -> int:
                     "notarization_ticket": "passed" if distribution_signing_required else "not-required",
                     "gatekeeper_assessment": "passed" if distribution_signing_required else "not-required",
                     "packaged_askpass": "passed",
+                    "release_tag": release_tag,
+                    "expected_architectures": sorted(expected_architectures),
                     "github_update_transport": update_transport_status,
                     "latest_checked_version": latest_checked_version,
                     "assets_match_source": True,

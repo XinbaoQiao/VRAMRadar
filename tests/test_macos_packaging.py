@@ -65,7 +65,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn("validate_release_tag()", self.validator)
         self.assertIn("validate_packaged_update_transport(", self.validator)
         self.assertIn('code == "update_rate_limited"', self.validator)
-        self.assertIn('"rate-limited-after-native-pass"', self.validator)
+        self.assertIn('"rate-limited-requires-sibling-proof"', self.validator)
         self.assertIn('"--check-updates-json"', self.validator)
         self.assertIn('"github_update_transport": update_transport_status', self.validator)
         self.assertIn('ASKPASS_EXECUTABLE = CONTENTS / "MacOS" / "VRAMRadarAskPass"', self.validator)
@@ -197,9 +197,11 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn("Validate final macOS package on ${{ matrix.arch }}", self.workflow)
         self.assertIn("VRAM_RADAR_MACOS_BUNDLE: combined-extracted/VRAM Radar macOS/${{ matrix.app }}", self.workflow)
         self.assertEqual(
-            self.workflow.count('VRAM_RADAR_ALLOW_FINAL_PACKAGE_RATE_LIMIT: "1"'),
-            1,
+            self.workflow.count('VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF: "1"'),
+            2,
         )
+        self.assertIn("tools/validate_macos_transport_receipts.py", self.workflow)
+        self.assertIn('macos-validation-${{ matrix.arch }}.json', self.workflow)
         self.assertIn("./.venv/bin/python tools/validate_macos_bundle.py", self.workflow)
 
 
