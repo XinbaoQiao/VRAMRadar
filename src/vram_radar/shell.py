@@ -38,7 +38,9 @@ from .models import (
     ConfigError,
     MAX_FAVORITE_SERVER_IDS,
     MAX_IGNORED_SSH_ALIASES,
+    MAX_TASK_COMPLETION_WATCHES,
     Profile,
+    normalize_task_completion_watch,
     normalize_saved_view,
     require_bounded_text,
     require_id,
@@ -821,6 +823,11 @@ class AppApi:
         self._favorite_alert_state_lock = threading.Lock()
         self._favorite_alert_active_ids: set[str] = set()
         self._favorite_alert_monitor_running = False
+        self._task_alert_state_lock = threading.Lock()
+        self._task_alert_active: dict[str, dict[str, dict[str, str]]] = {}
+        self._task_alert_events: list[dict[str, Any]] = []
+        self._task_alert_sequence = 0
+        self._task_alert_read_sequence = 0
         self._key_setup_lock = threading.Lock()
         self._host_key_trust_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
@@ -892,6 +899,7 @@ class AppApi:
             self.profile = updated_profile
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, updated_profile)
+            self._reset_task_alerts_if_servers_changed(old_profile, updated_profile)
             committed_profile = self._desktop_profile(updated_profile)
         except (OSError, ValueError, RuntimeError) as exc:
             if str(exc) == "profile_rollback_failed":
@@ -1091,6 +1099,7 @@ class AppApi:
     def get_status(self, force: bool = False, server_id: str | None = None) -> dict[str, Any]:
         snapshot = self.service.request_refresh(force=bool(force), server_id=server_id or None)
         self._evaluate_favorite_alerts(snapshot)
+        self._evaluate_task_completion_alerts(snapshot)
         return snapshot
 
     def get_snapshot(self) -> dict[str, Any]:
@@ -1098,6 +1107,7 @@ class AppApi:
 
         snapshot = self.service.snapshot()
         self._evaluate_favorite_alerts(snapshot)
+        self._evaluate_task_completion_alerts(snapshot)
         return snapshot
 
     def dismiss_notice(self, code: str) -> dict[str, Any]:
@@ -1114,6 +1124,7 @@ class AppApi:
 
         snapshot = self.service.request_refresh(force=False)
         self._evaluate_favorite_alerts(snapshot)
+        self._evaluate_task_completion_alerts(snapshot)
         monitoring = snapshot.get("monitoring") or {}
         if monitoring.get("in_flight"):
             self._monitor_background_refresh_for_favorite_alerts()
@@ -1131,10 +1142,191 @@ class AppApi:
 
         self._notification_callback = callback
         if callback is not None:
-            self._evaluate_favorite_alerts(self.service.snapshot())
+            snapshot = self.service.snapshot()
+            self._evaluate_favorite_alerts(snapshot)
+            self._evaluate_task_completion_alerts(snapshot)
         else:
             with self._favorite_alert_state_lock:
                 self._favorite_alert_active_ids.clear()
+
+    @staticmethod
+    def _task_alert_server_signature(profile: Profile) -> tuple[tuple[str, str, bool], ...]:
+        return tuple((server.id, server.backend, server.enabled) for server in profile.servers)
+
+    def _reset_task_alerts_if_servers_changed(
+        self,
+        old_profile: Profile,
+        new_profile: Profile,
+    ) -> None:
+        if self._task_alert_server_signature(old_profile) == self._task_alert_server_signature(new_profile):
+            return
+        retained = {server.id for server in new_profile.servers if server.enabled}
+        with self._task_alert_state_lock:
+            self._task_alert_active = {
+                server_id: tasks
+                for server_id, tasks in self._task_alert_active.items()
+                if server_id in retained
+            }
+
+    @staticmethod
+    def _active_owned_tasks(server: dict[str, Any]) -> dict[str, dict[str, str]]:
+        result: dict[str, dict[str, str]] = {}
+        server_id = str(server.get("server_id") or "")
+        tasks = server.get("tasks") or {}
+        current_user = str(tasks.get("current_user") or "")
+        for task in tasks.get("active") or []:
+            if not isinstance(task, dict) or not current_user or str(task.get("user") or "") != current_user:
+                continue
+            task_id = str(task.get("job_id") or "").strip()
+            if not task_id:
+                continue
+            task_key = f"slurm:{task_id}"
+            result[task_key] = {
+                "server_id": server_id,
+                "task_key": task_key,
+                "task_kind": "slurm",
+                "task_id": task_id,
+                "label": str(task.get("name") or task_id).strip() or task_id,
+            }
+        processes = server.get("processes") or {}
+        process_user = str(processes.get("current_user") or "")
+        for process in processes.get("active") or []:
+            if not isinstance(process, dict):
+                continue
+            if process.get("owner_scope") != "mine" and (
+                not process_user or str(process.get("user") or "") != process_user
+            ):
+                continue
+            task_id = str(process.get("pid") or "").strip()
+            if not task_id:
+                continue
+            started_at = str(process.get("started_at") or "").strip()
+            task_key = f"process:{task_id}:{started_at}" if started_at else f"process:{task_id}"
+            result[task_key] = {
+                "server_id": server_id,
+                "task_key": task_key,
+                "task_kind": "process",
+                "task_id": task_id,
+                "label": str(process.get("name") or process.get("command_preview") or f"PID {task_id}").strip(),
+            }
+        return result
+
+    def _attach_task_alert_state(self, snapshot: dict[str, Any]) -> None:
+        with self._task_alert_state_lock:
+            unread = sum(
+                1
+                for event in self._task_alert_events
+                if int(event.get("sequence") or 0) > self._task_alert_read_sequence
+            )
+            snapshot["task_completion_alerts"] = {
+                "unread_count": unread,
+                "latest_sequence": self._task_alert_sequence,
+                "events": [dict(event) for event in self._task_alert_events[-20:]],
+            }
+
+    def _evaluate_task_completion_alerts(self, snapshot: dict[str, Any]) -> None:
+        if not isinstance(snapshot, dict):
+            return
+        with self._profile_mutation_lock:
+            profile = self.profile
+        monitoring = snapshot.get("monitoring") or {}
+        if monitoring.get("paused") is True:
+            self._attach_task_alert_state(snapshot)
+            return
+        watched = {
+            (watch["server_id"], watch["task_key"])
+            for watch in profile.task_completion_watches
+        }
+        completed: list[dict[str, str]] = []
+        with self._task_alert_state_lock:
+            for server in snapshot.get("servers") or []:
+                if not isinstance(server, dict) or (server.get("connection") or {}).get("state") != "online":
+                    continue
+                server_id = str(server.get("server_id") or "")
+                current = self._active_owned_tasks(server)
+                previous = self._task_alert_active.get(server_id)
+                self._task_alert_active[server_id] = current
+                if previous is None:
+                    continue
+                for task_key, task in previous.items():
+                    if task_key in current:
+                        continue
+                    if profile.task_completion_alert_enabled or (server_id, task_key) in watched:
+                        self._task_alert_sequence += 1
+                        event: dict[str, Any] = {
+                            **task,
+                            "sequence": self._task_alert_sequence,
+                            "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                            "watched": (server_id, task_key) in watched,
+                        }
+                        self._task_alert_events.append(event)
+                        self._task_alert_events = self._task_alert_events[-64:]
+                        completed.append(task)
+        self._attach_task_alert_state(snapshot)
+        if not completed or self._notification_callback is None:
+            return
+        names = "、".join(task["label"] for task in completed[:3])
+        remaining = len(completed) - 3
+        if remaining > 0:
+            names += f" 等 {len(completed)} 个任务"
+        english = profile.ui_language == "en"
+        title = "Task completed" if english else "任务已完成"
+        message = (
+            f"{names} finished." if english else f"{names} 已结束。"
+        )
+        try:
+            if not self._notification_callback(title, message):
+                logging.getLogger("vram_radar").warning("task completion notification was not shown")
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to show task completion notification")
+
+    def mark_task_completion_alerts_read(self) -> dict[str, Any]:
+        with self._task_alert_state_lock:
+            self._task_alert_read_sequence = self._task_alert_sequence
+        return {"ok": True, "unread_count": 0}
+
+    def set_task_completion_watch(
+        self,
+        server_id: str,
+        task_key: str,
+        task_kind: str,
+        task_id: str,
+        label: str,
+        watched: bool,
+    ) -> dict[str, Any]:
+        base_profile = self.profile
+        try:
+            watch = normalize_task_completion_watch(
+                {
+                    "server_id": server_id,
+                    "task_key": task_key,
+                    "task_kind": task_kind,
+                    "task_id": task_id,
+                    "label": label,
+                }
+            )
+            if not isinstance(watched, bool):
+                raise ConfigError("watched must be true or false")
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_task_watch"}
+        retained = [
+            dict(item)
+            for item in base_profile.task_completion_watches
+            if (item["server_id"], item["task_key"])
+            != (watch["server_id"], watch["task_key"])
+        ]
+        if watched:
+            retained.append(watch)
+        if len(retained) > MAX_TASK_COMPLETION_WATCHES:
+            return {
+                "ok": False,
+                "error": f"最多可单独关注 {MAX_TASK_COMPLETION_WATCHES} 个任务",
+                "code": "task_watch_limit",
+            }
+        return self._persist_local_preferences(
+            replace(base_profile, task_completion_watches=tuple(retained)),
+            expected_profile=base_profile,
+        )
 
     @staticmethod
     def _favorite_alert_policy(profile: Profile) -> tuple[bool, float, tuple[str, ...]]:
@@ -1246,6 +1438,7 @@ class AppApi:
                         return
                     if not snapshot.get("monitoring", {}).get("in_flight"):
                         self._evaluate_favorite_alerts(snapshot)
+                        self._evaluate_task_completion_alerts(snapshot)
                         return
                     time.sleep(0.25)
             finally:
@@ -1678,6 +1871,72 @@ class AppApi:
                 "response_too_large",
                 "node_list_too_large",
             }
+            if collection_failure and server.auto_detect_backend:
+                detected_backend = (
+                    "slurm_ssh" if server.backend == "direct_ssh" else "direct_ssh"
+                )
+                try:
+                    payload = self.service.probe_server_backend(
+                        normalized_id,
+                        detected_backend,
+                    )
+                except ConnectorFailure:
+                    payload = None
+                if payload is not None:
+                    updated_servers = tuple(
+                        replace(item, backend=detected_backend, auto_detect_backend=False)
+                        if item.id == normalized_id
+                        else item
+                        for item in self.profile.servers
+                    )
+                    persisted = self._persist_local_preferences(
+                        replace(self.profile, servers=updated_servers),
+                        replace_service=True,
+                        expected_profile=self.profile,
+                    )
+                    if not persisted.get("ok"):
+                        return {
+                            "ok": False,
+                            "server_id": normalized_id,
+                            "code": persisted.get("code", "profile_save_failed"),
+                            "error": persisted.get("error", "已识别连接类型，但保存失败"),
+                            "stages": stages,
+                        }
+                    stages.extend(
+                        [
+                            {
+                                "id": "connection",
+                                "label": "SSH 连接",
+                                "state": "passed",
+                                "message": "SSH 连接和身份验证成功",
+                            },
+                            {
+                                "id": "detection",
+                                "label": "连接类型",
+                                "state": "passed",
+                                "message": (
+                                    "已自动识别为 Slurm"
+                                    if detected_backend == "slurm_ssh"
+                                    else "已自动识别为 SSH 直连"
+                                ),
+                            },
+                            {
+                                "id": "collection",
+                                "label": "资源读取",
+                                "state": "passed",
+                                "message": "GPU 或调度信息读取成功",
+                            },
+                        ]
+                    )
+                    return {
+                        "ok": True,
+                        "server_id": normalized_id,
+                        "code": "connection_type_detected",
+                        "message": "连接类型已自动识别并保存",
+                        "detected_backend": detected_backend,
+                        "profile": persisted.get("profile"),
+                        "stages": stages,
+                    }
             if collection_failure:
                 stages.append(
                     {
@@ -1723,6 +1982,61 @@ class AppApi:
                 "retryable": True,
                 "stages": stages,
             }
+        persisted_profile: dict[str, Any] | None = None
+        detected_backend = server.backend
+        if server.auto_detect_backend:
+            # Imported OpenSSH aliases start with the direct collector because
+            # it is the least assumptive probe. A login node can still expose
+            # nvidia-smi while being governed by Slurm, so a successful direct
+            # probe is not enough to classify it: prefer the Slurm collector
+            # when that exact collector also succeeds.
+            if server.backend == "direct_ssh":
+                try:
+                    slurm_payload = self.service.probe_server_backend(
+                        normalized_id,
+                        "slurm_ssh",
+                    )
+                except ConnectorFailure:
+                    slurm_payload = None
+                if isinstance(slurm_payload, dict):
+                    detected_backend = "slurm_ssh"
+                    payload = slurm_payload
+            updated_servers = tuple(
+                replace(
+                    item,
+                    backend=detected_backend,
+                    auto_detect_backend=False,
+                )
+                if item.id == normalized_id
+                else item
+                for item in self.profile.servers
+            )
+            persisted = self._persist_local_preferences(
+                replace(self.profile, servers=updated_servers),
+                replace_service=detected_backend != server.backend,
+                expected_profile=self.profile,
+            )
+            if not persisted.get("ok"):
+                return {
+                    "ok": False,
+                    "server_id": normalized_id,
+                    "code": persisted.get("code", "profile_save_failed"),
+                    "error": persisted.get("error", "已验证连接类型，但保存失败"),
+                    "stages": stages,
+                }
+            persisted_profile = persisted.get("profile")
+            stages.append(
+                {
+                    "id": "detection",
+                    "label": "连接类型",
+                    "state": "passed",
+                    "message": (
+                        "已自动识别为 Slurm"
+                        if detected_backend == "slurm_ssh"
+                        else "已自动识别为 SSH 直连"
+                    ),
+                }
+            )
         stages.extend(
             [
                 {
@@ -1744,8 +2058,9 @@ class AppApi:
             "server_id": normalized_id,
             "code": "connection_ok",
             "message": "连接测试成功",
+            "profile": persisted_profile,
             "summary": {
-                "backend": server.backend,
+                "backend": detected_backend,
                 "total_gpus": max(0, int(payload.get("total_gpus") or 0)),
             },
             "stages": stages,
@@ -2321,6 +2636,8 @@ class AppApi:
                 "favorite_server_ids",
                 "favorite_alert_enabled",
                 "favorite_alert_min_memory_gib",
+                "task_completion_alert_enabled",
+                "task_completion_watches",
                 "saved_views",
             ):
                 if preference not in candidate:
@@ -2395,6 +2712,21 @@ class AppApi:
                         favorite_id,
                     )
                     for favorite_id in candidate.get("favorite_server_ids", [])
+                ]
+                candidate["task_completion_watches"] = [
+                    {
+                        **watch,
+                        "server_id": next(
+                            (
+                                new_id
+                                for new_id, old_id in renames.items()
+                                if old_id == watch.get("server_id")
+                            ),
+                            watch.get("server_id"),
+                        ),
+                    }
+                    for watch in candidate.get("task_completion_watches", [])
+                    if isinstance(watch, dict)
                 ]
             for row in server_rows:
                 if not isinstance(row, dict):
@@ -2518,6 +2850,7 @@ class AppApi:
             self.profile = profile
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, profile)
+            self._reset_task_alerts_if_servers_changed(old_profile, profile)
             tray_controller = self._tray_controller
             if tray_controller is not None:
                 tray_controller.refresh_menu()

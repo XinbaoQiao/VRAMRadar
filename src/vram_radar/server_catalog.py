@@ -18,6 +18,7 @@ import tomllib
 from typing import Any
 
 from .models import ConfigError, Profile, ServerProfile
+from .openssh_resolution import resolve_openssh_identity_files
 
 
 MAX_CATALOG_BYTES = 1_048_576
@@ -970,20 +971,37 @@ def import_openssh_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
         raise ConfigError("OpenSSH 配置及其 Include 文件中没有可导入的具体 Host 别名")
 
     used_ids: set[str] = set()
-    imported = tuple(
-        ServerProfile.from_dict(
-            {
-                "id": _server_id_from_alias(alias, used_ids),
-                "display_name": alias,
-                "backend": "direct_ssh",
-                "enabled": True,
-                "ssh_alias": alias,
-                "ssh_config_file": str(source),
-            }
+    imported_rows: list[ServerProfile] = []
+    identity_paths_found = 0
+    for alias in aliases:
+        identity_resolution = resolve_openssh_identity_files(source, alias)
+        identity_file = ""
+        if identity_resolution.status == "exact" and len(identity_resolution.identity_files) == 1:
+            identity_paths_found += 1
+        imported_rows.append(
+            ServerProfile.from_dict(
+                {
+                    "id": _server_id_from_alias(alias, used_ids),
+                    "display_name": alias,
+                    "backend": "direct_ssh",
+                    "auto_detect_backend": True,
+                    "enabled": True,
+                    "ssh_alias": alias,
+                    "ssh_config_file": str(source),
+                    # Keep SSH Config authoritative for imported aliases. A
+                    # discovered IdentityFile is confirmation metadata only;
+                    # pinning it as -i would make a later config/key rotation
+                    # fail before OpenSSH can apply the updated configuration.
+                    "identity_file": identity_file,
+                }
+            )
         )
-        for alias in aliases
-    )
-    warnings = ["OpenSSH 配置无法判断直连或 Slurm；已按直连 SSH 导入，请确认每台服务器的类型"]
+    imported = tuple(imported_rows)
+    warnings = ["OpenSSH 静态配置无法判断直连或 Slurm；将在保存验证时自动识别，失败时可手动选择"]
+    if identity_paths_found:
+        warnings.append(
+            f"已确认 {identity_paths_found} 台服务器由 OpenSSH 配置管理私钥；不会固化路径"
+        )
     warnings.extend(parser_warnings)
     if included_files:
         warnings.append(f"已安全解析 {included_files} 个 OpenSSH Include 文件")

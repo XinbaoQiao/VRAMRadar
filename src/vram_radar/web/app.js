@@ -9,6 +9,8 @@ const ui = {
   refresh: document.getElementById('refresh-button'),
   refreshClock: document.getElementById('refresh-clock'),
   monitoringToggle: document.getElementById('monitoring-toggle'),
+  taskAlertIndicator: document.getElementById('task-alert-indicator'),
+  taskAlertCount: document.getElementById('task-alert-count'),
   settings: document.getElementById('settings-button'),
   dialog: document.getElementById('settings-dialog'),
   form: document.getElementById('settings-form'),
@@ -26,6 +28,10 @@ const ui = {
   closeBehavior: document.getElementById('close-behavior'),
   favoriteAlertEnabled: document.getElementById('favorite-alert-enabled'),
   favoriteAlertMinMemory: document.getElementById('favorite-alert-min-memory'),
+  taskCompletionAlertEnabled: document.getElementById('task-completion-alert-enabled'),
+  taskCompletionWatchList: document.getElementById('task-completion-watch-list'),
+  checkForUpdates: document.getElementById('check-for-updates'),
+  updateCheckStatus: document.getElementById('update-check-status'),
   copyDiagnostics: document.getElementById('copy-diagnostics'),
   openLogsDirectory: document.getElementById('open-logs-directory'),
   settingsError: document.getElementById('settings-error'),
@@ -182,6 +188,7 @@ const localizedText = value => window.VRAMRadarI18n?.translateText(value, window
 const number = value => value == null ? '未知' : Number(value).toLocaleString(activeLocale(), {maximumFractionDigits: 2});
 const ICONS = Object.freeze({
   alert: '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v5"></path><path d="M12 16.5h.01"></path>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path>',
   cancelled: '<circle cx="12" cy="12" r="9"></circle><path d="m9 9 6 6"></path><path d="m15 9-6 6"></path>',
   check: '<circle cx="12" cy="12" r="9"></circle><path d="m8.5 12 2.25 2.25 4.75-4.75"></path>',
   chevron: '<path d="m7 10 5 5 5-5"></path>',
@@ -361,14 +368,35 @@ function renderTaskName(task) {
   return `<details class="task-name-details"><summary title="查看完整任务名称：${safeName}"><span class="task-name-preview">${safeName}</span><span class="task-name-hint"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary><div class="task-name-full">${safeName}</div></details>`;
 }
 
-function renderTaskTable(tasks, recent = false, currentUser = '', emptyMessage = '') {
+function taskCompletionKey(kind, task) {
+  if (kind === 'slurm') return `slurm:${String(task.job_id || '').trim()}`;
+  const pid = String(task.pid || '').trim();
+  const startedAt = String(task.started_at || '').trim();
+  return startedAt ? `process:${pid}:${startedAt}` : `process:${pid}`;
+}
+
+function taskCompletionWatchButton(serverId, kind, task, currentUser) {
+  const mine = task.owner_scope === 'mine' || (currentUser && task.user === currentUser);
+  if (!mine) return '';
+  const taskId = String(kind === 'slurm' ? task.job_id : task.pid || '').trim();
+  if (!taskId) return '';
+  const taskKey = taskCompletionKey(kind, task);
+  const watched = (currentProfile?.task_completion_watches || []).some(
+    item => item.server_id === serverId && item.task_key === taskKey,
+  );
+  const label = String(task.name || task.command_preview || (kind === 'slurm' ? taskId : `PID ${taskId}`)).trim();
+  return `<button class="task-watch-toggle" type="button" data-server-id="${escapeHtml(serverId)}" data-task-key="${escapeHtml(taskKey)}" data-task-kind="${escapeHtml(kind)}" data-task-id="${escapeHtml(taskId)}" data-task-label="${escapeHtml(label)}" aria-pressed="${watched}" title="${watched ? '取消单独提醒' : '单独关注完成提醒'}">${icon('bell')}<span>${watched ? '已关注' : '关注'}</span></button>`;
+}
+
+function renderTaskTable(tasks, recent = false, currentUser = '', emptyMessage = '', serverId = '') {
   if (!tasks.length) return `<div class="module-empty">${escapeHtml(emptyMessage || (recent ? '所选时间范围内没有可显示的 GPU 终态任务' : '当前没有排队或运行中的 GPU 任务'))}</div>`;
   const timeHeaders = recent ? '<th scope="col">结束时间</th>' : '<th scope="col">提交时间</th><th scope="col">时间限额</th>';
   const timeCells = task => recent
     ? `<td class="time-value" data-label="结束时间">${escapeHtml(formatTaskTimestamp(task.ended_at))}</td>`
     : `<td class="time-value" data-label="提交时间">${escapeHtml(formatTaskTimestamp(task.submitted_at))}</td><td class="time-value" data-label="时间限额">${escapeHtml(formatSlurmDuration(task.time_limit))}</td>`;
   const runDuration = task => !recent && task.state === 'PENDING' ? '尚未开始' : formatSlurmDuration(task.elapsed);
-  return `<div class="table-wrap task-table" role="region" aria-label="GPU 任务列表，可横向滚动"><table><caption class="sr-only">${recent ? '近 24 小时 GPU 任务结果' : '当前 GPU 任务队列'}</caption><thead><tr><th scope="col">用户</th><th scope="col">任务 ID</th><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">节点或排队原因</th><th scope="col">运行时长</th>${timeHeaders}<th scope="col">占用 GPU</th></tr></thead><tbody>${tasks.map(task => `<tr><td data-label="用户">${renderTaskUser(task, currentUser)}</td><td class="mono copyable-cell" data-label="任务 ID">${copyableValue(task.job_id, '任务 ID')}</td><td class="task-name-cell" data-label="任务名称">${renderTaskName(task)}</td><td data-label="状态">${taskBadge(task.state)}</td><td class="task-location" data-label="节点或排队原因">${escapeHtml(formatTaskLocation(task))}</td><td class="time-value" data-label="运行时长">${escapeHtml(runDuration(task))}</td>${timeCells(task)}<td class="number-value" data-label="占用 GPU">${escapeHtml(formatTaskGpuCount(task.gpu_count))}</td></tr>`).join('')}</tbody></table></div>`;
+  const actionHeader = recent ? '' : '<th scope="col">提醒</th>';
+  return `<div class="table-wrap task-table" role="region" aria-label="GPU 任务列表，可横向滚动"><table><caption class="sr-only">${recent ? '近 24 小时 GPU 任务结果' : '当前 GPU 任务队列'}</caption><thead><tr><th scope="col">用户</th><th scope="col">任务 ID</th><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">节点或排队原因</th><th scope="col">运行时长</th>${timeHeaders}<th scope="col">占用 GPU</th>${actionHeader}</tr></thead><tbody>${tasks.map(task => `<tr><td data-label="用户">${renderTaskUser(task, currentUser)}</td><td class="mono copyable-cell" data-label="任务 ID">${copyableValue(task.job_id, '任务 ID')}</td><td class="task-name-cell" data-label="任务名称">${renderTaskName(task)}</td><td data-label="状态">${taskBadge(task.state)}</td><td class="task-location" data-label="节点或排队原因">${escapeHtml(formatTaskLocation(task))}</td><td class="time-value" data-label="运行时长">${escapeHtml(runDuration(task))}</td>${timeCells(task)}<td class="number-value" data-label="占用 GPU">${escapeHtml(formatTaskGpuCount(task.gpu_count))}</td>${recent ? '' : `<td data-label="提醒">${taskCompletionWatchButton(serverId, 'slurm', task, currentUser)}</td>`}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function partitionTasksByOwner(items, currentUser) {
@@ -402,10 +430,10 @@ function renderModuleContext(serverId, key, text) {
   return `<details class="module-context" data-context-note="${escapeHtml(key)}" data-server-id="${escapeHtml(serverId)}"${contextNoteOpen(serverId, key)}><summary>说明</summary><p>${text}</p></details>`;
 }
 
-function renderTaskPeriod(title, tasks, recent, currentUser, emptyMessage, historySupported = true) {
+function renderTaskPeriod(title, tasks, recent, currentUser, emptyMessage, historySupported = true, serverId = '') {
   const body = recent && !historySupported
     ? '<div class="module-empty">当前服务器未提供近期任务历史，仍可查看当前任务。</div>'
-    : renderTaskTable(tasks, recent, currentUser, emptyMessage);
+    : renderTaskTable(tasks, recent, currentUser, emptyMessage, serverId);
   return `<section class="task-period"><header class="task-period-head"><h6>${escapeHtml(title)}</h6><span>${number(tasks.length)} 条</span></header>${body}</section>`;
 }
 
@@ -413,7 +441,7 @@ function renderTaskOwnerGroup(server, options) {
   const {key, title, subtitle, iconName, active, recent, currentUser, historySupported, defaultOpen, activeEmpty, recentEmpty} = options;
   const meta = `${number(active.length)} 当前 · ${number(recent.length)} 近期`;
   const secondary = subtitle ? `<small>${escapeHtml(subtitle)}</small>` : '';
-  return `<details class="task-group task-owner-group ${escapeHtml(key)}" data-task-group="${escapeHtml(key)}" data-task-module="cluster-tasks" data-server-id="${escapeHtml(server.server_id)}"${taskGroupOpen(server.server_id, 'cluster-tasks', key, defaultOpen)}><summary><span class="task-owner-heading">${icon(iconName, 'owner-icon')}<span><h5>${escapeHtml(title)}</h5>${secondary}</span></span><span class="task-group-meta">${escapeHtml(meta)} ${icon('chevron', 'task-group-chevron')}</span></summary><div class="task-owner-content">${renderTaskPeriod('正在运行与排队', active, false, currentUser, activeEmpty, true)}${renderTaskPeriod(`过去 ${number((server.tasks || {}).history_window_hours || 24)} 小时结果`, recent, true, currentUser, recentEmpty, historySupported)}</div></details>`;
+  return `<details class="task-group task-owner-group ${escapeHtml(key)}" data-task-group="${escapeHtml(key)}" data-task-module="cluster-tasks" data-server-id="${escapeHtml(server.server_id)}"${taskGroupOpen(server.server_id, 'cluster-tasks', key, defaultOpen)}><summary><span class="task-owner-heading">${icon(iconName, 'owner-icon')}<span><h5>${escapeHtml(title)}</h5>${secondary}</span></span><span class="task-group-meta">${escapeHtml(meta)} ${icon('chevron', 'task-group-chevron')}</span></summary><div class="task-owner-content">${renderTaskPeriod('正在运行与排队', active, false, currentUser, activeEmpty, true, server.server_id)}${renderTaskPeriod(`过去 ${number((server.tasks || {}).history_window_hours || 24)} 小时结果`, recent, true, currentUser, recentEmpty, historySupported, server.server_id)}</div></details>`;
 }
 
 function formatElapsedSeconds(value) {
@@ -448,15 +476,15 @@ function renderProcessAllocations(process) {
   return `<div class="process-gpu-list">${allocations.map(allocation => `<span class="process-gpu-allocation"><strong>${allocation.gpu_index == null ? 'GPU 未识别' : `GPU ${escapeHtml(allocation.gpu_index)}`}</strong><small>${allocation.memory_used_gib == null ? '显存未知' : `${number(allocation.memory_used_gib)} GiB`}</small></span>`).join('')}</div>`;
 }
 
-function renderProcessTable(processes, currentUser, emptyMessage) {
+function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">运行时长</th><th scope="col">启动时间</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
   const {key, title, subtitle, iconName, processes, currentUser, defaultOpen, emptyMessage} = options;
   const secondary = subtitle ? `<small>${escapeHtml(subtitle)}</small>` : '';
-  return `<details class="task-group task-owner-group process-owner-group ${escapeHtml(key)}" data-task-group="${escapeHtml(key)}" data-task-module="gpu-processes" data-server-id="${escapeHtml(server.server_id)}"${taskGroupOpen(server.server_id, 'gpu-processes', key, defaultOpen)}><summary><span class="task-owner-heading">${icon(iconName, 'owner-icon')}<span><h5>${escapeHtml(title)}</h5>${secondary}</span></span><span class="task-group-meta">${number(processes.length)} 个 ${icon('chevron', 'task-group-chevron')}</span></summary><div class="task-owner-content">${renderProcessTable(processes, currentUser, emptyMessage)}</div></details>`;
+  return `<details class="task-group task-owner-group process-owner-group ${escapeHtml(key)}" data-task-group="${escapeHtml(key)}" data-task-module="gpu-processes" data-server-id="${escapeHtml(server.server_id)}"${taskGroupOpen(server.server_id, 'gpu-processes', key, defaultOpen)}><summary><span class="task-owner-heading">${icon(iconName, 'owner-icon')}<span><h5>${escapeHtml(title)}</h5>${secondary}</span></span><span class="task-group-meta">${number(processes.length)} 个 ${icon('chevron', 'task-group-chevron')}</span></summary><div class="task-owner-content">${renderProcessTable(processes, currentUser, emptyMessage, server.server_id)}</div></details>`;
 }
 
 function renderDirectProcessModule(server) {
@@ -1179,6 +1207,21 @@ function acceptProfile(candidate) {
   return true;
 }
 
+function renderTaskCompletionWatchList() {
+  const watches = currentProfile?.task_completion_watches || [];
+  ui.taskCompletionWatchList.hidden = watches.length === 0;
+  ui.taskCompletionWatchList.innerHTML = watches.length
+    ? `<div class="task-watch-heading">单独关注 ${number(watches.length)} 项</div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `任务 ${watch.task_id}` : `PID ${watch.task_id}`)}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}">移除</button></div>`).join('')}`
+    : '';
+}
+
+function renderTaskAlertIndicator(snapshot) {
+  const unread = Number(snapshot?.task_completion_alerts?.unread_count || 0);
+  ui.taskAlertIndicator.hidden = unread <= 0;
+  ui.taskAlertCount.textContent = unread > 99 ? '99+' : String(unread);
+  ui.taskAlertIndicator.classList.toggle('has-unread', unread > 0);
+}
+
 function repaintFavoriteServer(serverId) {
   const favorite = favoriteServerIds.has(serverId);
   document.querySelectorAll('.favorite-server').forEach(button => {
@@ -1771,6 +1814,7 @@ function snapshotDataUpdatedAt(snapshot) {
 function syncUnchangedSnapshotStatus(snapshot) {
   currentSnapshot = snapshot;
   lastRenderedRevision = snapshotRevision(snapshot);
+  renderTaskAlertIndicator(snapshot);
   const paused = snapshot.monitoring?.paused ?? snapshot.profile?.monitoring?.paused ?? currentProfile?.monitoring_paused;
   const inFlight = Boolean(snapshot.monitoring?.in_flight);
   updateMonitoringControls(paused);
@@ -1788,6 +1832,7 @@ function render(snapshot) {
   uiRenderMetrics.fullRenders += 1;
   currentSnapshot = snapshot;
   lastRenderedRevision = snapshotRevision(snapshot);
+  renderTaskAlertIndicator(snapshot);
   snapshot.servers.forEach(server => {
     const page = clusterNodePages.get(server.server_id);
     const dataRevision = server.connection?.data_revision ?? null;
@@ -2199,6 +2244,8 @@ function scheduleResourceWatchEvaluation() {
 function serverDraftFromValue(server = {}, options = {}) {
   return {
     ...server,
+    backend: server.auto_detect_backend ? 'auto' : (server.backend || 'auto'),
+    _detected_backend: server.backend === 'slurm_ssh' ? 'slurm_ssh' : 'direct_ssh',
     _original_id: server.id || '',
     _original_ssh_alias: server.ssh_alias || '',
     _imported_candidate: options.importedCandidate === true,
@@ -2488,6 +2535,7 @@ async function testServerEditorConnection(editor) {
   output.hidden = false;
   try {
     const result = await api.test_connection(serverId);
+    if (result?.profile) acceptProfile(result.profile);
     const stages = (result?.stages || []).slice(0, 8);
     output.innerHTML = `<strong>${result?.ok ? '连接测试通过' : '连接测试未通过'}</strong>${stages.length ? `<ol>${stages.map(stage => `<li class="${escapeHtml(stage.state || '')}"><span>${escapeHtml(stage.label || stage.id)}</span><small>${escapeHtml(stage.message || '')}</small></li>`).join('')}</ol>` : `<span>${escapeHtml(result?.error || '')}</span>`}`;
   } catch (error) {
@@ -2529,7 +2577,7 @@ function addServerEditor(server = {}, options = {}) {
   );
   let generatedIndex = 1;
   while (usedIds.has(`server-${generatedIndex}`)) generatedIndex += 1;
-  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'direct_ssh', ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: true, prefer_identity_auth: false, connect_timeout_seconds: 10};
+  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'auto', auto_detect_backend: true, ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: true, prefer_identity_auth: false, connect_timeout_seconds: 10};
   const values = {...defaults, ...server};
   usedIds.add(values.id);
   editor.dataset.draftIndex = String(options.draftIndex ?? settingsServerDrafts.length);
@@ -2612,7 +2660,8 @@ function addServerEditor(server = {}, options = {}) {
   editor.querySelector('.configure-ssh-key').addEventListener('click', () => void configureServerSshKey(editor));
   refreshKeyMode();
   const refreshCapabilities = () => {
-    const slurm = editor.querySelector('[data-field="backend"]').value === 'slurm_ssh';
+    const backend = editor.querySelector('[data-field="backend"]').value;
+    const slurm = backend === 'slurm_ssh' || (backend === 'auto' && values._detected_backend === 'slurm_ssh');
     editor.querySelector('[data-command-summary-help]').textContent = slurm
       ? 'Slurm：显示其他用户的作业名、状态与时间；调度器视图不读取完整 shell 命令。'
       : 'SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。';
@@ -2854,6 +2903,8 @@ function openSettings(options = {}) {
     ? String(currentProfile.favorite_alert_min_memory_gib)
     : '';
   ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;
+  ui.taskCompletionAlertEnabled.checked = currentProfile?.task_completion_alert_enabled !== false;
+  renderTaskCompletionWatchList();
   ui.serverConfigPath.value = currentProfile?.server_config_path || '';
   ui.autoSyncServers.checked = Boolean(currentProfile?.auto_sync_servers);
   pendingIgnoredSshAliases = new Set(currentProfile?.ignored_ssh_aliases || []);
@@ -2927,14 +2978,16 @@ function collectProfile() {
     const value = field => String(draft[field] ?? '').trim();
     const existingId = draft._original_id || value('id');
     const existing = currentProfile?.servers?.find(item => item.id === existingId);
+    const selectedBackend = value('backend');
     const server = {
-      id: value('id'), display_name: value('display_name'), backend: value('backend'), ssh_alias: value('ssh_alias'),
+      id: value('id'), display_name: value('display_name'), backend: selectedBackend === 'auto' ? (draft._detected_backend || existing?.backend || 'direct_ssh') : selectedBackend, ssh_alias: value('ssh_alias'),
       host: value('host'), port: Number(value('port') || 22), username: value('username'), identity_file: value('identity_file'),
       ssh_config_file: value('ssh_config_file'),
       port_override: Boolean(draft.port_override),
       enabled: draft.enabled !== false,
       connect_timeout_seconds: Number(existing?.connect_timeout_seconds || 10),
       show_other_user_commands: Boolean(draft.show_other_user_commands),
+      auto_detect_backend: selectedBackend === 'auto',
     };
     if (draft.default_work_directory || existing?.default_work_directory) server.default_work_directory = draft.default_work_directory || existing.default_work_directory;
     if (draft.prefer_identity_auth || existing?.prefer_identity_auth) server.prefer_identity_auth = true;
@@ -2958,6 +3011,8 @@ function collectProfile() {
     ui_language: ui.language.value,
     favorite_alert_enabled: ui.favoriteAlertEnabled.checked,
     favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0),
+    task_completion_alert_enabled: ui.taskCompletionAlertEnabled.checked,
+    task_completion_watches: (currentProfile.task_completion_watches || []).map(item => ({...item})),
     servers,
   };
 }
@@ -2991,6 +3046,7 @@ function directoryConnectionSignature(server) {
   return JSON.stringify([
     server.id,
     server.backend,
+    Boolean(server.auto_detect_backend),
     server.ssh_alias,
     server.host,
     Number(server.port || 22),
@@ -3057,6 +3113,20 @@ async function saveSettings(event) {
     ui.dialog.close();
     const syncWarning = (result.warnings || [])[0];
     showToast(syncWarning ? `配置已保存并同步；${syncWarning}` : '配置已保存，正在连接服务器');
+    const automaticServers = (currentProfile.servers || []).filter(
+      server => server.enabled !== false && server.auto_detect_backend,
+    );
+    if (automaticServers.length && api?.test_connection) {
+      let needsManualReview = 0;
+      showToast(`配置已保存，正在自动识别 ${automaticServers.length} 台服务器`);
+      for (const server of automaticServers) {
+        const validation = await api.test_connection(server.id);
+        if (validation?.profile) acceptProfile(validation.profile);
+        if (!validation?.ok) needsManualReview += 1;
+      }
+      if (needsManualReview) showToast(`${needsManualReview} 台服务器未能自动识别，请在设置中手动确认连接类型或私钥路径`);
+      else showToast('服务器连接类型已自动验证');
+    }
     scheduleRefresh();
     await refresh(true);
   } catch (error) {
@@ -3092,11 +3162,15 @@ function scheduleUpdateCheck(delayMilliseconds) {
   }, delayMilliseconds);
 }
 
-function showUpdateCheckFailure(message = '暂时无法连接 GitHub') {
-  if (updateAvailableShown) return;
-  ui.updateNotice.classList.add('update-check-failed');
-  ui.updateNotice.innerHTML = `<div><div class="notice-title">未能检查更新</div><div class="notice-copy">${escapeHtml(message)}，不会影响服务器监控。</div></div><button class="button retry-update-check" type="button">重试</button>`;
-  ui.updateNotice.hidden = false;
+function showUpdateCheckFailure(message = '暂时无法连接 GitHub', interactive = false) {
+  if (!updateAvailableShown) {
+    ui.updateNotice.replaceChildren();
+    ui.updateNotice.hidden = true;
+  }
+  if (interactive) {
+    ui.updateCheckStatus.textContent = '检查失败，可稍后重试；服务器监控不受影响';
+    showToast(message || '暂时无法检查更新');
+  }
 }
 
 async function checkForUpdates({interactive = false} = {}) {
@@ -3106,11 +3180,15 @@ async function checkForUpdates({interactive = false} = {}) {
     return;
   }
   updateCheckInFlight = true;
+  if (interactive) {
+    ui.checkForUpdates.disabled = true;
+    ui.updateCheckStatus.textContent = '正在检查更新…';
+  }
   lastUpdateCheckAt = Date.now();
   try {
     const result = await api.check_for_updates();
     if (!result?.ok) {
-      showUpdateCheckFailure(result?.error);
+      showUpdateCheckFailure(result?.error, interactive);
       scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
       return;
     }
@@ -3119,6 +3197,12 @@ async function checkForUpdates({interactive = false} = {}) {
       ui.updateNotice.classList.remove('update-check-failed');
       ui.updateNotice.hidden = true;
       if (interactive) showToast(`当前已是最新版本 ${result.current_version}`);
+      if (interactive) {
+        ui.updateCheckStatus.textContent = `已是最新版本 ${result.current_version}`;
+        window.setTimeout(() => {
+          if (!updateCheckInFlight) ui.updateCheckStatus.textContent = '无更新时保持静默，仅在发现新版本后显示顶部提示';
+        }, 4000);
+      }
       scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
       return;
     }
@@ -3138,12 +3222,14 @@ async function checkForUpdates({interactive = false} = {}) {
       : `发现 VRAM Radar ${escapeHtml(result.latest_version)}`;
     ui.updateNotice.innerHTML = `<div><div class="notice-title">${releaseTitle}</div><div class="notice-copy">当前版本 ${escapeHtml(result.current_version)}。${actionCopy}</div></div><button class="button primary install-latest-update" type="button">${actionLabel}</button>`;
     ui.updateNotice.hidden = false;
+    if (interactive) ui.updateCheckStatus.textContent = `发现新版本 ${result.latest_version}`;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {
-    showUpdateCheckFailure(error?.message);
+    showUpdateCheckFailure(error?.message, interactive);
     scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
   } finally {
     updateCheckInFlight = false;
+    if (interactive) ui.checkForUpdates.disabled = false;
   }
 }
 
@@ -3168,6 +3254,32 @@ async function installLatestUpdate(button) {
     button.disabled = false;
   } finally {
     if (!button.disabled) button.textContent = previousLabel;
+  }
+}
+
+async function toggleTaskCompletionWatch(button) {
+  if (!api?.set_task_completion_watch) return;
+  const nextWatched = button.classList.contains('remove-task-watch')
+    ? false
+    : button.getAttribute('aria-pressed') !== 'true';
+  button.disabled = true;
+  try {
+    const result = await api.set_task_completion_watch(
+      button.dataset.serverId,
+      button.dataset.taskKey,
+      button.dataset.taskKind,
+      button.dataset.taskId,
+      button.dataset.taskLabel,
+      nextWatched,
+    );
+    if (!result?.ok) throw new Error(result?.error || '提醒设置保存失败');
+    acceptProfile(result.profile);
+    renderTaskCompletionWatchList();
+    if (currentSnapshot) render(currentSnapshot);
+    showToast(nextWatched ? '已单独关注该任务，结束时会提醒' : '已取消该任务的单独提醒');
+  } catch (error) {
+    showToast(error.message || String(error));
+    button.disabled = false;
   }
 }
 
@@ -3238,7 +3350,8 @@ document.addEventListener('click', event => {
   if (event.target.closest('.open-settings')) openSettings({onboarding: !currentProfile?.servers?.length});
   const installUpdate = event.target.closest('.install-latest-update');
   if (installUpdate) void installLatestUpdate(installUpdate);
-  if (event.target.closest('.retry-update-check')) void checkForUpdates({interactive: true});
+  const taskWatch = event.target.closest('.task-watch-toggle, .remove-task-watch');
+  if (taskWatch) void toggleTaskCompletionWatch(taskWatch);
   const retry = event.target.closest('.retry-server');
   if (retry) refresh(true, retry.dataset.serverId);
   const retryDirectory = event.target.closest('.retry-directory');
@@ -3368,6 +3481,14 @@ ui.resourceWatchEnabled.addEventListener('change', () => {
 ui.saveView.addEventListener('click', saveCurrentView);
 ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
+ui.checkForUpdates.addEventListener('click', () => void checkForUpdates({interactive: true}));
+ui.taskAlertIndicator.addEventListener('click', async () => {
+  const events = currentSnapshot?.task_completion_alerts?.events || [];
+  const latest = events[events.length - 1];
+  if (api?.mark_task_completion_alerts_read) await api.mark_task_completion_alerts_read();
+  ui.taskAlertIndicator.hidden = true;
+  if (latest) showToast(`${latest.label} 已结束`);
+});
 ui.language.addEventListener('change', () => {
   window.VRAMRadarI18n?.setLanguage(ui.language.value);
 });

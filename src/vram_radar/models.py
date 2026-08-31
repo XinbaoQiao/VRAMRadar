@@ -16,6 +16,7 @@ MAX_IGNORED_SSH_ALIASES = 4096
 MAX_SAVED_VIEWS = 32
 MAX_SAVED_VIEW_QUERY_BYTES = 256
 MAX_SAVED_VIEW_TEXT_BYTES = 128
+MAX_TASK_COMPLETION_WATCHES = 512
 DEFAULT_MEMORY_MAP = {
     "A100-40G": 40.0,
     "3g.20gb": 20.0,
@@ -190,6 +191,44 @@ def normalize_saved_view(raw: Any) -> dict[str, Any]:
     }
 
 
+def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
+    """Validate one non-secret task/process completion watch."""
+
+    if not isinstance(raw, dict):
+        raise ConfigError("each task completion watch must be a table")
+    allowed_keys = {"server_id", "task_key", "task_kind", "task_id", "label"}
+    unknown_keys = set(raw) - allowed_keys
+    if unknown_keys:
+        raise ConfigError(
+            "task completion watch contains unsupported fields: "
+            + ", ".join(sorted(unknown_keys))
+        )
+    server_id = require_id(raw.get("server_id"), "task completion watch server id")
+    task_key = require_bounded_text(
+        raw.get("task_key"), "task completion watch key", maximum_bytes=256
+    )
+    task_kind = require_bounded_text(
+        raw.get("task_kind"), "task completion watch kind", maximum_bytes=32
+    ).lower()
+    if task_kind not in {"slurm", "process"}:
+        raise ConfigError("task completion watch kind must be slurm or process")
+    task_id = require_bounded_text(
+        raw.get("task_id"), "task completion watch id", maximum_bytes=128
+    )
+    label = require_bounded_text(
+        raw.get("label", task_id),
+        "task completion watch label",
+        maximum_bytes=256,
+    )
+    return {
+        "server_id": server_id,
+        "task_key": task_key,
+        "task_kind": task_kind,
+        "task_id": task_id,
+        "label": label,
+    }
+
+
 @dataclass(frozen=True)
 class ServerProfile:
     id: str
@@ -208,6 +247,7 @@ class ServerProfile:
     connect_timeout_seconds: int = 10
     show_other_user_commands: bool = True
     prefer_identity_auth: bool = False
+    auto_detect_backend: bool = False
     gpu_memory_gib: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_MEMORY_MAP))
 
     @classmethod
@@ -291,6 +331,10 @@ class ServerProfile:
                 raw.get("prefer_identity_auth", False),
                 f"server {server_id} prefer_identity_auth",
             ),
+            auto_detect_backend=require_bool(
+                raw.get("auto_detect_backend", False),
+                f"server {server_id} auto_detect_backend",
+            ),
             gpu_memory_gib=memory,
         )
 
@@ -306,6 +350,8 @@ class ServerProfile:
         }
         if self.prefer_identity_auth:
             result["prefer_identity_auth"] = True
+        if self.auto_detect_backend:
+            result["auto_detect_backend"] = True
         if self.port_override:
             result["port_override"] = True
         for key in (
@@ -340,6 +386,8 @@ class Profile:
     favorite_server_ids: tuple[str, ...] = ()
     favorite_alert_enabled: bool = True
     favorite_alert_min_memory_gib: float = 0.0
+    task_completion_alert_enabled: bool = True
+    task_completion_watches: tuple[dict[str, str], ...] = ()
     saved_views: tuple[dict[str, Any], ...] = ()
     schema_version: int = 1
 
@@ -425,6 +473,26 @@ class Profile:
             raise ConfigError(
                 "profile favorite_alert_min_memory_gib must be between 0 and 1000"
             )
+        task_completion_alert_enabled = raw.get("task_completion_alert_enabled", True)
+        if not isinstance(task_completion_alert_enabled, bool):
+            raise ConfigError("profile task_completion_alert_enabled must be true or false")
+        task_completion_watch_rows = raw.get("task_completion_watches", [])
+        if not isinstance(task_completion_watch_rows, (list, tuple)):
+            raise ConfigError("profile task_completion_watches must be an array")
+        if len(task_completion_watch_rows) > MAX_TASK_COMPLETION_WATCHES:
+            raise ConfigError(
+                "profile task_completion_watches cannot contain more than "
+                f"{MAX_TASK_COMPLETION_WATCHES} entries"
+            )
+        task_completion_watches = tuple(
+            normalize_task_completion_watch(item) for item in task_completion_watch_rows
+        )
+        watch_keys = [
+            (watch["server_id"], watch["task_key"])
+            for watch in task_completion_watches
+        ]
+        if len(watch_keys) != len(set(watch_keys)):
+            raise ConfigError("profile task_completion_watches must be unique")
         saved_view_rows = raw.get("saved_views", [])
         if not isinstance(saved_view_rows, (list, tuple)):
             raise ConfigError("profile saved_views must be an array")
@@ -452,6 +520,8 @@ class Profile:
             favorite_server_ids=favorites,
             favorite_alert_enabled=favorite_alert_enabled,
             favorite_alert_min_memory_gib=float(favorite_alert_min_memory),
+            task_completion_alert_enabled=task_completion_alert_enabled,
+            task_completion_watches=task_completion_watches,
             saved_views=saved_views,
         )
 
@@ -470,6 +540,8 @@ class Profile:
             "favorite_server_ids": list(self.favorite_server_ids),
             "favorite_alert_enabled": self.favorite_alert_enabled,
             "favorite_alert_min_memory_gib": self.favorite_alert_min_memory_gib,
+            "task_completion_alert_enabled": self.task_completion_alert_enabled,
+            "task_completion_watches": [dict(watch) for watch in self.task_completion_watches],
             "saved_views": [dict(view) for view in self.saved_views],
             "servers": [server.to_dict() for server in self.servers],
         }

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -1021,6 +1021,28 @@ class DashboardService:
             except ConnectorFailure as exc:
                 self._record_failure(server_id, exc)
                 raise
+
+    def probe_server_backend(self, server_id: str, backend: str) -> dict[str, Any]:
+        """Probe an alternate collector without changing the saved profile.
+
+        This is used only for an explicitly auto-detected connection type. The
+        caller persists the detected backend after a successful exact collector
+        run, so an SSH success alone can never be mistaken for GPU readiness.
+        """
+
+        with self.refresh_lock:
+            with self.lock:
+                runtime = self.states.get(server_id)
+                if runtime is None:
+                    raise ConnectorFailure(
+                        "server_not_found", "找不到这台服务器", retryable=False, state="misconfigured"
+                    )
+                if not runtime.server.enabled:
+                    raise ConnectorFailure(
+                        "server_disabled", "这台服务器已停用", retryable=False, state="disabled"
+                    )
+                candidate = replace(runtime.server, backend=backend)
+            return self._authenticated_call(candidate, self.query)
 
     def _directory_cache_metadata(
         self,

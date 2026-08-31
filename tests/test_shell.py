@@ -103,6 +103,26 @@ class ShellApiTests(unittest.TestCase):
             }],
         }
 
+    @staticmethod
+    def task_alert_snapshot(*, active=True):
+        return {
+            "monitoring": {"paused": False, "in_flight": False},
+            "servers": [{
+                "server_id": "gpu",
+                "display_name": "GPU Lab",
+                "backend": "slurm_ssh",
+                "connection": {"state": "online"},
+                "tasks": {
+                    "current_user": "alice",
+                    "active": ([{
+                        "job_id": "4182",
+                        "name": "training",
+                        "user": "alice",
+                    }] if active else []),
+                },
+            }],
+        }
+
     def test_status_bridge_starts_a_coalesced_background_refresh(self):
         service = Mock()
         service.request_refresh.return_value = {"monitoring": {"in_flight": True}}
@@ -567,6 +587,149 @@ class ShellApiTests(unittest.TestCase):
         notify.assert_called_once_with("资源可用", "H100 已空闲")
         self.assertFalse(invalid["ok"])
         self.assertEqual(invalid["code"], "invalid_notification")
+
+    def test_owned_task_completion_is_default_on_and_exposes_unread_state(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        })
+        service = Mock()
+        service.snapshot.return_value = self.task_alert_snapshot(active=True)
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = self.task_alert_snapshot(active=False)
+        completed = api.get_snapshot()
+
+        notify.assert_called_once_with("任务已完成", "training 已结束。")
+        self.assertEqual(completed["task_completion_alerts"]["unread_count"], 1)
+        self.assertEqual(completed["task_completion_alerts"]["events"][0]["task_key"], "slurm:4182")
+        self.assertEqual(api.mark_task_completion_alerts_read()["unread_count"], 0)
+
+    def test_specific_task_watch_notifies_when_global_completion_alert_is_off(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu",
+                "task_key": "slurm:4182",
+                "task_kind": "slurm",
+                "task_id": "4182",
+                "label": "training",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        })
+        service = Mock()
+        service.snapshot.return_value = self.task_alert_snapshot(active=True)
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+        service.snapshot.return_value = self.task_alert_snapshot(active=False)
+
+        api.get_snapshot()
+
+        notify.assert_called_once()
+
+    def test_auto_backend_probe_persists_slurm_after_direct_collection_failure(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu",
+                "display_name": "GPU",
+                "backend": "direct_ssh",
+                "auto_detect_backend": True,
+                "host": "gpu.test",
+            }],
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.probe_server.side_effect = ConnectorFailure(
+                "command_missing", "nvidia-smi missing", retryable=False, state="misconfigured"
+            )
+            service.probe_server_backend.return_value = {"tasks": {"active": []}}
+            api = AppApi(profile, store=store, paths=paths, service=service)
+
+            result = api.test_connection("gpu")
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["detected_backend"], "slurm_ssh")
+            self.assertEqual(api.profile.servers[0].backend, "slurm_ssh")
+            self.assertFalse(api.profile.servers[0].auto_detect_backend)
+            service.probe_server_backend.assert_called_once_with("gpu", "slurm_ssh")
+
+    def test_successful_auto_backend_probe_becomes_one_shot_concrete_choice(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh",
+                "auto_detect_backend": True, "host": "gpu.test",
+            }],
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.probe_server.return_value = {"total_gpus": 1}
+            service.probe_server_backend.side_effect = ConnectorFailure(
+                "command_missing", "scontrol missing", retryable=False, state="misconfigured"
+            )
+            api = AppApi(profile, store=store, paths=paths, service=service)
+
+            result = api.test_connection("gpu")
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(api.profile.servers[0].auto_detect_backend)
+        self.assertEqual(api.profile.servers[0].backend, "direct_ssh")
+        service.probe_server_backend.assert_called_once_with("gpu", "slurm_ssh")
+        self.assertFalse(result["profile"]["servers"][0].get("auto_detect_backend", False))
+
+    def test_successful_direct_auto_probe_prefers_slurm_when_both_collectors_work(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh",
+                "auto_detect_backend": True, "host": "gpu.test",
+            }],
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.probe_server.return_value = {"total_gpus": 1}
+            service.probe_server_backend.return_value = {
+                "total_gpus": 8,
+                "tasks": {"active": []},
+            }
+            api = AppApi(profile, store=store, paths=paths, service=service)
+
+            result = api.test_connection("gpu")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["summary"]["backend"], "slurm_ssh")
+        self.assertEqual(result["summary"]["total_gpus"], 8)
+        self.assertEqual(api.profile.servers[0].backend, "slurm_ssh")
+        self.assertFalse(api.profile.servers[0].auto_detect_backend)
+        service.replace_profile.assert_called_once()
 
     def test_favorite_alert_notifies_once_per_transition_and_resets_after_unavailable(self):
         service = Mock()

@@ -82,6 +82,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .icon-button { width: 38px; height: 38px; padding: 0; }
 .icon-button .ui-icon { width: 18px; height: 18px; }
 .settings-button { min-width: 82px; }
+.task-alert-indicator { min-width: 50px; color: var(--cyan); }
+.task-alert-indicator.has-unread { animation: task-alert-pulse 1.6s ease-in-out 3; }
+.task-alert-indicator span { min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: var(--cyan); color: var(--surface); font-size: 11px; line-height: 17px; }
+@keyframes task-alert-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--cyan) 18%, transparent); } }
 main { grid-column: 1; width: 100%; max-width: 1320px; margin: 0 auto; padding: 24px 24px 44px; }
 .app-shell:has(.server-navigator[data-side="left"]:not([hidden])) main { grid-column: 2; }
 .first-run-home { max-width: 760px; min-height: calc(100vh - 136px); min-height: calc(100dvh - 136px); margin: 0 auto; padding: 42px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
@@ -547,6 +551,18 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .settings-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }
 .settings-group[open] > summary { background: color-mix(in srgb, var(--cyan) 3%, var(--surface)); border-bottom: 1px solid var(--border); }
 .settings-group-body { padding: 12px; }
+.task-completion-setting, .update-settings-row { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.update-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.update-settings-row > div { display: grid; gap: 3px; }
+.update-settings-row small, .task-watch-item small { color: var(--muted); }
+.task-completion-watch-list { margin-top: 9px; border-top: 1px solid var(--border); padding-top: 8px; }
+.task-watch-heading { margin-bottom: 5px; color: var(--muted); font-size: var(--font-small); }
+.task-watch-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; }
+.task-watch-item > span { display: grid; gap: 2px; min-width: 0; }
+.task-watch-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-watch-toggle { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.task-watch-toggle[aria-pressed="true"] { color: var(--cyan); }
+.task-watch-toggle .ui-icon { width: 16px; height: 16px; }
 .settings-summary-side { display: inline-flex; align-items: center; gap: 9px; }
 .favorite-alert-setting { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, .8fr); align-items: center; gap: 11px; margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .favorite-alert-setting .check-label { align-items: flex-start; margin: 0; }

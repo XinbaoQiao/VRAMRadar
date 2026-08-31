@@ -37,6 +37,15 @@ class OpenSSHEndpointResolution:
         return self.status == "exact"
 
 
+@dataclass(frozen=True)
+class OpenSSHIdentityResolution:
+    """Existing static IdentityFile candidates for one Host alias."""
+
+    status: Literal["exact", "dynamic"]
+    identity_files: tuple[str, ...] = ()
+    reason: str = ""
+
+
 @dataclass
 class _ResolutionState:
     alias: str
@@ -50,6 +59,8 @@ class _ResolutionState:
     total_bytes: int = 0
     total_lines: int = 0
     matched_host: bool = False
+    identity_files: list[str] = field(default_factory=list)
+    identity_uncertain: bool = False
 
     def mark_uncertain(self, fields: tuple[str, ...], reason: str) -> None:
         for name in fields:
@@ -197,6 +208,62 @@ def _set_endpoint_value(state: _ResolutionState, keyword: str, values: list[str]
     state.values[name] = values[0]
 
 
+def _expand_identity_file(value: str, include_root: Path) -> str | None:
+    home = include_root.parent
+    expanded = value
+    if expanded == "~" or expanded.startswith(("~/", "~\\")):
+        expanded = str(home) + expanded[1:]
+    expanded = re.sub(r"%d(?=$|[\\/])", lambda _match: str(home), expanded)
+    expanded = re.sub(
+        r"\$(?:\{HOME\}|HOME\b)", lambda _match: str(home), expanded, flags=re.IGNORECASE
+    )
+    expanded = re.sub(
+        r"\$env:(HOME|USERPROFILE)\b",
+        lambda match: os.environ.get(match.group(1).upper()) or str(home),
+        expanded,
+        flags=re.IGNORECASE,
+    )
+    expanded = re.sub(
+        r"%(HOME|USERPROFILE)%",
+        lambda match: os.environ.get(match.group(1).upper()) or str(home),
+        expanded,
+        flags=re.IGNORECASE,
+    )
+    expanded = os.path.expandvars(os.path.expanduser(expanded))
+    if re.search(r"%(?![%])", expanded) or "${" in expanded or "$env:" in expanded.casefold():
+        return None
+    candidate = Path(expanded)
+    if not candidate.is_absolute():
+        candidate = home / candidate
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError):
+        resolved = candidate
+    try:
+        return str(resolved) if resolved.is_file() else None
+    except OSError:
+        return None
+
+
+def _add_identity_files(state: _ResolutionState, values: list[str]) -> None:
+    if state.active is False:
+        return
+    if state.active is None or not values:
+        state.identity_uncertain = True
+        return
+    for value in values:
+        if not value or value.casefold() == "none":
+            continue
+        resolved = _expand_identity_file(value, state.include_root)
+        if resolved is None:
+            if _DYNAMIC_VALUE_RE.search(value):
+                state.identity_uncertain = True
+            continue
+        key = os.path.normcase(resolved)
+        if all(os.path.normcase(existing) != key for existing in state.identity_files):
+            state.identity_files.append(resolved)
+
+
 def _visit_config(path: Path, state: _ResolutionState, *, root: bool = False) -> None:
     if state.file_visits >= MAX_OPENSSH_FILE_VISITS:
         state.mark_uncertain(state.unresolved_fields(), "include_limit")
@@ -292,6 +359,9 @@ def _visit_config(path: Path, state: _ResolutionState, *, root: bool = False) ->
                     for included_path in included:
                         _visit_config(included_path, state)
                 continue
+            if keyword == "identityfile":
+                _add_identity_files(state, values)
+                continue
             if keyword in {"hostname", "user", "port"}:
                 _set_endpoint_value(state, keyword, values)
                 continue
@@ -346,4 +416,27 @@ def resolve_openssh_endpoint(
         hostname=hostname,
         user=user,
         port=port,
+    )
+
+
+def resolve_openssh_identity_files(
+    config_path: str | Path,
+    alias: str,
+) -> OpenSSHIdentityResolution:
+    """Resolve existing static IdentityFile paths without running OpenSSH."""
+
+    source = Path(config_path).expanduser()
+    state = _ResolutionState(alias=alias, include_root=_include_root(source))
+    _visit_config(source, state, root=True)
+    if not state.matched_host:
+        return OpenSSHIdentityResolution(status="dynamic", reason="host_alias_not_found")
+    if state.identity_uncertain:
+        return OpenSSHIdentityResolution(
+            status="dynamic",
+            identity_files=tuple(state.identity_files),
+            reason="dynamic_identity_file",
+        )
+    return OpenSSHIdentityResolution(
+        status="exact",
+        identity_files=tuple(state.identity_files),
     )

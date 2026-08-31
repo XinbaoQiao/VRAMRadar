@@ -94,6 +94,8 @@ class ModelStorageTests(unittest.TestCase):
         self.assertEqual(profile.favorite_alert_min_memory_gib, 0.0)
         self.assertEqual(profile.ignored_ssh_aliases, ())
         self.assertEqual(profile.saved_views, ())
+        self.assertTrue(profile.task_completion_alert_enabled)
+        self.assertEqual(profile.task_completion_watches, ())
 
     def test_new_defaults_enable_alerts_and_other_user_summaries_without_overriding_opt_outs(self):
         default_profile = Profile.from_dict(
@@ -128,6 +130,32 @@ class ModelStorageTests(unittest.TestCase):
         self.assertTrue(default_profile.servers[0].show_other_user_commands)
         self.assertFalse(opted_out.favorite_alert_enabled)
         self.assertFalse(opted_out.servers[0].show_other_user_commands)
+
+    def test_task_completion_preferences_and_auto_backend_round_trip(self):
+        raw = dict(
+            PROFILE,
+            task_completion_alert_enabled=False,
+            task_completion_watches=[{
+                "server_id": "gpu-1",
+                "task_key": "slurm:4182",
+                "task_kind": "slurm",
+                "task_id": "4182",
+                "label": "training",
+            }],
+            servers=[dict(PROFILE["servers"][0], auto_detect_backend=True)],
+        )
+
+        profile = Profile.from_dict(raw)
+
+        self.assertFalse(profile.task_completion_alert_enabled)
+        self.assertEqual(profile.task_completion_watches[0]["task_key"], "slurm:4182")
+        self.assertTrue(profile.servers[0].auto_detect_backend)
+        self.assertEqual(Profile.from_dict(profile.to_dict()), profile)
+
+        with self.assertRaisesRegex(ConfigError, "kind must be slurm or process"):
+            Profile.from_dict(dict(raw, task_completion_watches=[{
+                **raw["task_completion_watches"][0], "task_kind": "shell"
+            }]))
 
     def test_ui_language_round_trip_and_validation(self):
         english = Profile.from_dict(dict(PROFILE, ui_language="en"))

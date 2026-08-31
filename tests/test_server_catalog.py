@@ -264,6 +264,46 @@ Host !blocked *.example.com exact-host
         self.assertTrue(all(server.ssh_config_file == str(path.resolve()) for server in servers))
         self.assertIn("无法判断直连或 Slurm", warnings[0])
 
+    def test_openssh_import_leaves_confirmed_identity_under_config_control(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            ssh_dir = home / ".ssh"
+            ssh_dir.mkdir()
+            private_key = ssh_dir / "lab_key"
+            private_key.write_text("not-read-by-importer", encoding="utf-8")
+            config = ssh_dir / "config"
+            config.write_text(
+                "Host gpu-lab\n  HostName gpu.test\n  IdentityFile ~/.ssh/lab_key\n",
+                encoding="utf-8",
+            )
+
+            with patch("vram_radar.openssh_resolution.Path.home", return_value=home):
+                servers, warnings = import_openssh_config(config)
+
+        self.assertEqual(servers[0].identity_file, "")
+        self.assertTrue(servers[0].auto_detect_backend)
+        self.assertTrue(any("OpenSSH 配置管理私钥" in warning for warning in warnings))
+
+    def test_dynamic_identity_selection_is_not_reported_as_confirmed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            ssh_dir = home / ".ssh"
+            ssh_dir.mkdir()
+            (ssh_dir / "global_key").write_text("not-read", encoding="utf-8")
+            config = ssh_dir / "config"
+            config.write_text(
+                "IdentityFile ~/.ssh/global_key\n"
+                "Host gpu-lab\n  HostName gpu.test\n"
+                "Match exec \"choose-key\"\n  IdentityFile ~/.ssh/dynamic_key\n",
+                encoding="utf-8",
+            )
+
+            with patch("vram_radar.openssh_resolution.Path.home", return_value=home):
+                servers, warnings = import_openssh_config(config)
+
+        self.assertEqual(servers[0].identity_file, "")
+        self.assertFalse(any("OpenSSH 配置管理私钥" in warning for warning in warnings))
+
     def test_openssh_import_accepts_equals_separated_host_and_include_directives(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
