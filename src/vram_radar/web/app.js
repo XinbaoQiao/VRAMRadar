@@ -11,6 +11,9 @@ const ui = {
   monitoringToggle: document.getElementById('monitoring-toggle'),
   taskAlertIndicator: document.getElementById('task-alert-indicator'),
   taskAlertCount: document.getElementById('task-alert-count'),
+  notificationCenter: document.getElementById('notification-center'),
+  notificationList: document.getElementById('notification-list'),
+  markNotificationsRead: document.getElementById('mark-notifications-read'),
   settings: document.getElementById('settings-button'),
   dialog: document.getElementById('settings-dialog'),
   form: document.getElementById('settings-form'),
@@ -369,7 +372,11 @@ function renderTaskName(task) {
 }
 
 function taskCompletionKey(kind, task) {
-  if (kind === 'slurm') return `slurm:${String(task.job_id || '').trim()}`;
+  if (kind === 'slurm') {
+    const jobId = String(task.job_id || '').trim();
+    const submittedAt = String(task.submitted_at || '').trim();
+    return submittedAt ? `slurm:${jobId}:${submittedAt}` : `slurm:${jobId}`;
+  }
   const pid = String(task.pid || '').trim();
   const startedAt = String(task.started_at || '').trim();
   return startedAt ? `process:${pid}:${startedAt}` : `process:${pid}`;
@@ -377,7 +384,6 @@ function taskCompletionKey(kind, task) {
 
 function taskCompletionWatchButton(serverId, kind, task, currentUser) {
   const mine = task.owner_scope === 'mine' || (currentUser && task.user === currentUser);
-  if (!mine) return '';
   const taskId = String(kind === 'slurm' ? task.job_id : task.pid || '').trim();
   if (!taskId) return '';
   const taskKey = taskCompletionKey(kind, task);
@@ -385,7 +391,12 @@ function taskCompletionWatchButton(serverId, kind, task, currentUser) {
     item => item.server_id === serverId && item.task_key === taskKey,
   );
   const label = String(task.name || task.command_preview || (kind === 'slurm' ? taskId : `PID ${taskId}`)).trim();
-  return `<button class="task-watch-toggle" type="button" data-server-id="${escapeHtml(serverId)}" data-task-key="${escapeHtml(taskKey)}" data-task-kind="${escapeHtml(kind)}" data-task-id="${escapeHtml(taskId)}" data-task-label="${escapeHtml(label)}" aria-pressed="${watched}" title="${watched ? '取消单独提醒' : '单独关注完成提醒'}">${icon('bell')}<span>${watched ? '已关注' : '关注'}</span></button>`;
+  const owner = String(task.user || '').trim();
+  const ownerScope = mine ? 'mine' : (owner ? 'other' : 'unknown');
+  const watchTitle = watched
+    ? '取消单独提醒'
+    : (mine ? '单独关注完成提醒' : '仅关注这个用户的这一项任务');
+  return `<button class="task-watch-toggle" type="button" data-server-id="${escapeHtml(serverId)}" data-task-key="${escapeHtml(taskKey)}" data-task-kind="${escapeHtml(kind)}" data-task-id="${escapeHtml(taskId)}" data-task-label="${escapeHtml(label)}" data-task-owner="${escapeHtml(owner)}" data-task-owner-scope="${ownerScope}" aria-pressed="${watched}" title="${watchTitle}">${icon('bell')}<span>${watched ? '已关注' : '关注'}</span></button>`;
 }
 
 function renderTaskTable(tasks, recent = false, currentUser = '', emptyMessage = '', serverId = '') {
@@ -1208,15 +1219,70 @@ function renderTaskCompletionWatchList() {
   const watches = currentProfile?.task_completion_watches || [];
   ui.taskCompletionWatchList.hidden = watches.length === 0;
   ui.taskCompletionWatchList.innerHTML = watches.length
-    ? `<div class="task-watch-heading">单独关注 ${number(watches.length)} 项</div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `任务 ${watch.task_id}` : `PID ${watch.task_id}`)}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}">移除</button></div>`).join('')}`
+    ? `<div class="task-watch-heading"><span>单独关注 ${number(watches.length)} 项</span><button class="clear-task-watches button compact-button" type="button">全部移除</button></div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `任务 ${watch.task_id}` : `PID ${watch.task_id}`)}${watch.owner ? ` · ${escapeHtml(watch.owner)}` : ''}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}" data-task-owner="${escapeHtml(watch.owner || '')}" data-task-owner-scope="${escapeHtml(watch.owner_scope || 'unknown')}">移除</button></div>`).join('')}`
     : '';
 }
 
+function notificationKindLabel(kind) {
+  if (kind === 'task_completed') return localizedText('任务完成');
+  if (kind === 'favorite_gpu_available') return localizedText('收藏 GPU 可用');
+  if (kind === 'resource_available') return localizedText('GPU 条件满足');
+  return localizedText('应用通知');
+}
+
+function notificationTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return String(value);
+  return new Intl.DateTimeFormat(activeLocale(), {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  }).format(date);
+}
+
+function notificationEventTitle(event) {
+  if (event.kind === 'task_completed') return localizedText('任务已完成');
+  if (event.kind === 'favorite_gpu_available') return localizedText('收藏 GPU 已可用');
+  if (event.kind === 'resource_available') return localizedText('显存雷达：资源可用');
+  return String(event.title || notificationKindLabel(event.kind));
+}
+
+function notificationEventMessage(event) {
+  if (event.kind === 'task_completed' && event.label) {
+    return window.VRAMRadarI18n?.language === 'en'
+      ? `${event.label} finished.`
+      : `${event.label} 已结束。`;
+  }
+  if (event.kind === 'favorite_gpu_available' && event.language && event.language !== window.VRAMRadarI18n?.language) {
+    return localizedText('收藏服务器已有 GPU 可用。');
+  }
+  if (event.kind === 'resource_available') return localizedText('你设置的 GPU 条件已有匹配结果。');
+  return String(event.message || '');
+}
+
+function renderNotificationCenter(snapshot) {
+  const state = snapshot?.notifications || {events: [], read_sequence: 0};
+  const readSequence = Number(state.read_sequence || 0);
+  const events = [...(state.events || [])].reverse();
+  ui.notificationList.innerHTML = events.length
+    ? events.map(event => `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p></article>`).join('')
+    : '<div class="notification-empty">暂无通知</div>';
+  ui.markNotificationsRead.disabled = Number(state.unread_count || 0) <= 0;
+}
+
 function renderTaskAlertIndicator(snapshot) {
-  const unread = Number(snapshot?.task_completion_alerts?.unread_count || 0);
-  ui.taskAlertIndicator.hidden = unread <= 0;
+  const unread = Number(snapshot?.notifications?.unread_count || 0);
+  ui.taskAlertIndicator.hidden = false;
+  ui.taskAlertCount.hidden = unread <= 0;
   ui.taskAlertCount.textContent = unread > 99 ? '99+' : String(unread);
   ui.taskAlertIndicator.classList.toggle('has-unread', unread > 0);
+  const english = window.VRAMRadarI18n?.language === 'en';
+  ui.taskAlertIndicator.setAttribute(
+    'aria-label',
+    unread > 0
+      ? (english ? `Open notification center, ${unread} unread` : `打开通知中心，${unread} 条未读`)
+      : (english ? 'Open notification center' : '打开通知中心'),
+  );
+  renderNotificationCenter(snapshot);
 }
 
 function repaintFavoriteServer(serverId) {
@@ -2199,6 +2265,7 @@ async function evaluateResourceWatch() {
         if (api?.show_notification) await api.show_notification(
           localizedText('显存雷达：资源可用'),
           localizedText('你设置的 GPU 条件已有匹配结果。'),
+          'resource_available',
         );
       }
       resourceWatchMatched = matched;
@@ -3251,6 +3318,8 @@ async function toggleTaskCompletionWatch(button) {
       button.dataset.taskId,
       button.dataset.taskLabel,
       nextWatched,
+      button.dataset.taskOwner || '',
+      button.dataset.taskOwnerScope || 'unknown',
     );
     if (!result?.ok) throw new Error(result?.error || '提醒设置保存失败');
     acceptProfile(result.profile);
@@ -3260,6 +3329,43 @@ async function toggleTaskCompletionWatch(button) {
   } catch (error) {
     showToast(error.message || String(error));
     button.disabled = false;
+  }
+}
+
+async function clearTaskCompletionWatches(button) {
+  if (!api?.clear_task_completion_watches) return;
+  button.disabled = true;
+  try {
+    const result = await api.clear_task_completion_watches();
+    if (!result?.ok) throw new Error(result?.error || '无法移除关注任务');
+    acceptProfile(result.profile);
+    renderTaskCompletionWatchList();
+    if (currentSnapshot) render(currentSnapshot);
+    showToast('已移除全部单独关注任务');
+  } catch (error) {
+    showToast(error.message || String(error));
+    button.disabled = false;
+  }
+}
+
+async function markAllNotificationsRead() {
+  if (!currentSnapshot?.notifications) return;
+  if (api?.mark_notifications_read) await api.mark_notifications_read();
+  else if (api?.mark_task_completion_alerts_read) await api.mark_task_completion_alerts_read();
+  currentSnapshot.notifications.unread_count = 0;
+  currentSnapshot.notifications.read_sequence = currentSnapshot.notifications.latest_sequence || 0;
+  if (currentSnapshot.task_completion_alerts) currentSnapshot.task_completion_alerts.unread_count = 0;
+  renderTaskAlertIndicator(currentSnapshot);
+}
+
+async function setNotificationCenterOpen(open) {
+  ui.notificationCenter.hidden = !open;
+  ui.taskAlertIndicator.setAttribute('aria-expanded', String(open));
+  if (open) {
+    renderNotificationCenter(currentSnapshot);
+    if (Number(currentSnapshot?.notifications?.unread_count || 0) > 0) {
+      await markAllNotificationsRead();
+    }
   }
 }
 
@@ -3330,6 +3436,8 @@ document.addEventListener('click', event => {
   if (installUpdate) void installLatestUpdate(installUpdate);
   const taskWatch = event.target.closest('.task-watch-toggle, .remove-task-watch');
   if (taskWatch) void toggleTaskCompletionWatch(taskWatch);
+  const clearTaskWatches = event.target.closest('.clear-task-watches');
+  if (clearTaskWatches) void clearTaskCompletionWatches(clearTaskWatches);
   const retry = event.target.closest('.retry-server');
   if (retry) refresh(true, retry.dataset.serverId);
   const retryDirectory = event.target.closest('.retry-directory');
@@ -3353,6 +3461,11 @@ document.addEventListener('click', event => {
   const dismissNoticeButton = event.target.closest('.dismiss-notice');
   if (dismissNoticeButton) void dismissNotice(dismissNoticeButton.dataset.noticeCode);
   if (event.target.closest('.retry-all')) refresh(true);
+  if (
+    !ui.notificationCenter.hidden
+    && !event.target.closest('#notification-center')
+    && !event.target.closest('#task-alert-indicator')
+  ) void setNotificationCenterOpen(false);
 });
 document.addEventListener('focusin', event => {
   const serverCard = event.target.closest?.('.server-card');
@@ -3460,15 +3573,19 @@ ui.saveView.addEventListener('click', saveCurrentView);
 ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
 ui.checkForUpdates.addEventListener('click', () => void checkForUpdates({interactive: true}));
-ui.taskAlertIndicator.addEventListener('click', async () => {
-  const events = currentSnapshot?.task_completion_alerts?.events || [];
-  const latest = events[events.length - 1];
-  if (api?.mark_task_completion_alerts_read) await api.mark_task_completion_alerts_read();
-  ui.taskAlertIndicator.hidden = true;
-  if (latest) showToast(`${latest.label} 已结束`);
+ui.taskAlertIndicator.addEventListener('click', () => {
+  void setNotificationCenterOpen(ui.notificationCenter.hidden);
+});
+ui.markNotificationsRead.addEventListener('click', () => void markAllNotificationsRead());
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !ui.notificationCenter.hidden) {
+    void setNotificationCenterOpen(false);
+    ui.taskAlertIndicator.focus();
+  }
 });
 ui.language.addEventListener('change', () => {
   window.VRAMRadarI18n?.setLanguage(ui.language.value);
+  if (currentSnapshot) renderNotificationCenter(currentSnapshot);
 });
 ui.favoriteAlertEnabled.addEventListener('change', () => {
   ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;

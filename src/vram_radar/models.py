@@ -196,7 +196,9 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
 
     if not isinstance(raw, dict):
         raise ConfigError("each task completion watch must be a table")
-    allowed_keys = {"server_id", "task_key", "task_kind", "task_id", "label"}
+    allowed_keys = {
+        "server_id", "task_key", "task_kind", "task_id", "label", "owner", "owner_scope"
+    }
     unknown_keys = set(raw) - allowed_keys
     if unknown_keys:
         raise ConfigError(
@@ -220,12 +222,27 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
         "task completion watch label",
         maximum_bytes=256,
     )
+    owner = require_bounded_text(
+        raw.get("owner", ""),
+        "task completion watch owner",
+        maximum_bytes=256,
+        allow_empty=True,
+    )
+    owner_scope = require_bounded_text(
+        raw.get("owner_scope", "mine"),
+        "task completion watch owner scope",
+        maximum_bytes=16,
+    ).lower()
+    if owner_scope not in {"mine", "other", "unknown"}:
+        raise ConfigError("task completion watch owner scope must be mine, other, or unknown")
     return {
         "server_id": server_id,
         "task_key": task_key,
         "task_kind": task_kind,
         "task_id": task_id,
         "label": label,
+        "owner": owner,
+        "owner_scope": owner_scope,
     }
 
 

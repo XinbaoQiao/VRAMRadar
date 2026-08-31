@@ -41,15 +41,15 @@ Agents can edit code, run commands, and start long tasks while you stay focused 
 - Which server or GPU is it using?
 - When will usable capacity become available?
 
-VRAM Radar puts that missing state back into one local desktop view. It combines Direct SSH and Slurm capacity, shows your active work beside the GPUs, and can notify you when a saved availability condition becomes true.
+VRAM Radar puts that missing state back into one local desktop view. It combines Direct SSH and Slurm capacity, shows your active work beside the GPUs, and keeps task-completion plus GPU-availability messages in one local notification center.
 
 It is intentionally not a scheduler: VRAM Radar does not submit jobs, reserve GPUs, or replace `nvidia-smi`, `nvtop`, or Slurm. It helps you decide **where capacity exists, where your work is running, and which server to open next**.
 
 ## What stays visible
 
-| One view for multiple servers | Your jobs beside the GPUs | Availability without constant refreshing |
+| One view for multiple servers | Your jobs beside the GPUs | Alerts without constant refreshing |
 |---|---|---|
-| Compare Direct SSH workstations and Slurm clusters without opening a terminal for each host. | See running and queued work for the current account, with node and GPU context when available. | Save a GPU requirement and receive a one-shot local notification when it becomes available. |
+| Compare Direct SSH workstations and Slurm clusters without opening a terminal for each host. | See running and queued work for the current account, with node and GPU context when available. | Receive native task/GPU alerts and review durable unread history from one bell. Other users' tasks are watched only when selected individually. |
 
 ![VRAM Radar server and task details](docs/assets/vram-radar-server-detail.png)
 
@@ -65,12 +65,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.8.3**.
+The current public stable release is **v0.8.4**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.8.3.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.8.3-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-0.8.4.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-0.8.4-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -79,7 +79,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.8.3 release notes](docs/release-notes-v0.8.3.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.8.4 release notes](docs/release-notes-v0.8.4.md) for the exact boundaries.
 
 ## Local-first by design
 
@@ -110,6 +110,7 @@ Windows:
 uv sync --extra build --frozen
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check src\vram_radar\web\app.js
+.\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
 .\Build-VramRadar.ps1 -SkipSync
 ```
 
@@ -119,6 +120,7 @@ macOS:
 uv sync --extra build --frozen
 ./.venv/bin/python -m unittest discover -s tests -v
 node --check src/vram_radar/web/app.js
+./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```

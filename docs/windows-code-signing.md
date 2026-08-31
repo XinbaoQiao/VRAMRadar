@@ -1,7 +1,7 @@
 # Windows code-signing path
 
 VRAM Radar is applying for the SignPath Foundation sponsored open-source
-program. The current public `v0.8.3` installer remains outside that approval and is
+program. The current public `v0.8.4` installer remains outside that approval and is
 unsigned. Do not describe a Windows artifact as signed until the verification
 workflow below succeeds for the exact published file.
 

@@ -13,6 +13,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         cls.validator = (ROOT / "tools" / "validate_macos_bundle.py").read_text(encoding="utf-8")
         cls.icon_builder = (ROOT / "tools" / "build_icon.py").read_text(encoding="utf-8")
         cls.lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+        cls.pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github" / "workflows" / "publish-release.yml").read_text(encoding="utf-8")
         cls.signer = (ROOT / "tools" / "sign_notarize_macos.sh").read_text(encoding="utf-8")
         cls.packager = (ROOT / "tools" / "package_macos_release.sh").read_text(encoding="utf-8")
@@ -54,12 +55,17 @@ class MacOSPackagingContractTests(unittest.TestCase):
             'name = "pyobjc-framework-webkit"',
         ):
             self.assertIn(package, self.lock)
+        self.assertIn("name = \"truststore\"", self.lock)
+        self.assertIn("truststore>=0.10.4,<0.11; sys_platform == 'darwin'", self.pyproject)
 
     def test_bundle_validator_reaches_the_cocoa_window_without_servers(self) -> None:
         self.assertIn('"--no-auto-import"', self.validator)
         self.assertIn('run_bundle_smoke(home, "--gui-smoke"', self.validator)
         self.assertIn("validate_packaged_askpass()", self.validator)
         self.assertIn("validate_release_tag()", self.validator)
+        self.assertIn("validate_packaged_update_transport(release_tag)", self.validator)
+        self.assertIn('"--check-updates-json"', self.validator)
+        self.assertIn('"github_update_transport": "passed"', self.validator)
         self.assertIn('ASKPASS_EXECUTABLE = CONTENTS / "MacOS" / "VRAMRadarAskPass"', self.validator)
         self.assertIn("executable_architectures(EXECUTABLE)", self.validator)
         self.assertIn("executable_architectures(ASKPASS_EXECUTABLE)", self.validator)
@@ -78,6 +84,8 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn("VRAM_RADAR_RELEASE_TAG: ${{ inputs.release_tag }}", self.workflow)
         self.assertIn("VRAM_RADAR_EXPECTED_MACOS_ARCH: ${{ matrix.arch }}", self.workflow)
         self.assertIn("tools\\validate_packaged_tray.py", self.workflow)
+        self.assertIn("tools\\benchmark_webview_ui.py --timeout-seconds 120", self.workflow)
+        self.assertIn("tools/benchmark_webview_ui.py --timeout-seconds 120", self.workflow)
         self.assertIn("VRAMRadar-*-macos-${{ matrix.arch }}.zip", self.workflow)
         self.assertIn("bash tools/package_macos_release.sh", self.workflow)
         self.assertNotIn("secrets.MACOS_", self.workflow)

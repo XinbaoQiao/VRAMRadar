@@ -66,6 +66,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           .\.venv\Scripts\python.exe -m compileall -q src tests tools
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build and validate packaged app
         shell: pwsh
@@ -157,6 +159,7 @@ jobs:
           node --check src/vram_radar/web/app.js
           node --check src/vram_radar/web/localization.js
           ./.venv/bin/python -m compileall -q src tests tools
+          ./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
           bash -n Build-VramRadar-macOS.sh tools/package_macos_release.sh tools/package_combined_macos_release.sh
 
       - name: Build native app bundle

@@ -14,7 +14,7 @@ from unittest.mock import patch
 from vram_radar.connectors import ConnectorFailure
 from vram_radar.models import Profile
 from vram_radar.ssh_keys import PreparedSshKey, SshKeySetupError
-from vram_radar.storage import ProfileStore, SnapshotCache, storage_paths
+from vram_radar.storage import NotificationStateStore, ProfileStore, SnapshotCache, storage_paths
 from vram_radar.window_state import WindowGeometry
 from vram_radar.shell import (
     ActivationServer,
@@ -104,21 +104,29 @@ class ShellApiTests(unittest.TestCase):
         }
 
     @staticmethod
-    def task_alert_snapshot(*, active=True):
+    def task_alert_snapshot(
+        *, active=True, owner="alice", current_user="alice", data_origin=None,
+        recent=None, submitted_at="",
+    ):
+        connection = {"state": "online"}
+        if data_origin is not None:
+            connection["data_origin"] = data_origin
         return {
             "monitoring": {"paused": False, "in_flight": False},
             "servers": [{
                 "server_id": "gpu",
                 "display_name": "GPU Lab",
                 "backend": "slurm_ssh",
-                "connection": {"state": "online"},
+                "connection": connection,
                 "tasks": {
-                    "current_user": "alice",
+                    "current_user": current_user,
                     "active": ([{
                         "job_id": "4182",
                         "name": "training",
-                        "user": "alice",
+                        "user": owner,
+                        **({"submitted_at": submitted_at} if submitted_at else {}),
                     }] if active else []),
+                    "recent": list(recent or []),
                 },
             }],
         }
@@ -639,6 +647,144 @@ class ShellApiTests(unittest.TestCase):
 
         notify.assert_called_once()
 
+    def test_task_completion_is_recovered_after_restart_and_read_state_persists(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            first_service = Mock()
+            first_service.snapshot.return_value = self.task_alert_snapshot(
+                active=True, data_origin="live"
+            )
+            first = AppApi(profile, store=store, paths=paths, service=first_service)
+            first.bind_notification_callback(Mock(return_value=True))
+
+            second_service = Mock()
+            second_service.snapshot.return_value = self.task_alert_snapshot(
+                active=False,
+                data_origin="live",
+                recent=[{
+                    "job_id": "4182", "state": "COMPLETED", "ended_at": "2026-08-31T11:00:00Z"
+                }],
+            )
+            notify = Mock(return_value=True)
+            second = AppApi(profile, store=store, paths=paths, service=second_service)
+            second.bind_notification_callback(notify)
+            recovered = second.get_snapshot()
+
+            notify.assert_called_once_with("任务已完成", "training 已结束。")
+            self.assertEqual(recovered["notifications"]["unread_count"], 1)
+            event = recovered["notifications"]["events"][0]
+            self.assertEqual(event["terminal_state"], "COMPLETED")
+            self.assertEqual(event["completed_at"], "2026-08-31T11:00:00Z")
+            second.mark_notifications_read()
+
+            third = AppApi(profile, store=store, paths=paths, service=second_service)
+            persisted = third.get_snapshot()["notifications"]
+            self.assertEqual(persisted["unread_count"], 0)
+            self.assertEqual(len(persisted["events"]), 1)
+
+    def test_cached_snapshot_cannot_claim_completion_before_next_live_refresh(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        })
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            first_service = Mock()
+            first_service.snapshot.return_value = self.task_alert_snapshot(active=True, data_origin="live")
+            first = AppApi(profile, store=store, paths=paths, service=first_service)
+            first.bind_notification_callback(Mock(return_value=True))
+
+            next_service = Mock()
+            next_service.snapshot.return_value = self.task_alert_snapshot(active=False, data_origin="cache")
+            notify = Mock(return_value=True)
+            second = AppApi(profile, store=store, paths=paths, service=next_service)
+            second.bind_notification_callback(notify)
+            notify.assert_not_called()
+
+            next_service.snapshot.return_value = self.task_alert_snapshot(active=False, data_origin="live")
+            second.get_snapshot()
+            notify.assert_called_once()
+
+    def test_other_users_tasks_require_an_explicit_individual_watch(self):
+        base = {
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        }
+        service = Mock()
+        service.snapshot.return_value = self.task_alert_snapshot(active=True, owner="bob")
+        automatic = AppApi(Profile.from_dict(base), store=Mock(), paths=Mock(), service=service)
+        automatic_notify = Mock(return_value=True)
+        automatic.bind_notification_callback(automatic_notify)
+        service.snapshot.return_value = self.task_alert_snapshot(active=False, owner="bob")
+        automatic.get_snapshot()
+        automatic_notify.assert_not_called()
+
+        watched_profile = Profile.from_dict({
+            **base,
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "slurm:4182:2026-08-31T10:00:00Z", "task_kind": "slurm",
+                "task_id": "4182", "label": "training", "owner": "bob", "owner_scope": "other",
+            }],
+        })
+        watched_service = Mock()
+        watched_service.snapshot.return_value = self.task_alert_snapshot(
+            active=True, owner="bob", submitted_at="2026-08-31T10:00:00Z"
+        )
+        watched = AppApi(watched_profile, store=Mock(), paths=Mock(), service=watched_service)
+        watched_notify = Mock(return_value=True)
+        watched.bind_notification_callback(watched_notify)
+        watched_service.snapshot.return_value = self.task_alert_snapshot(
+            active=True, owner="alice", submitted_at="2026-08-31T10:00:00Z"
+        )
+        watched.get_snapshot()
+        watched_notify.assert_called_once()
+        watched_service.snapshot.return_value = self.task_alert_snapshot(active=False)
+        watched.get_snapshot()
+        watched_notify.assert_called_once()
+
+    def test_all_individual_task_watches_can_be_removed_in_one_action(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "slurm:4182", "task_kind": "slurm",
+                "task_id": "4182", "label": "training",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "slurm_ssh", "host": "gpu.test"
+            }],
+        })
+        service = Mock()
+        service.snapshot.return_value = self.task_alert_snapshot(active=True)
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+
+        result = api.clear_task_completion_watches()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(api.profile.task_completion_watches, ())
+
     def test_auto_backend_probe_persists_slurm_after_direct_collection_failure(self):
         profile = Profile.from_dict({
             "schema_version": 1,
@@ -745,10 +891,15 @@ class ShellApiTests(unittest.TestCase):
 
         service.snapshot.return_value = self.favorite_alert_snapshot(available=True)
         api.get_snapshot()
-        api.get_snapshot()
+        notification_snapshot = api.get_snapshot()
         self.assertEqual(notify.call_count, 1)
         self.assertEqual(notify.call_args.args[0], "Favorite GPUs are available")
         self.assertIn("A100 Lab", notify.call_args.args[1])
+        self.assertEqual(notification_snapshot["notifications"]["unread_count"], 1)
+        self.assertEqual(
+            notification_snapshot["notifications"]["events"][0]["kind"],
+            "favorite_gpu_available",
+        )
 
         service.snapshot.return_value = self.favorite_alert_snapshot(available=False)
         api.get_snapshot()
@@ -771,6 +922,24 @@ class ShellApiTests(unittest.TestCase):
         api.get_snapshot()
 
         notify.assert_not_called()
+
+    def test_favorite_transition_and_center_event_share_one_durable_state(self):
+        profile = self.favorite_alert_profile()
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.snapshot.return_value = self.favorite_alert_snapshot(available=False)
+            api = AppApi(profile, store=store, paths=paths, service=service)
+            api.bind_notification_callback(Mock(return_value=True))
+
+            service.snapshot.return_value = self.favorite_alert_snapshot(available=True)
+            api.get_snapshot()
+
+            durable = NotificationStateStore(paths, profile.id).load()
+            self.assertEqual(durable["favorite_active_ids"], ["gpu"])
+            self.assertEqual(durable["events"][0]["kind"], "favorite_gpu_available")
 
     def test_hidden_refresh_notifies_after_background_collection_finishes(self):
         service = Mock()
@@ -3280,6 +3449,24 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result, 0)
         build_runtime.assert_not_called()
         print_value.assert_called_once_with("v0.4.0-macos-beta.3")
+
+    def test_check_updates_json_exits_without_building_runtime(self):
+        update_result = {
+            "ok": True,
+            "update_available": False,
+            "current_version": "0.8.4",
+            "latest_version": "0.8.3",
+        }
+        with patch("vram_radar.shell.check_latest_release", return_value=update_result), patch(
+            "vram_radar.shell.build_runtime"
+        ) as build_runtime, patch("builtins.print") as print_value:
+            from vram_radar.shell import main
+
+            result = main(["--check-updates-json"])
+
+        self.assertEqual(result, 0)
+        build_runtime.assert_not_called()
+        self.assertEqual(json.loads(print_value.call_args.args[0]), update_result)
 
 
 if __name__ == "__main__":

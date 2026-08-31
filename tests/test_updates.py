@@ -1,5 +1,8 @@
 import json
+import ssl
 import unittest
+from urllib.error import HTTPError, URLError
+from unittest.mock import ANY, patch, sentinel
 
 from vram_radar.updates import LATEST_RELEASE_API, RELEASES_API, check_latest_release
 
@@ -19,6 +22,53 @@ class FakeResponse:
 
 
 class UpdateCheckTests(unittest.TestCase):
+    def test_macos_default_opener_uses_native_system_trust(self):
+        payload = {
+            "tag_name": "v0.8.3",
+            "html_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.8.3",
+            "draft": False,
+            "prerelease": False,
+        }
+        with patch(
+            "vram_radar.updates._macos_system_trust_context",
+            return_value=sentinel.context,
+        ) as system_trust, patch(
+            "vram_radar.updates.urlopen",
+            return_value=FakeResponse(payload),
+        ) as open_release:
+            result = check_latest_release(
+                "0.8.4",
+                current_tag="v0.8.4",
+                platform_name="darwin",
+            )
+
+        self.assertTrue(result["ok"])
+        system_trust.assert_called_once_with()
+        open_release.assert_called_once_with(ANY, timeout=4.0, context=sentinel.context)
+
+    def test_tls_failure_is_actionable_and_logged_without_exception_text(self):
+        def opener(_request, *, timeout):
+            self.assertEqual(timeout, 4.0)
+            raise URLError(ssl.SSLCertVerificationError(1, "private-proxy.example"))
+
+        with self.assertLogs("vram_radar", level="WARNING") as logs:
+            result = check_latest_release("0.8.3", current_tag="v0.8.3", opener=opener)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "update_tls_failed")
+        self.assertEqual(result["error"], "无法验证 GitHub 的 HTTPS 证书")
+        self.assertNotIn("private-proxy.example", "\n".join(logs.output))
+
+    def test_rate_limit_reports_bounded_http_status(self):
+        def opener(request, *, timeout):
+            raise HTTPError(request.full_url, 429, "limited", {}, None)
+
+        result = check_latest_release("0.8.3", current_tag="v0.8.3", opener=opener)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "update_rate_limited")
+        self.assertEqual(result["http_status"], 429)
+
     def test_newer_stable_release_is_reported(self):
         requests = []
 

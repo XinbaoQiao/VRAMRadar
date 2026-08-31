@@ -424,6 +424,20 @@ BENCHMARK_JAVASCRIPT = r"""
         total_gpus: 120,
         data_updated_at: now,
       },
+      notifications: {
+        unread_count: 1,
+        latest_sequence: 1,
+        read_sequence: 0,
+        events: [{
+          sequence: 1,
+          kind: 'task_completed',
+          title: '任务已完成',
+          message: 'synthetic-training 已结束。',
+          label: 'synthetic-training',
+          language: 'zh-CN',
+          created_at: now,
+        }],
+      },
       servers,
     };
 
@@ -460,6 +474,14 @@ BENCHMARK_JAVASCRIPT = r"""
     const initialStart = performance.now();
     render(snapshot);
     forceLayout(ui.list);
+    const bellAlwaysVisible = !ui.taskAlertIndicator.hidden && ui.taskAlertCount.textContent === '1';
+    ui.taskAlertIndicator.click();
+    const notificationCenterOpens = !ui.notificationCenter.hidden
+      && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'true'
+      && ui.notificationList.querySelectorAll('.notification-item').length === 1;
+    document.body.dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    const notificationCenterCloses = ui.notificationCenter.hidden
+      && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'false';
     const initialWall = performance.now() - initialStart;
     const initialMetricsAfter = metricCopy();
     const visibleCardsAfterInitial = ui.list.querySelectorAll(':scope > .server-card').length;
@@ -587,6 +609,20 @@ BENCHMARK_JAVASCRIPT = r"""
     forceLayout(ui.dialog);
     const settingsWall = performance.now() - settingsStart;
     const editors = [...ui.editorList.querySelectorAll(':scope > .server-editor')];
+    editors[0].open = true;
+    forceLayout(editors[0]);
+    const primaryGrid = editors[0].querySelector('.server-primary-fields');
+    const displayNameBounds = editors[0].querySelector('[data-field="display_name"]').getBoundingClientRect();
+    const backendBounds = editors[0].querySelector('[data-field="backend"]').getBoundingClientRect();
+    const aliasBounds = editors[0].querySelector('[data-field="ssh_alias"]').getBoundingClientRect();
+    const hostBounds = editors[0].querySelector('[data-field="host"]').getBoundingClientRect();
+    const primaryHelpBounds = editors[0].querySelector('.primary-help').getBoundingClientRect();
+    const primaryGridBounds = primaryGrid.getBoundingClientRect();
+    const primaryFieldsAlign = Math.abs(displayNameBounds.top - backendBounds.top) < 0.5
+      && Math.abs(displayNameBounds.height - backendBounds.height) < 0.5
+      && Math.abs(aliasBounds.top - hostBounds.top) < 0.5
+      && Math.abs(aliasBounds.height - hostBounds.height) < 0.5
+      && Math.abs(primaryHelpBounds.left - primaryGridBounds.left) < 0.5;
     const editorBodiesOwnAllControls = editors.every(editor => {
       const body = editor.querySelector(':scope > .server-editor-body');
       return Boolean(
@@ -674,6 +710,7 @@ BENCHMARK_JAVASCRIPT = r"""
 
     openSettings({forceNormal: true});
     window.VRAMRadarI18n.setLanguage('en');
+    renderNotificationCenter(currentSnapshot);
     const untranslatedChinese = [];
     const translationWalker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
     let translationNode = translationWalker.nextNode();
@@ -699,6 +736,8 @@ BENCHMARK_JAVASCRIPT = r"""
       initial_visible_cards_paginated_to_50: visibleCardsAfterInitial === 50,
       initial_server_cards_created_once: metricDelta(initialMetricsAfter, initialMetricsBefore).serverCardCreates === 50,
       repeated_render_preserves_card_identity: firstCard === firstCardAfterRepeatedRender,
+      notification_bell_is_always_visible: bellAlwaysVisible,
+      notification_center_opens_renders_and_closes: notificationCenterOpens && notificationCenterCloses,
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
@@ -715,6 +754,7 @@ BENCHMARK_JAVASCRIPT = r"""
       settings_renders_only_first_20_servers: editors.length === 20,
       settings_editor_body_owns_all_controls: editorBodiesOwnAllControls,
       settings_primary_groups_start_collapsed: primarySettingsGroupsStartCollapsed,
+      settings_primary_connection_fields_align: primaryFieldsAlign,
       settings_first_page_ids_remain_unique: new Set(editorIds).size === 20,
       settings_first_page_handles_are_directly_sortable: firstPageHandlesSortable,
       settings_drag_event_chain_reorders_directly: directDragEventsReorder,

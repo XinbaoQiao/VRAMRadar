@@ -86,6 +86,43 @@ class ProfileStore:
         return sorted(path.stem for path in root.glob("*.toml") if path.is_file())
 
 
+class NotificationStateStore:
+    """Machine-local durable state for the unified notification center.
+
+    The Profile owns notification policy.  This separate bounded JSON file owns
+    ephemeral observations, unread state, and the last active-task baseline so
+    a completion that happened while the app was closed can be reported on the
+    next live refresh.
+    """
+
+    MAX_BYTES = 1_048_576
+
+    def __init__(self, paths: StoragePaths, profile_id: str) -> None:
+        require_id(profile_id, "profile id")
+        self.path = paths.config / "notifications" / f"{profile_id}.json"
+
+    def load(self) -> dict[str, Any]:
+        if not self.path.is_file():
+            return {}
+        try:
+            if self.path.stat().st_size > self.MAX_BYTES:
+                return {}
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        if not isinstance(raw, dict) or raw.get("schema_version") != 1:
+            return {}
+        return raw
+
+    def save(self, state: dict[str, Any]) -> Path:
+        document = {"schema_version": 1, **state}
+        atomic_write_text(
+            self.path,
+            json.dumps(document, ensure_ascii=False, separators=(",", ":")) + "\n",
+        )
+        return self.path
+
+
 class WindowStateStore:
     """Small machine-local store for the last useful normal window size."""
 

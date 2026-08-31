@@ -45,7 +45,7 @@
 - 跑在哪台服务器、哪张 GPU 上？
 - 什么时候会有真正可用的显存？
 
-VRAM Radar 想补回的就是这层“状态感”。它把 Direct SSH 与 Slurm 里的容量、当前账号任务和连接状态放到同一个本地桌面界面里，需要时还能在资源满足条件时提醒一次。
+VRAM Radar 想补回的就是这层“状态感”。它把 Direct SSH 与 Slurm 里的容量、当前账号任务和连接状态放到同一个本地桌面界面里，并把任务完成与 GPU 可用消息收进同一个本地通知中心。
 
 ## 三个最常用的能力
 
@@ -58,7 +58,7 @@ VRAM Radar 想补回的就是这层“状态感”。它把 Direct SSH 与 Slurm
   <tr>
     <td><strong>一个界面看多台服务器</strong><br>Direct SSH 工作站和 Slurm 集群不再分散在不同终端。</td>
     <td><strong>任务状态与 GPU 放在一起</strong><br>查看当前账号的运行、排队、节点和资源状态。</td>
-    <td><strong>资源可用时提醒一次</strong><br>保存卡型、数量或显存条件，不需要一直手动刷新。</td>
+    <td><strong>提醒集中且不漏报</strong><br>任务完成与 GPU 可用统一进入铃铛；离线期间结束的已观测任务会在下次实时刷新后补报，其他人的任务只在逐项选择后关注。</td>
   </tr>
 </table>
 
@@ -80,19 +80,19 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 
 ## 下载与首次启动边界
 
-当前公开稳定版为 **v0.8.3**。
+当前公开稳定版为 **v0.8.4**。
 
 | 平台 | 下载文件 | 当前边界 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.8.3.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-0.8.3-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-0.8.4.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
+| macOS | `VRAMRadar-0.8.4-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
 
 Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
 更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
 macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
 **打开**，不要关闭 Gatekeeper。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.8.3 发布说明](docs/release-notes-v0.8.3.md)。
+Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.8.4 发布说明](docs/release-notes-v0.8.4.md)。
 
 ## 本地优先，不接管你的基础设施
 

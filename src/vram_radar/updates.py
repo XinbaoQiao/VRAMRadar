@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import socket
+import ssl
 import sys
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
@@ -33,12 +36,51 @@ def _version_tuple(value: str) -> tuple[int, int, int, int, int]:
     return int(major), int(minor), int(patch), 1 if beta is None else 0, int(beta or 0)
 
 
-def _read_payload(request: Request, timeout_seconds: float, opener: Callable[..., Any]) -> Any:
-    with opener(request, timeout=max(0.5, float(timeout_seconds))) as response:
+def _read_payload(
+    request: Request,
+    timeout_seconds: float,
+    opener: Callable[..., Any],
+    *,
+    ssl_context: ssl.SSLContext | None = None,
+) -> Any:
+    open_kwargs: dict[str, Any] = {"timeout": max(0.5, float(timeout_seconds))}
+    if ssl_context is not None:
+        open_kwargs["context"] = ssl_context
+    with opener(request, **open_kwargs) as response:
         payload_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
     if len(payload_bytes) > _MAX_RESPONSE_BYTES:
         raise ValueError("release response is too large")
     return json.loads(payload_bytes.decode("utf-8"))
+
+
+def _macos_system_trust_context() -> ssl.SSLContext:
+    try:
+        import truststore
+    except ImportError as exc:
+        raise RuntimeError("macOS system trust support is unavailable") from exc
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
+def _update_failure_details(exc: BaseException) -> tuple[str, str, int | None]:
+    if isinstance(exc, HTTPError):
+        if exc.code in {403, 429}:
+            return "update_rate_limited", "GitHub 暂时限制了匿名检查，请稍后重试", exc.code
+        return "update_http_failed", f"GitHub 返回 HTTP {exc.code}，请稍后重试", exc.code
+
+    reason = exc.reason if isinstance(exc, URLError) else exc
+    if isinstance(reason, (ssl.SSLCertVerificationError, ssl.SSLError)):
+        return "update_tls_failed", "无法验证 GitHub 的 HTTPS 证书", None
+    if isinstance(reason, socket.gaierror):
+        return "update_dns_failed", "无法解析 GitHub 地址，请检查 DNS 或网络", None
+    if isinstance(reason, (TimeoutError, socket.timeout)):
+        return "update_timeout", "连接 GitHub 超时，请稍后重试", None
+    if isinstance(exc, RuntimeError):
+        return "update_tls_unavailable", "应用缺少 macOS 系统证书信任组件", None
+    if isinstance(exc, (UnicodeError, json.JSONDecodeError)):
+        return "update_response_invalid", "GitHub 返回了无法解析的响应", None
+    if isinstance(exc, ValueError):
+        return "update_metadata_invalid", "GitHub Release 元数据不完整或不受信任", None
+    return "update_network_failed", "暂时无法连接 GitHub，请稍后重试", None
 
 
 def _trusted_release(payload: Any) -> tuple[str, str, tuple[int, int, int, int, int]] | None:
@@ -109,7 +151,7 @@ def check_latest_release(
     current_tag: str | None = None,
     current_commit: str | None = None,
     timeout_seconds: float = 4.0,
-    opener: Callable[..., Any] = urlopen,
+    opener: Callable[..., Any] | None = None,
     platform_name: str = sys.platform,
 ) -> dict[str, Any]:
     """Check stable updates, plus newer macOS betas for a packaged beta build."""
@@ -130,7 +172,14 @@ def check_latest_release(
         method="GET",
     )
     try:
-        payload = _read_payload(request, timeout_seconds, opener)
+        active_opener = opener or urlopen
+        ssl_context = _macos_system_trust_context() if opener is None and platform_name == "darwin" else None
+        payload = _read_payload(
+            request,
+            timeout_seconds,
+            active_opener,
+            ssl_context=ssl_context,
+        )
         if beta_channel:
             if not isinstance(payload, list):
                 raise ValueError("unexpected release response")
@@ -195,10 +244,20 @@ def check_latest_release(
                 platform_name=platform_name,
             ),
         }
-    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, json.JSONDecodeError):
-        return {
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        error_code, error_message, http_status = _update_failure_details(exc)
+        logging.getLogger("vram_radar").warning(
+            "update check failed code=%s exception=%s",
+            error_code,
+            type(exc).__name__,
+        )
+        failure = {
             "ok": False,
             "update_available": False,
             "current_version": installed_tag.removeprefix("v"),
-            "error": "暂时无法检查 GitHub 最新版本",
+            "code": error_code,
+            "error": error_message,
         }
+        if http_status is not None:
+            failure["http_status"] = http_status
+        return failure

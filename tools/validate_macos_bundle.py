@@ -194,6 +194,29 @@ def validate_release_tag() -> str:
     return actual
 
 
+def validate_packaged_update_transport(release_tag: str) -> str:
+    result = subprocess.run(
+        [str(EXECUTABLE), "--check-updates-json"],
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("packaged macOS update transport returned invalid JSON") from exc
+    if result.returncode != 0 or result.stderr or not payload.get("ok"):
+        code = payload.get("code") if isinstance(payload, dict) else None
+        raise RuntimeError(f"packaged macOS update transport failed: {code or 'unknown'}")
+    expected_version = release_tag.removeprefix("v")
+    if payload.get("current_version") != expected_version:
+        raise RuntimeError("packaged macOS update transport used the wrong release identity")
+    return str(payload.get("latest_version") or "")
+
+
 def main() -> int:
     if sys.platform != "darwin" or os.name != "posix":
         raise RuntimeError("macOS bundle validation must run on macOS")
@@ -210,6 +233,7 @@ def main() -> int:
             validate_distribution_signing()
         validate_packaged_askpass()
         release_tag = validate_release_tag()
+        latest_checked_version = validate_packaged_update_transport(release_tag)
         run_bundle_smoke(home, "--show-paths", timeout=20)
         run_bundle_smoke(home, "--gui-smoke", timeout=45)
         profile_path = home / "config" / "profiles" / "macos-bundle-smoke.toml"
@@ -230,6 +254,8 @@ def main() -> int:
                     "notarization_ticket": "passed" if distribution_signing_required else "not-required",
                     "gatekeeper_assessment": "passed" if distribution_signing_required else "not-required",
                     "packaged_askpass": "passed",
+                    "github_update_transport": "passed",
+                    "latest_checked_version": latest_checked_version,
                     "assets_match_source": True,
                     "show_paths_exit": 0,
                     "cocoa_window_smoke_exit": 0,

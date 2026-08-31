@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from vram_radar.models import ConfigError, Profile
-from vram_radar.storage import ProfileStore, SnapshotCache, storage_paths
+from vram_radar.storage import NotificationStateStore, ProfileStore, SnapshotCache, storage_paths
 
 
 PROFILE = {
@@ -26,6 +26,23 @@ PROFILE = {
 
 
 class ModelStorageTests(unittest.TestCase):
+    def test_notification_state_round_trip_is_profile_local_and_bounded_on_load(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = NotificationStateStore(paths, "lab")
+            state = {"sequence": 1, "read_sequence": 0, "events": [{"sequence": 1}]}
+            path = store.save(state)
+            self.assertEqual(store.load()["events"], [{"sequence": 1}])
+            path.write_bytes(b"x" * (NotificationStateStore.MAX_BYTES + 1))
+            self.assertEqual(store.load(), {})
+
+    def test_notification_state_recovers_from_non_utf8_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = NotificationStateStore(storage_paths(Path(temporary)), "lab")
+            store.path.parent.mkdir(parents=True, exist_ok=True)
+            store.path.write_bytes(b"\xff\xfe\x00")
+            self.assertEqual(store.load(), {})
+
     def test_profile_round_trip_uses_explicit_home(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = storage_paths(Path(temporary))

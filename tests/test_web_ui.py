@@ -49,6 +49,25 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.mark_task_completion_alerts_read", self.javascript)
         self.assertIn("task-watch-toggle", self.javascript)
 
+    def test_notification_center_is_persistent_unified_and_always_visible(self):
+        bell_start = self.markup.index('id="task-alert-indicator"')
+        bell_markup = self.markup[bell_start:self.markup.index('>', bell_start)]
+        self.assertNotIn(" hidden", bell_markup)
+        self.assertIn('id="notification-center"', self.markup)
+        self.assertIn('id="notification-list"', self.markup)
+        self.assertIn("snapshot?.notifications", self.javascript)
+        self.assertIn("api.mark_notifications_read", self.javascript)
+        self.assertIn("favorite_gpu_available", self.javascript)
+        self.assertIn("resource_available", self.javascript)
+
+    def test_task_watches_support_bulk_removal_and_explicit_other_user_selection(self):
+        self.assertIn("api.clear_task_completion_watches", self.javascript)
+        self.assertIn("clear-task-watches", self.javascript)
+        self.assertIn("data-task-owner", self.javascript)
+        self.assertIn("data-task-owner-scope", self.javascript)
+        self.assertNotIn("if (!mine) return '';", self.javascript)
+        self.assertIn("其他用户的任务不会自动关注", self.markup)
+
     def test_connection_type_defaults_to_auto_with_manual_fallback(self):
         self.assertIn('<option value="auto">自动识别（推荐）</option>', self.markup)
         self.assertIn("auto_detect_backend: selectedBackend === 'auto'", self.javascript)
@@ -770,7 +789,7 @@ class WebUiContractTests(unittest.TestCase):
         ]
         body_start = editor_template.index('<div class="server-editor-body">')
         body_end = editor_template.rindex('</div>')
-        self.assertLess(body_start, editor_template.index('<div class="field-grid">'))
+        self.assertLess(body_start, editor_template.index('<div class="field-grid server-primary-fields">'))
         self.assertLess(editor_template.index('<details class="server-editor-more">'), body_end)
         self.assertLess(editor_template.index('<details class="ssh-key-setup">'), body_end)
         self.assertIn('<details class="server-editor-more">', self.markup)
@@ -783,6 +802,13 @@ class WebUiContractTests(unittest.TestCase):
         for selector in (".settings-section", ".server-editor-more", ".server-editor-more-body"):
             self.assertIn(selector, self.styles)
         self.assertIn("if (editor && !options.focusDragHandle) editor.open = true", self.javascript)
+
+    def test_server_editor_primary_fields_share_aligned_rows(self):
+        self.assertIn('class="field-grid server-primary-fields"', self.markup)
+        self.assertIn(".field-grid > label:not(.check-label) { align-content: start; }", self.styles)
+        self.assertIn(".primary-help { grid-column: 1 / -1;", self.styles)
+        benchmark = (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8")
+        self.assertIn("settings_primary_connection_fields_align", benchmark)
 
     def test_server_editor_exposes_config_source_and_preserves_hidden_advanced_fields(self):
         self.assertIn('data-field="ssh_config_file"', self.markup)

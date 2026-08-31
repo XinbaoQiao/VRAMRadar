@@ -106,9 +106,10 @@ must approve the app.
 
 The stable GitHub workflow builds each architecture on a native runner and
 requires the complete test suite, strict bundle code verification, source asset
-matching, packaged askpass exchange, Cocoa smoke, and exact architecture
-checks. Version 0.6.1 is distributed without an Apple Developer ID signature
-or Apple notarization, so Gatekeeper may require Finder's right-click **Open**
+matching, packaged askpass exchange, a packaged GitHub update-transport probe,
+Cocoa smoke, and exact architecture checks. Version 0.8.4 is distributed
+without an Apple Developer ID signature or Apple notarization, so Gatekeeper
+may require Finder's right-click **Open**
 confirmation on first launch. The maintained `tools/sign_notarize_macos.sh`
 path remains available for a future credentialed release, and
 `VRAM_RADAR_REQUIRE_DISTRIBUTION_SIGNING=1` retains the stronger Developer ID,
@@ -120,4 +121,4 @@ Apple Silicon, and Intel artifacts all pass. The two validated native apps are
 then placed together in one public macOS ZIP. The final ZIP is extracted and
 the selected app is launched and fully validated again on both native runner
 architectures. A missing or failed architecture blocks the entire release;
-version 0.6.1 does not claim notarization.
+version 0.8.4 does not claim notarization.
