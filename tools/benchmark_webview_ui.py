@@ -623,6 +623,14 @@ BENCHMARK_JAVASCRIPT = r"""
       && Math.abs(aliasBounds.top - hostBounds.top) < 0.5
       && Math.abs(aliasBounds.height - hostBounds.height) < 0.5
       && Math.abs(primaryHelpBounds.left - primaryGridBounds.left) < 0.5;
+    const primaryFieldGeometry = {
+      display_name: {top: displayNameBounds.top, height: displayNameBounds.height},
+      backend: {top: backendBounds.top, height: backendBounds.height},
+      ssh_alias: {top: aliasBounds.top, height: aliasBounds.height},
+      host: {top: hostBounds.top, height: hostBounds.height},
+      help_left: primaryHelpBounds.left,
+      grid_left: primaryGridBounds.left,
+    };
     const editorBodiesOwnAllControls = editors.every(editor => {
       const body = editor.querySelector(':scope > .server-editor-body');
       return Boolean(
@@ -827,6 +835,7 @@ BENCHMARK_JAVASCRIPT = r"""
         editor_count: editors.length,
         unique_editor_ids: new Set(editorIds).size,
         dialog_dom_nodes: settingsDomNodes,
+        primary_field_geometry: primaryFieldGeometry,
       },
       js_heap: {
         before: heapBefore,

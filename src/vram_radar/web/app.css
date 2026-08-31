@@ -673,6 +673,7 @@ details[open] > summary > .summary-action .when-open { display: inline; }
 .server-command-setting small { color: var(--muted); font-size: var(--font-caption); line-height: 1.5; }
 .editor-help { color: var(--muted); font-size: var(--font-small); margin: 8px 0 0; }
 .server-primary-fields { align-items: start; }
+.server-primary-fields input, .server-primary-fields select { height: 38px; }
 .primary-help { grid-column: 1 / -1; margin-top: -2px; padding-left: 0; }
 .connection-test-result { display: grid; gap: 7px; margin-top: 10px; padding: 10px 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--font-small); }
 .connection-test-result > strong { color: var(--text); }

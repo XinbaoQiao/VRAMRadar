@@ -806,6 +806,7 @@ class WebUiContractTests(unittest.TestCase):
     def test_server_editor_primary_fields_share_aligned_rows(self):
         self.assertIn('class="field-grid server-primary-fields"', self.markup)
         self.assertIn(".field-grid > label:not(.check-label) { align-content: start; }", self.styles)
+        self.assertIn(".server-primary-fields input, .server-primary-fields select { height: 38px; }", self.styles)
         self.assertIn(".primary-help { grid-column: 1 / -1;", self.styles)
         benchmark = (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8")
         self.assertIn("settings_primary_connection_fields_align", benchmark)
