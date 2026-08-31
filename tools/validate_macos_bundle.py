@@ -194,7 +194,7 @@ def validate_release_tag() -> str:
     return actual
 
 
-def validate_packaged_update_transport(release_tag: str) -> str:
+def validate_packaged_update_transport(release_tag: str) -> tuple[str, str]:
     result = subprocess.run(
         [str(EXECUTABLE), "--check-updates-json"],
         cwd=ROOT,
@@ -210,11 +210,16 @@ def validate_packaged_update_transport(release_tag: str) -> str:
         raise RuntimeError("packaged macOS update transport returned invalid JSON") from exc
     if result.returncode != 0 or result.stderr or not payload.get("ok"):
         code = payload.get("code") if isinstance(payload, dict) else None
+        allow_final_package_rate_limit = (
+            os.environ.get("VRAM_RADAR_ALLOW_FINAL_PACKAGE_RATE_LIMIT") == "1"
+        )
+        if code == "update_rate_limited" and allow_final_package_rate_limit:
+            return "", "rate-limited-after-native-pass"
         raise RuntimeError(f"packaged macOS update transport failed: {code or 'unknown'}")
     expected_version = release_tag.removeprefix("v")
     if payload.get("current_version") != expected_version:
         raise RuntimeError("packaged macOS update transport used the wrong release identity")
-    return str(payload.get("latest_version") or "")
+    return str(payload.get("latest_version") or ""), "passed"
 
 
 def main() -> int:
@@ -233,7 +238,9 @@ def main() -> int:
             validate_distribution_signing()
         validate_packaged_askpass()
         release_tag = validate_release_tag()
-        latest_checked_version = validate_packaged_update_transport(release_tag)
+        latest_checked_version, update_transport_status = validate_packaged_update_transport(
+            release_tag
+        )
         run_bundle_smoke(home, "--show-paths", timeout=20)
         run_bundle_smoke(home, "--gui-smoke", timeout=45)
         profile_path = home / "config" / "profiles" / "macos-bundle-smoke.toml"
@@ -254,7 +261,7 @@ def main() -> int:
                     "notarization_ticket": "passed" if distribution_signing_required else "not-required",
                     "gatekeeper_assessment": "passed" if distribution_signing_required else "not-required",
                     "packaged_askpass": "passed",
-                    "github_update_transport": "passed",
+                    "github_update_transport": update_transport_status,
                     "latest_checked_version": latest_checked_version,
                     "assets_match_source": True,
                     "show_paths_exit": 0,

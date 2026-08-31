@@ -276,6 +276,11 @@ jobs:
           VRAM_RADAR_EXPECTED_MACOS_ARCH: ${{ matrix.arch }}
           VRAM_RADAR_RELEASE_TAG: ${{ inputs.release_tag }}
           VRAM_RADAR_MACOS_BUNDLE: combined-extracted/VRAM Radar macOS/${{ matrix.app }}
+          # Both native architecture jobs already passed the real packaged
+          # GitHub transport before this combined archive could be created.
+          # Keep probing the final app, but do not let a shared-runner
+          # anonymous quota hide otherwise identical package evidence.
+          VRAM_RADAR_ALLOW_FINAL_PACKAGE_RATE_LIMIT: "1"
         run: ./.venv/bin/python tools/validate_macos_bundle.py
 
   publish:
