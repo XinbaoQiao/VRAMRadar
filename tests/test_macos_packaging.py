@@ -68,6 +68,7 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn('"rate-limited-requires-sibling-proof"', self.validator)
         self.assertIn('"--check-updates-json"', self.validator)
         self.assertIn('"github_update_transport": update_transport_status', self.validator)
+        self.assertIn('"expected_architectures": sorted(architectures)', self.validator)
         self.assertIn('ASKPASS_EXECUTABLE = CONTENTS / "MacOS" / "VRAMRadarAskPass"', self.validator)
         self.assertIn("executable_architectures(EXECUTABLE)", self.validator)
         self.assertIn("executable_architectures(ASKPASS_EXECUTABLE)", self.validator)
