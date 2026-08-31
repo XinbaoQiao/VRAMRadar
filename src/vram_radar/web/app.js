@@ -1810,7 +1810,16 @@ function serverCardRenderSignature(server, index) {
     error.message,
     favoriteServerIds.has(server.server_id),
     serverIsEnabled(server.server_id),
+    taskCompletionWatchRenderSignature(server.server_id),
   ]);
+}
+
+function taskCompletionWatchRenderSignature(serverId) {
+  return (currentProfile?.task_completion_watches || [])
+    .filter(watch => watch.server_id === serverId)
+    .map(watch => watch.task_key)
+    .sort()
+    .join('\u001f');
 }
 
 function serverCardElement(server, index) {

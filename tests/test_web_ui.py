@@ -48,6 +48,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.set_task_completion_watch", self.javascript)
         self.assertIn("api.mark_task_completion_alerts_read", self.javascript)
         self.assertIn("task-watch-toggle", self.javascript)
+        self.assertIn("function taskCompletionWatchRenderSignature(serverId)", self.javascript)
+        self.assertIn("taskCompletionWatchRenderSignature(server.server_id)", self.javascript)
 
     def test_notification_center_is_persistent_unified_and_always_visible(self):
         bell_start = self.markup.index('id="task-alert-indicator"')
@@ -1021,12 +1023,29 @@ class WebUiContractTests(unittest.TestCase):
             self.assertIn(contract, self.javascript)
         for selector in (
             ".scheduler-node-table { min-width: 1040px; table-layout: fixed; }",
-            ".scheduler-node-table .node-memory-column { width: 27%; }",
+            ".scheduler-node-table .node-memory-column { width: 25%; }",
+            ".scheduler-node-table .node-state-column { width: 12%; }",
+            ".scheduler-node-table th:last-child, .scheduler-node-table td:last-child { white-space: normal; }",
             ".copyable-cell { vertical-align: middle; }",
             ".copyable-value { max-width: 100%; display: inline-flex",
         ):
             self.assertIn(selector, self.styles)
         self.assertNotIn(".copyable-cell { display: flex", self.styles)
+
+    def test_scheduler_node_translation_is_generic_and_covers_all_state_labels(self):
+        self.assertIn("[/^(.+) · ([\\d,.]+) GiB\\/卡$/, '$1 · $2 GiB/GPU']", self.localization)
+        for source, target in (
+            ("已分配", "Allocated"),
+            ("即将完成", "Completing"),
+            ("不可用", "Unavailable"),
+            ("排空中", "Draining"),
+            ("正在排空", "Draining"),
+            ("故障", "Failed"),
+            ("部分占用", "Partially allocated"),
+            ("已保留", "Reserved"),
+            ("维护中", "Maintenance"),
+        ):
+            self.assertIn(f"['{source}', '{target}']", self.localization)
 
     def test_large_server_fleet_keeps_main_paging_independent_from_navigator_filters(self):
         self.assertIn("const SERVER_FLEET_PAGE_SIZE = 50", self.javascript)

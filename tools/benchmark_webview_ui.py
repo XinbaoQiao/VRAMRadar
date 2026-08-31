@@ -347,12 +347,26 @@ BENCHMARK_JAVASCRIPT = r"""
       if (index === 0) {
         server.backend = 'slurm_ssh';
         server.view_kind = 'scheduler';
-        server.nodes = [{
-          node: 'gpu-a100-01', partition: 'gpu-large', gpu_type: 'A100-80G',
-          memory_per_gpu_gib: 80, total_gpus: 8, free_gpus: 4,
-          allocated_gpus: 4, total_vram_gib: 640, free_vram_gib: 320,
-          tasks: ['1001'], state: 'mix',
-        }];
+        server.nodes = [
+          {
+            node: 'gpu-r2080-01', partition: 'gpu-medium', gpu_type: 'R2080 × 8',
+            memory_per_gpu_gib: 12, total_gpus: 8, free_gpus: 0,
+            allocated_gpus: 8, total_vram_gib: 96, free_vram_gib: 0,
+            tasks: ['1001'], state: 'alloc',
+          },
+          {
+            node: 'gpu-titanx-01', partition: 'gpu-medium', gpu_type: 'TITANX × 8',
+            memory_per_gpu_gib: 12, total_gpus: 8, free_gpus: 4,
+            allocated_gpus: 4, total_vram_gib: 96, free_vram_gib: 48,
+            tasks: [], state: 'mix',
+          },
+          {
+            node: 'gpu-h100-01', partition: 'gpu-large', gpu_type: 'H100-80G',
+            memory_per_gpu_gib: 80, total_gpus: 8, free_gpus: 8,
+            allocated_gpus: 0, total_vram_gib: 640, free_vram_gib: 640,
+            tasks: [], state: 'idle',
+          },
+        ];
         server.tasks = {
           current_user: 'benchmark', history_supported: true, history_window_hours: 24,
           counts: {PENDING: 1, RUNNING: 1, COMPLETED: 1},
@@ -389,6 +403,7 @@ BENCHMARK_JAVASCRIPT = r"""
       navigator_side: 'right',
       close_behavior: 'exit',
       ui_language: 'zh-CN',
+      task_completion_watches: [],
       servers: servers.map(server => ({
         id: server.server_id,
         display_name: server.display_name,
@@ -495,6 +510,30 @@ BENCHMARK_JAVASCRIPT = r"""
     const repeatWall = performance.now() - repeatStart;
     const repeatMetricsAfter = metricCopy();
     const firstCardAfterRepeatedRender = ui.list.querySelector('.server-card');
+
+    const taskWatchButtonBefore = ui.list.querySelector('[data-task-key].task-watch-toggle');
+    const taskWatchKey = taskWatchButtonBefore?.dataset.taskKey || '';
+    currentProfile = {
+      ...currentProfile,
+      profile_revision: currentProfile.profile_revision + 1,
+      task_completion_watches: [{
+        server_id: 'synthetic-000', task_key: taskWatchKey, task_kind: 'slurm',
+        task_id: '1001', label: 'training', owner: 'benchmark', owner_scope: 'mine',
+      }],
+    };
+    render(snapshot);
+    const taskWatchButtonAfterAdd = ui.list.querySelector(`[data-task-key="${taskWatchKey}"]`);
+    currentProfile = {
+      ...currentProfile,
+      profile_revision: currentProfile.profile_revision + 1,
+      task_completion_watches: [],
+    };
+    render(snapshot);
+    const taskWatchButtonAfterRemove = ui.list.querySelector(`[data-task-key="${taskWatchKey}"]`);
+    const taskWatchStateRepaintsImmediately = Boolean(taskWatchKey)
+      && taskWatchButtonBefore?.getAttribute('aria-pressed') === 'false'
+      && taskWatchButtonAfterAdd?.getAttribute('aria-pressed') === 'true'
+      && taskWatchButtonAfterRemove?.getAttribute('aria-pressed') === 'false';
 
     const appShell = document.querySelector('.app-shell');
     const mainContent = document.querySelector('main');
@@ -719,6 +758,10 @@ BENCHMARK_JAVASCRIPT = r"""
     openSettings({forceNormal: true});
     window.VRAMRadarI18n.setLanguage('en');
     renderNotificationCenter(currentSnapshot);
+    const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
+      .map(row => row.innerText);
+    const schedulerStateCellsFit = [...document.querySelectorAll('.scheduler-node-table td:last-child')]
+      .every(cell => cell.scrollWidth <= cell.clientWidth + 1);
     const untranslatedChinese = [];
     const translationWalker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
     let translationNode = translationWalker.nextNode();
@@ -749,6 +792,7 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
+      task_watch_state_repaints_without_server_refresh: taskWatchStateRepaintsImmediately,
       navigator_right_collapsed_track_is_compact: rightCollapsedTrackWidth <= 50.5 && rightCollapsedTrackWidth >= rightRailBounds.width,
       navigator_left_collapsed_track_is_compact: leftCollapsedTrackWidth <= 50.5 && leftCollapsedTrackWidth >= rightRailBounds.width,
       navigator_expansion_does_not_reflow_main: Math.abs(rightExpandedMainBounds.width - rightCollapsedMainBounds.width) < 0.5
@@ -777,6 +821,9 @@ BENCHMARK_JAVASCRIPT = r"""
       settings_cross_page_password_is_preserved_outside_profile: collectedPasswords['synthetic-000'] === 'benchmark-secret' && !JSON.stringify(collectedProfile).includes('benchmark-secret'),
       settings_close_releases_editor_dom: closedEditorCount === 0,
       english_interface_has_no_untranslated_chinese: untranslatedChinese.length === 0,
+      english_scheduler_rows_cover_generic_gpu_models_and_states: englishSchedulerRows.some(row => row.includes('R2080 × 8 · 12 GiB/GPU') && row.includes('Allocated'))
+        && englishSchedulerRows.some(row => row.includes('TITANX × 8 · 12 GiB/GPU') && row.includes('Partially allocated')),
+      scheduler_state_cells_do_not_overflow: schedulerStateCellsFit,
     };
     return JSON.stringify({
       ok: Object.values(assertions).every(Boolean),

@@ -324,13 +324,14 @@ td { font-size: 13.5px; line-height: 1.42; font-variant-numeric: tabular-nums; }
 .scheduler-node-table { min-width: 1040px; table-layout: fixed; }
 .scheduler-node-table .node-name-column { width: 15%; }
 .scheduler-node-table .node-partition-column { width: 12%; }
-.scheduler-node-table .node-gpu-column { width: 18%; }
-.scheduler-node-table .node-free-column { width: 13%; }
-.scheduler-node-table .node-memory-column { width: 27%; }
+.scheduler-node-table .node-gpu-column { width: 17%; }
+.scheduler-node-table .node-free-column { width: 12%; }
+.scheduler-node-table .node-memory-column { width: 25%; }
 .scheduler-node-table .node-tasks-column { width: 7%; }
-.scheduler-node-table .node-state-column { width: 8%; }
+.scheduler-node-table .node-state-column { width: 12%; }
 .scheduler-node-table th, .scheduler-node-table td { min-width: 0; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 .scheduler-node-table td:nth-child(5) { overflow: visible; white-space: normal; }
+.scheduler-node-table th:last-child, .scheduler-node-table td:last-child { white-space: normal; }
 tbody tr:hover { background: color-mix(in srgb, var(--cyan) 3.5%, var(--surface)); }
 tr:last-child td { border-bottom: 0; }
 .mono { font-family: var(--mono-font); font-size: 14px; font-variant-numeric: tabular-nums; }
@@ -482,7 +483,7 @@ tr:last-child td { border-bottom: 0; }
 .task-user { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; }
 .task-user.unknown { color: var(--muted); font-weight: 500; }
 .self-user-tag { display: inline-grid; min-width: 22px; height: 21px; place-items: center; padding: 0 6px; color: var(--cyan-text); background: color-mix(in srgb, var(--cyan) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--cyan) 38%, var(--border)); border-radius: var(--radius-sm); font-size: var(--font-caption); line-height: 1; }
-.node-state { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.node-state { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; white-space: normal; font-size: 13px; font-weight: 600; }
 .node-state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .node-state.idle::before { background: var(--green); }
 .node-state.partial::before { background: var(--cyan); }
