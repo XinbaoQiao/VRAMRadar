@@ -98,7 +98,7 @@ Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 
 
 - Profile、缓存、日志、运行锁和服务器目录都留在当前电脑，不会进入公开安装包。
 - 密码只保存在 Windows Credential Manager 或 macOS Keychain，不写入 Profile、日志、命令行参数或子进程环境。
-- 未知 SSH Host Key 必须显式确认；已经变化的 Host Key 会继续阻止连接。
+- 首次出现的 SSH Host Key 由 OpenSSH 自动保存；已经变化的 Host Key 会继续阻止连接。
 - 监控保持只读；任务提交、GPU 预约和站点策略仍由 Slurm 或现有平台负责。
 
 需要完整实现边界时，可查看[隐私说明](PRIVACY.md)与[服务器可靠性审计](docs/server-reliability-audit-2026-08-29.md)。

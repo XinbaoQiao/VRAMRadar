@@ -278,7 +278,10 @@ def classify_process_error(
         )
     if "host key verification failed" in lower:
         return ConnectorFailure(
-            "host_key_untrusted", "服务器 Host Key 尚未受信任，请先核对指纹", retryable=False, state="security_blocked"
+            "host_key_untrusted",
+            "服务器 Host Key 无法自动保存或验证，请检查 known_hosts 权限与 SSH 配置",
+            retryable=False,
+            state="security_blocked",
         )
     if "invalid -j argument" in lower or "jumphost loop via" in lower:
         return ConnectorFailure(
@@ -577,11 +580,11 @@ def ssh_argv(
     options = login[1:target_index]
     target = login[target_index + 1]
     options.extend(["-o", "ClearAllForwardings=yes"])
-    if accept_new_host_key:
-        # This is only used after an explicit user confirmation. OpenSSH's
-        # accept-new policy records an unknown key but still refuses a changed
-        # key, preserving the important replacement/MITM safety boundary.
-        options.extend(["-o", "StrictHostKeyChecking=accept-new"])
+    # Keep first use independent of the executable or installer directory.
+    # OpenSSH records a previously unknown key in the user's configured
+    # known_hosts file, while accept-new still refuses a changed key. The
+    # argument remains for API compatibility with older callers.
+    options.extend(["-o", "StrictHostKeyChecking=accept-new"])
     if password_auth:
         options.extend(
             [

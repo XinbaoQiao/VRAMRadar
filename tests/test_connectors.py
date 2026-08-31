@@ -664,7 +664,7 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("-F") + 1], str(config))
         self.assertEqual(argv[-2:], ["--", "gpu-alias"])
 
-    def test_accept_new_host_key_is_explicit_and_scoped_to_one_ssh_argv(self):
+    def test_accept_new_host_key_is_default_and_scoped_to_one_ssh_argv(self):
         server = ServerProfile(
             id="a",
             display_name="A",
@@ -675,11 +675,11 @@ class ConnectorTests(unittest.TestCase):
         ordinary = ssh_argv(server, "true")
         confirmed = ssh_argv(server, "true", accept_new_host_key=True)
 
-        self.assertNotIn("StrictHostKeyChecking=accept-new", ordinary)
+        self.assertEqual(ordinary.count("StrictHostKeyChecking=accept-new"), 1)
         self.assertEqual(confirmed.count("StrictHostKeyChecking=accept-new"), 1)
         self.assertLess(
-            confirmed.index("StrictHostKeyChecking=accept-new"),
-            confirmed.index("--"),
+            ordinary.index("StrictHostKeyChecking=accept-new"),
+            ordinary.index("--"),
         )
 
     def test_relative_identity_and_config_paths_share_the_ssh_directory_base(self):

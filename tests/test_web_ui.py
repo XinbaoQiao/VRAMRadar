@@ -643,24 +643,14 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("disabled", error_renderer)
         self.assertNotIn("error.retryable ?", error_renderer)
 
-    def test_unknown_host_key_has_explicit_confirmed_trust_flow(self):
+    def test_unknown_host_key_uses_automatic_accept_new_without_confirmation(self):
         error_renderer = self.javascript[
             self.javascript.index("function renderError"):
             self.javascript.index("function serverGlyph")
         ]
-        self.assertIn("error.code === 'host_key_untrusted'", error_renderer)
-        self.assertIn("trust-server-host-key", error_renderer)
-        self.assertIn("信任并连接", error_renderer)
-        trust_flow = self.javascript[
-            self.javascript.index("async function trustServerHostKey"):
-            self.javascript.index("async function copyRedactedDiagnostics")
-        ]
-        self.assertIn("window.confirm(confirmation)", trust_flow)
-        self.assertIn("await api.trust_host_key(serverId)", trust_flow)
-        self.assertIn("render(await api.get_snapshot())", trust_flow)
-        self.assertNotIn("refresh(true, serverId)", trust_flow)
-        self.assertIn("已有 Host Key 发生变化", trust_flow)
-        self.assertIn("const trustHostKey = event.target.closest('.trust-server-host-key')", self.javascript)
+        self.assertIn("error.code === 'host_key_changed'", error_renderer)
+        self.assertNotIn("trust-server-host-key", self.javascript)
+        self.assertNotIn("function trustServerHostKey", self.javascript)
 
     def test_settings_primary_groups_are_collapsed_progressive_disclosures(self):
         self.assertIn('<details id="profile-settings"', self.markup)

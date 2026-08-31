@@ -85,7 +85,7 @@ Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS
 
 - Server Profiles, caches, logs, locks, and credentials stay on your computer and never enter the public package.
 - Passwords are stored only in Windows Credential Manager or macOS Keychain; they are not written to Profiles, logs, argv, or child-process environments.
-- Unknown SSH Host Keys require an explicit confirmation; changed Host Keys remain blocked.
+- Previously unknown SSH Host Keys are saved through OpenSSH on first use; changed Host Keys remain blocked.
 - Monitoring is read-only. Job submission, reservation, and site policy remain with Slurm or your existing platform.
 
 Read the full [privacy policy](PRIVACY.md) and [server reliability audit](docs/server-reliability-audit-2026-08-29.md) when you need the implementation details.

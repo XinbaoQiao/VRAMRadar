@@ -21,8 +21,11 @@ be created again.
 The default is a per-user installation and does not require administrator
 permission. Interactive Setup always shows **Select Destination Location** so
 the user can confirm or change the exact drive and folder before files are
-written. A different drive is also supported: choose a directory owned by
-your account, such as `D:\Apps\VRAM Radar` or `D:\VRAM Radar`. Windows protects
+written. A different drive is also supported: choose any writable directory
+owned by your account, such as `D:\Download\VRAM Radar`,
+`D:\Apps\VRAM Radar`, or `D:\VRAM Radar`. The selected executable directory
+does not change the Profile or OpenSSH trust location; those remain in the
+user's platform-owned data and SSH directories. Windows protects
 locations such as `D:\Program Files`; to install there, close Setup and launch
 it explicitly with **Run as administrator**. Before replacing any files, Setup
 now verifies that it can create, write, and remove a small probe file in the

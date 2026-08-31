@@ -22,6 +22,8 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("UsePreviousAppDir=yes", self.manifest)
         self.assertIn("UsePreviousTasks=yes", self.manifest)
         self.assertIn("DisableDirPage=no", self.manifest)
+        self.assertIn("D:\\Download\\VRAM Radar", self.guide)
+        self.assertIn("does not change the Profile or OpenSSH trust location", self.guide)
 
     def test_shortcuts_keep_a_stable_executable_and_shell_identity(self) -> None:
         icon_lines = [
