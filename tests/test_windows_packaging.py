@@ -68,6 +68,16 @@ class WindowsPackagingContractTests(unittest.TestCase):
             self.manifest.index("--quit-existing"),
         )
 
+    def test_postinstall_launch_uses_original_user_ssh_context(self) -> None:
+        run_line = next(
+            line for line in self.manifest.splitlines()
+            if line.startswith('Filename: "{app}\\{#MyAppExeName}"')
+        )
+        self.assertIn('WorkingDir: "{app}"', run_line)
+        self.assertIn("runasoriginaluser", run_line)
+        self.assertIn("postinstall", run_line)
+        self.assertIn("skipifsilent", run_line)
+
     def test_packaged_update_validation_cannot_replace_user_install_registration(self) -> None:
         validator = (ROOT / "tools" / "validate_packaged_update.py").read_text(encoding="utf-8")
         helper = (ROOT / "src" / "vram_radar" / "update_helper.py").read_text(encoding="utf-8")

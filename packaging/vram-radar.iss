@@ -1,6 +1,6 @@
 #define MyAppName "VRAM Radar"
 #ifndef MyAppVersion
-#define MyAppVersion "0.8.2"
+#define MyAppVersion "0.8.3"
 #endif
 #define MyAppPublisher "VRAM Radar"
 #define MyAppExeName "VRAMRadar.exe"
@@ -51,7 +51,7 @@ Name: "{autodesktop}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir:
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标："
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "启动 VRAM Radar"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "启动 VRAM Radar"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 function IsValidationInstall: Boolean;
