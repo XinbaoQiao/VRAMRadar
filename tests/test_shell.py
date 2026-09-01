@@ -596,6 +596,42 @@ class ShellApiTests(unittest.TestCase):
         self.assertFalse(invalid["ok"])
         self.assertEqual(invalid["code"], "invalid_notification")
 
+    def test_clear_notifications_removes_history_preserves_sequence_and_persists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            profile = Profile.empty("local")
+            service = Mock()
+            service.snapshot.return_value = {"monitoring": {"paused": False}, "servers": []}
+            api = AppApi(profile, store=Mock(), paths=paths, service=service)
+
+            api.show_notification("任务已完成", "training 已结束。", "general")
+            before = api.get_snapshot()["notifications"]
+            self.assertEqual(before["latest_sequence"], 1)
+            self.assertEqual(len(before["events"]), 1)
+
+            cleared = api.clear_notifications()
+            after = api.get_snapshot()["notifications"]
+            self.assertEqual(cleared, {
+                "ok": True,
+                "unread_count": 0,
+                "event_count": 0,
+                "latest_sequence": 1,
+            })
+            self.assertEqual(after["events"], [])
+            self.assertEqual(after["unread_count"], 0)
+            self.assertEqual(after["latest_sequence"], 1)
+            self.assertEqual(after["read_sequence"], 1)
+
+            persisted = NotificationStateStore(paths, profile.id).load()
+            self.assertEqual(persisted["events"], [])
+            self.assertEqual(persisted["sequence"], 1)
+            self.assertEqual(persisted["read_sequence"], 1)
+
+            api.show_notification("资源可用", "H100 已空闲", "general")
+            next_snapshot = api.get_snapshot()["notifications"]
+            self.assertEqual(next_snapshot["events"][0]["sequence"], 2)
+            self.assertEqual(next_snapshot["unread_count"], 1)
+
     def test_owned_task_completion_is_default_on_and_exposes_unread_state(self):
         profile = Profile.from_dict({
             "schema_version": 1,

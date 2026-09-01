@@ -14,6 +14,7 @@ const ui = {
   notificationCenter: document.getElementById('notification-center'),
   notificationList: document.getElementById('notification-list'),
   markNotificationsRead: document.getElementById('mark-notifications-read'),
+  clearNotifications: document.getElementById('clear-notifications'),
   settings: document.getElementById('settings-button'),
   dialog: document.getElementById('settings-dialog'),
   form: document.getElementById('settings-form'),
@@ -330,9 +331,28 @@ function memoryTrack(used, total, label = '显存占用率', valueLabel = '已�
   return `<progress class="memory-track ${tone}" role="progressbar" max="100" value="${percent}" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${escapeHtml(valueLabel)} ${percent}%">${percent}%</progress>`;
 }
 
+function renderCpuOverview(server) {
+  const cpu = server.cpu;
+  if (!cpu || typeof cpu !== 'object') return '';
+  const logicalCores = Number(cpu.logical_cores);
+  const hasCores = Number.isInteger(logicalCores) && logicalCores > 0;
+  const loadAverage = Array.isArray(cpu.load_average)
+    ? cpu.load_average.slice(0, 3).map(Number)
+    : [];
+  const hasLoadAverage = loadAverage.length === 3
+    && loadAverage.every(value => Number.isFinite(value) && value >= 0);
+  const coreLabel = hasCores
+    ? `${number(logicalCores)} ${localizedText('个逻辑核心')}`
+    : localizedText('逻辑核心未知');
+  const loadLabel = hasLoadAverage
+    ? loadAverage.map(value => number(value)).join(' / ')
+    : localizedText('不可用');
+  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong></div><div class="cpu-overview-load"><span>${escapeHtml(localizedText('系统负载（1/5/15 分钟）'))}</span><strong>${escapeHtml(loadLabel)}</strong></div></section>`;
+}
+
 function renderLiveTable(server) {
   const memoryTable = `<div class="table-wrap" role="region" aria-label="GPU 实时显存，可横向滚动"><table><caption class="sr-only">GPU 实时显存</caption><thead><tr><th scope="col">GPU</th><th scope="col">卡型</th><th scope="col">已用显存</th><th scope="col">空闲显存</th><th scope="col">利用率</th><th scope="col">温度</th></tr></thead><tbody>${(server.gpus || []).map(gpu => `<tr><td>GPU ${escapeHtml(gpu.gpu_index)}</td><td>${escapeHtml(gpu.gpu_type)}</td><td class="memory-cell"><div class="memory-values"><strong>${number(gpu.memory_used_gib)} GiB</strong><span>总量 ${number(gpu.memory_total_gib)} GiB</span></div>${memoryTrack(gpu.memory_used_gib, gpu.memory_total_gib)}</td><td>${number(gpu.memory_free_gib)} GiB</td><td>${gpu.utilization_percent == null ? '未知' : `${number(gpu.utilization_percent)}%`}</td><td>${gpu.temperature_c == null ? '未知' : `${number(gpu.temperature_c)} °C`}</td></tr>`).join('')}</tbody></table></div>`;
-  return memoryTable + renderDirectProcessModule(server);
+  return memoryTable + renderCpuOverview(server) + renderDirectProcessModule(server);
 }
 
 function taskBadge(state, count = null, label = null) {
@@ -470,6 +490,14 @@ function formatElapsedSeconds(value) {
   return units.slice(0, 2).join('');
 }
 
+function formatCpuPercent(value) {
+  if (value == null || value === '') return localizedText('不可用');
+  const cpuPercent = Number(value);
+  return Number.isFinite(cpuPercent) && cpuPercent >= 0
+    ? `${number(cpuPercent)}%`
+    : localizedText('不可用');
+}
+
 function renderProcessName(process) {
   const preview = String(process.command_preview || '').trim();
   const command = preview
@@ -488,7 +516,7 @@ function renderProcessAllocations(process) {
 
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
@@ -1241,7 +1269,7 @@ function notificationEventTitle(event) {
   if (event.kind === 'favorite_gpu_available') return localizedText('收藏 GPU 已可用');
   if (event.kind === 'resource_available') return localizedText('显存雷达：资源可用');
   if (event.kind === 'update_available') return localizedText('发现新版本');
-  return String(event.title || notificationKindLabel(event.kind));
+  return localizedText(String(event.title || notificationKindLabel(event.kind)));
 }
 
 function notificationEventMessage(event) {
@@ -1259,7 +1287,7 @@ function notificationEventMessage(event) {
       ? `VRAM Radar ${event.latest_version} is ready to download.`
       : `VRAM Radar ${event.latest_version} 已可下载。`;
   }
-  return String(event.message || '');
+  return localizedText(String(event.message || ''));
 }
 
 function renderNotificationCenter(snapshot) {
@@ -1273,8 +1301,9 @@ function renderNotificationCenter(snapshot) {
         : '';
       return `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p>${updateAction}</article>`;
     }).join('')
-    : '<div class="notification-empty">暂无通知</div>';
+    : `<div class="notification-empty">${escapeHtml(localizedText('暂无通知'))}</div>`;
   ui.markNotificationsRead.disabled = Number(state.unread_count || 0) <= 0;
+  ui.clearNotifications.disabled = events.length === 0;
 }
 
 function renderTaskAlertIndicator(snapshot) {
@@ -3392,6 +3421,31 @@ async function markAllNotificationsRead() {
   renderTaskAlertIndicator(currentSnapshot);
 }
 
+async function clearAllNotifications() {
+  if (!currentSnapshot?.notifications || !api?.clear_notifications) return;
+  ui.clearNotifications.disabled = true;
+  try {
+    const result = await api.clear_notifications();
+    if (!result?.ok) throw new Error(result?.error || '清空通知失败');
+    const latestSequence = Number(result.latest_sequence ?? currentSnapshot.notifications.latest_sequence ?? 0);
+    currentSnapshot.notifications.events = [];
+    currentSnapshot.notifications.unread_count = 0;
+    currentSnapshot.notifications.latest_sequence = latestSequence;
+    currentSnapshot.notifications.read_sequence = latestSequence;
+    if (currentSnapshot.task_completion_alerts) {
+      currentSnapshot.task_completion_alerts.events = [];
+      currentSnapshot.task_completion_alerts.unread_count = 0;
+      currentSnapshot.task_completion_alerts.latest_sequence = latestSequence;
+    }
+    renderTaskAlertIndicator(currentSnapshot);
+    renderNotificationCenter(currentSnapshot);
+    showToast(localizedText('通知已清空'));
+  } catch (error) {
+    showToast(localizedText(error.message || String(error)));
+    renderNotificationCenter(currentSnapshot);
+  }
+}
+
 async function setNotificationCenterOpen(open) {
   ui.notificationCenter.hidden = !open;
   ui.taskAlertIndicator.setAttribute('aria-expanded', String(open));
@@ -3611,6 +3665,7 @@ ui.taskAlertIndicator.addEventListener('click', () => {
   void setNotificationCenterOpen(ui.notificationCenter.hidden);
 });
 ui.markNotificationsRead.addEventListener('click', () => void markAllNotificationsRead());
+ui.clearNotifications.addEventListener('click', () => void clearAllNotifications());
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !ui.notificationCenter.hidden) {
     void setNotificationCenterOpen(false);

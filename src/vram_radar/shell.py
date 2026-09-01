@@ -1659,6 +1659,21 @@ class AppApi:
         self._persist_notification_state()
         return {"ok": True, "unread_count": 0}
 
+    def clear_notifications(self) -> dict[str, Any]:
+        """Clear notification history while preserving lifecycle baselines."""
+
+        with self._task_alert_state_lock:
+            self._notification_events.clear()
+            latest_sequence = self._notification_sequence
+            self._notification_read_sequence = latest_sequence
+        self._persist_notification_state()
+        return {
+            "ok": True,
+            "unread_count": 0,
+            "event_count": 0,
+            "latest_sequence": latest_sequence,
+        }
+
     def mark_task_completion_alerts_read(self) -> dict[str, Any]:
         """Compatibility bridge for v0.8.3 web assets."""
 

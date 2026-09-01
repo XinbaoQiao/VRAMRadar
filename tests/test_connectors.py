@@ -53,6 +53,8 @@ class ConnectorTests(unittest.TestCase):
         metadata: dict[str, str] | None = None,
         process_supported: bool = True,
         home_directory: str = "/srv/vram-radar-account",
+        cpu_count: int | None = None,
+        cpu_load: str | None = None,
     ) -> str:
         encode = lambda value: value.encode("utf-8").hex()
         lines = [
@@ -61,6 +63,8 @@ class ConnectorTests(unittest.TestCase):
             "CURRENT_UID=1001",
             f"CURRENT_USER_HEX={encode('alice')}",
             f"HOME_HEX={encode(home_directory)}",
+            *([f"CPU_COUNT={cpu_count}"] if cpu_count is not None else []),
+            *([f"CPU_LOAD_HEX={encode(cpu_load)}"] if cpu_load is not None else []),
             f"GPU_HEX={encode(gpu_rows)}",
             f"PROCESS_A_SUPPORTED={int(process_supported)}",
             f"PROCESS_A_HEX={encode(process_a)}",
@@ -99,9 +103,11 @@ class ConnectorTests(unittest.TestCase):
             gpu_rows=gpu_rows,
             process_a=process_a,
             process_b=process_b,
+            cpu_count=32,
+            cpu_load="0.42 0.37 0.31",
             metadata={
                 "1234": (
-                    "1234 1001 alice 3661 /opt/python train.py --run-name exp-a "
+                    "1234 1001 alice 3661 12.5 /opt/python train.py --run-name exp-a "
                     f"--api-key={canary} https://bob:password@example.test/data"
                 ),
                 "9999": "9999 1002 bob 10 short-lived",
@@ -123,7 +129,11 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(process["owner_scope"], "mine")
         self.assertEqual(process["name"], "exp-a · train.py")
         self.assertEqual(process["memory_used_gib"], 12.0)
+        self.assertEqual(process["cpu_percent"], 12.5)
         self.assertEqual([item["gpu_index"] for item in process["allocations"]], ["0", "1"])
+        self.assertTrue(snapshot["cpu"]["supported"])
+        self.assertEqual(snapshot["cpu"]["logical_cores"], 32)
+        self.assertEqual(snapshot["cpu"]["load_average"], [0.42, 0.37, 0.31])
         self.assertEqual(snapshot["processes"]["dropped_transient_count"], 1)
         self.assertEqual(snapshot["processes"]["deferred_new_count"], 1)
         serialized = json.dumps(snapshot, ensure_ascii=False)
@@ -133,6 +143,9 @@ class ConnectorTests(unittest.TestCase):
         script = remote.call_args.args[1]
         self.assertIn("--query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory", script)
         self.assertIn("ps -ww", script)
+        self.assertIn("getconf _NPROCESSORS_ONLN", script)
+        self.assertIn("/proc/loadavg", script)
+        self.assertIn("-o pcpu=", script)
         self.assertIn('owner[pid] == current_uid ? 0', script)
         self.assertIn("sort -k1,1n -k2,2n", script)
         self.assertIn("sed -n '1,128p'", script)

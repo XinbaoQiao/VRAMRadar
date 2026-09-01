@@ -388,6 +388,22 @@ BENCHMARK_JAVASCRIPT = r"""
           last_success_at: null, retry_at: null,
           error: {message: 'Authentication failed', code: 'authentication_failed', retryable: false},
         };
+      } else if (index === 3) {
+        server.connection = {
+          state: 'stale', data_origin: 'cache', data_revision: 7,
+          last_success_at: now, retry_at: new Date(Date.now() + 299_000).toISOString(),
+          error: {message: '服务器连接超时', code: 'ssh_timeout', retryable: true},
+        };
+        server.processes.active = [{
+          pid: '7321', user: 'other-user', owner_scope: 'other',
+          name: 'ns2dtime_GNOT_L4_seed2023 · train.py',
+          command_preview: 'python -u train.py --gpu 0', command_truncated: true,
+          allocations: [{gpu_index: 0, memory_used_gib: 2.47}],
+          memory_used_gib: 2.47, cpu_percent: 12.5, elapsed_seconds: 3600, started_at: now,
+        }];
+        server.cpu = {
+          supported: true, logical_cores: 16, load_average: [0.42, 0.37, 0.31], sampled_at: now,
+        };
       }
       return server;
     });
@@ -503,7 +519,9 @@ BENCHMARK_JAVASCRIPT = r"""
       && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'true'
       && ui.notificationList.querySelectorAll('.notification-item').length === 2
       && ui.notificationList.textContent.includes('0.9.0')
-      && ui.notificationList.querySelectorAll('.notification-update-action').length === 1;
+      && ui.notificationList.querySelectorAll('.notification-update-action').length === 1
+      && ui.clearNotifications && !ui.clearNotifications.disabled
+      && ui.clearNotifications.textContent.includes('清空通知');
     document.body.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     const notificationCenterCloses = ui.notificationCenter.hidden
       && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'false';
@@ -796,6 +814,12 @@ BENCHMARK_JAVASCRIPT = r"""
     openSettings({forceNormal: true});
     window.VRAMRadarI18n.setLanguage('en');
     renderNotificationCenter(currentSnapshot);
+    const englishCpuOverview = document.querySelector('#server-card-synthetic-003 .cpu-overview')?.textContent || '';
+    const englishCpuProcess = document.querySelector('#server-card-synthetic-003 .process-table tbody tr')?.textContent || '';
+    const directCpuInformationRendered = englishCpuOverview.includes('16 logical cores')
+      && englishCpuOverview.includes('Load average (1/5/15 min)')
+      && englishCpuOverview.includes('0.42 / 0.37 / 0.31')
+      && englishCpuProcess.includes('12.5%');
     const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
       .map(row => row.innerText);
     const schedulerStateCellsFit = [...document.querySelectorAll('.scheduler-node-table td:last-child')]
@@ -827,6 +851,7 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_preserves_card_identity: firstCard === firstCardAfterRepeatedRender,
       notification_bell_is_always_visible: bellAlwaysVisible,
       notification_center_opens_renders_and_closes: notificationCenterOpens && notificationCenterCloses,
+      notification_center_exposes_clear_action: notificationCenterOpens,
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
@@ -861,6 +886,7 @@ BENCHMARK_JAVASCRIPT = r"""
       settings_cross_page_edit_is_preserved: collectedProfile.servers.length === 120 && collectedProfile.servers[0].display_name === 'Detached editor stays with server zero',
       settings_cross_page_password_is_preserved_outside_profile: collectedPasswords['synthetic-000'] === 'benchmark-secret' && !JSON.stringify(collectedProfile).includes('benchmark-secret'),
       settings_close_releases_editor_dom: closedEditorCount === 0,
+      direct_cpu_information_is_rendered: directCpuInformationRendered,
       english_interface_has_no_untranslated_chinese: untranslatedChinese.length === 0,
       english_scheduler_rows_cover_generic_gpu_models_and_states: englishSchedulerRows.some(row => row.includes('R2080 × 8 · 12 GiB/GPU') && row.includes('Allocated'))
         && englishSchedulerRows.some(row => row.includes('TITANX × 8 · 12 GiB/GPU') && row.includes('Partially allocated')),

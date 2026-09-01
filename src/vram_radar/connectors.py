@@ -916,6 +916,8 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         "PROCESS_B_SUPPORTED",
         "PROCESS_B_HEX",
         "METADATA_LIMIT",
+        "CPU_COUNT",
+        "CPU_LOAD_HEX",
     }
     for raw in lines[1:-1]:
         if raw.startswith("META|"):
@@ -932,7 +934,7 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         fields[key] = value
     # HOME_HEX was added without changing the direct-GPU protocol version so
     # older cached fixtures remain readable. Fresh probes always include it.
-    required = allowed - {"HOME_HEX"}
+    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX"}
     if not required.issubset(fields):
         raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 快照字段", retryable=True)
     if fields["CURRENT_UID"] and not fields["CURRENT_UID"].isdigit():
@@ -944,6 +946,44 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
     if len(metadata) > DIRECT_METADATA_LIMIT:
         raise ConnectorFailure("parse_failed", "服务器返回了过多的进程元数据", retryable=True)
     return fields, metadata
+
+
+def _parse_cpu_snapshot(fields: dict[str, str], *, sampled_at: datetime) -> dict[str, Any] | None:
+    """Parse optional host CPU facts without making GPU collection depend on them."""
+
+    if "CPU_COUNT" not in fields and "CPU_LOAD_HEX" not in fields:
+        return None
+    logical_cores: int | None = None
+    raw_count = fields.get("CPU_COUNT", "").strip()
+    if raw_count.isdigit():
+        candidate = int(raw_count)
+        if 1 <= candidate <= 65_536:
+            logical_cores = candidate
+
+    load_average: list[float] = []
+    if "CPU_LOAD_HEX" in fields:
+        try:
+            raw_load = _decode_hex(fields["CPU_LOAD_HEX"], "CPU 负载", limit=256).split()
+        except ConnectorFailure:
+            raw_load = []
+        if len(raw_load) >= 3:
+            parsed: list[float] = []
+            for value in raw_load[:3]:
+                if not re.fullmatch(r"(?:\d+(?:\.\d*)?|\.\d+)", value):
+                    parsed = []
+                    break
+                number = float(value)
+                if not 0 <= number <= 1_000_000:
+                    parsed = []
+                    break
+                parsed.append(number)
+            load_average = parsed
+    return {
+        "supported": logical_cores is not None or len(load_average) == 3,
+        "logical_cores": logical_cores,
+        "load_average": load_average,
+        "sampled_at": sampled_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+    }
 
 
 def _account_summary(current_user: str, home_directory: str) -> dict[str, str]:
@@ -1526,11 +1566,20 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
     parts = text.strip().split(None, 4)
     if len(parts) < 4 or parts[0] != pid or not parts[1].isdigit() or not parts[3].isdigit():
         return None
+    cpu_percent: float | None = None
+    command = parts[4] if len(parts) == 5 else ""
+    command_parts = command.split(None, 1)
+    if command_parts and re.fullmatch(r"\d+(?:\.\d+)?", command_parts[0]):
+        candidate = float(command_parts[0])
+        if 0 <= candidate <= 1_000_000:
+            cpu_percent = round(candidate, 2)
+            command = command_parts[1] if len(command_parts) == 2 else ""
     return {
         "uid": parts[1],
         "user": parts[2],
         "elapsed_seconds": int(parts[3]),
-        "command": parts[4] if len(parts) == 5 else "",
+        "cpu_percent": cpu_percent,
+        "command": command,
     }
 
 
@@ -1615,6 +1664,7 @@ def _build_direct_processes(
                 "command_truncated": command_truncated,
                 "command_visibility": command_visibility,
                 "elapsed_seconds": elapsed_seconds,
+                "cpu_percent": metadata["cpu_percent"] if metadata else None,
                 "started_at": started_at,
                 "metadata_visibility": "full" if metadata else "none",
                 "allocations": allocations,
@@ -1661,6 +1711,24 @@ if [ -z "$home_dir" ] && command -v getent >/dev/null 2>&1; then
     home_dir=$(getent passwd "$(id -u)" 2>/dev/null | awk -F: '{{print $6; exit}}') || true
 fi
 printf 'HOME_HEX='; printf '%s' "$home_dir" | hex_encode; printf '\\n'
+cpu_count=''
+if command -v getconf >/dev/null 2>&1; then
+    cpu_count=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
+fi
+if [ -z "$cpu_count" ] && command -v nproc >/dev/null 2>&1; then
+    cpu_count=$(nproc 2>/dev/null || true)
+fi
+case "$cpu_count" in
+    ''|*[!0-9]*) cpu_count='';;
+esac
+printf 'CPU_COUNT=%s\\n' "$cpu_count"
+cpu_load=''
+if [ -r /proc/loadavg ]; then
+    cpu_load=$(awk '{{print $1" "$2" "$3}}' /proc/loadavg 2>/dev/null || true)
+elif command -v sysctl >/dev/null 2>&1; then
+    cpu_load=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{{}}' || true)
+fi
+printf 'CPU_LOAD_HEX='; printf '%s' "$cpu_load" | hex_encode; printf '\\n'
 gpu_rows=$(nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu --format=csv,noheader,nounits)
 printf 'GPU_HEX='; printf '%s' "$gpu_rows" | hex_encode; printf '\\n'
 process_a=''
@@ -1689,7 +1757,7 @@ pids=$(
     ' | sort -k1,1n -k2,2n | sed -n '1,{DIRECT_METADATA_LIMIT}p' | awk '{{ print $2 }}'
 )
 for pid in $pids; do
-    if meta=$(ps -ww -p "$pid" -o pid= -o uid= -o user:64= -o etimes= -o args= 2>/dev/null); then
+    if meta=$(ps -ww -p "$pid" -o pid= -o uid= -o user:64= -o etimes= -o pcpu= -o args= 2>/dev/null); then
         printf 'META|%s|OK|' "$pid"; printf '%s' "$meta" | hex_encode; printf '\\n'
     else
         printf 'META|%s|ERR|\\n' "$pid"
@@ -1712,6 +1780,7 @@ printf '{DIRECT_PROTOCOL_END}\\n'
     gpu_text = _decode_hex(fields["GPU_HEX"], "GPU 数据")
     gpus = parse_nvidia_smi_rows(gpu_text)
     sampled_at = datetime.now(timezone.utc)
+    cpu = _parse_cpu_snapshot(fields, sampled_at=sampled_at)
     processes: dict[str, Any]
     if fields["PROCESS_A_SUPPORTED"] == "1" and fields["PROCESS_B_SUPPORTED"] == "1":
         try:
@@ -1741,7 +1810,7 @@ printf '{DIRECT_PROTOCOL_END}\\n'
             "active": [],
             "warning": "当前驱动未提供 GPU 进程快照；显存数据仍会正常刷新。",
         }
-    return {
+    result = {
         "server_id": server.id,
         "display_name": server.display_name,
         "backend": server.backend,
@@ -1754,6 +1823,9 @@ printf '{DIRECT_PROTOCOL_END}\\n'
         "processes": processes,
         "account": _account_summary(current_user, home_directory),
     }
+    if cpu is not None:
+        result["cpu"] = cpu
+    return result
 
 
 def parse_node_rows(text: str) -> list[dict[str, Any]]:

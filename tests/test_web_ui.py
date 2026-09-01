@@ -57,14 +57,42 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn(" hidden", bell_markup)
         self.assertIn('id="notification-center"', self.markup)
         self.assertIn('id="notification-list"', self.markup)
+        self.assertIn('id="clear-notifications"', self.markup)
         self.assertIn("snapshot?.notifications", self.javascript)
         self.assertIn("api.mark_notifications_read", self.javascript)
+        self.assertIn("api.clear_notifications", self.javascript)
+        self.assertIn("function clearAllNotifications", self.javascript)
+        clear_handler = self.javascript[
+            self.javascript.index("async function clearAllNotifications"):
+            self.javascript.index("async function setNotificationCenterOpen")
+        ]
+        self.assertIn("renderNotificationCenter(currentSnapshot)", clear_handler)
         self.assertIn("favorite_gpu_available", self.javascript)
         self.assertIn("resource_available", self.javascript)
         self.assertIn("update_available", self.javascript)
         self.assertIn("notification-update-action install-latest-update", self.javascript)
         self.assertIn("发现新版本后会进入通知中心", self.markup)
         self.assertIn("任务完成、版本更新与 GPU 可用消息", self.markup)
+
+    def test_english_translation_covers_stale_error_and_process_details(self):
+        for source in (
+            "数据已过期",
+            "服务器连接超时",
+            "旧快照仅供参考，不计入顶部实时汇总。",
+            "进程 / 任务",
+            "GPU 明细",
+            "显存合计",
+            "启动时间",
+            "主机 CPU",
+            "个逻辑核心",
+            "逻辑核心未知",
+            "系统负载（1/5/15 分钟）",
+            "查看命令摘要",
+            "清空通知",
+        ):
+            self.assertIn(f"['{source}'", self.localization)
+        self.assertIn("Live GPU memory · last success", self.localization)
+        self.assertIn("Error code: $1 · Last success: $2", self.localization)
 
     def test_task_watches_support_bulk_removal_and_explicit_other_user_selection(self):
         self.assertIn("api.clear_task_completion_watches", self.javascript)
@@ -146,6 +174,7 @@ class WebUiContractTests(unittest.TestCase):
             "归属不可见",
             "进程 / 任务",
             "显存合计",
+            "CPU",
             "运行时长",
             "启动时间",
             "不是调度队列，不包含排队或完成历史",
@@ -159,6 +188,14 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("敏感参数已遮盖", direct_module)
         self.assertIn("其他用户摘要还需在服务器设置中开启", direct_module)
         self.assertIn("process.command_visibility", direct_module)
+        self.assertIn("function renderCpuOverview", self.javascript)
+        self.assertIn("function formatCpuPercent", direct_module)
+        cpu_formatter = direct_module[
+            direct_module.index("function formatCpuPercent"):
+            direct_module.index("function renderProcessName")
+        ]
+        self.assertIn("value == null || value === ''", cpu_formatter)
+        self.assertIn('<th scope="col">CPU</th>', direct_module)
         self.assertNotIn("command_raw", self.javascript)
         self.assertIn("escapeHtml(preview)", direct_module)
         self.assertIn('data-task-module="gpu-processes"', direct_module)
@@ -167,8 +204,13 @@ class WebUiContractTests(unittest.TestCase):
             ".process-summary-pill",
             ".process-command-details",
             ".process-gpu-list",
+            ".cpu-overview",
         ):
             self.assertIn(selector, self.styles)
+        self.assertIn(
+            "direct_cpu_information_is_rendered",
+            (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"),
+        )
 
     def test_visual_hierarchy_uses_distinct_semantic_levels_and_compact_defaults(self):
         for contract in (
