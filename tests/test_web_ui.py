@@ -87,7 +87,7 @@ class WebUiContractTests(unittest.TestCase):
             "个逻辑核心",
             "逻辑核心未知",
             "运行 / 等待任务数",
-            "1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。下方“进程 CPU”沿用 nvitop 的口径：约 100% 表示占用一个逻辑核心，多线程进程可以超过 100%。",
+            "1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。",
             "进程 CPU",
             "查看命令摘要",
             "清空通知",
@@ -192,8 +192,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("process.command_visibility", direct_module)
         self.assertIn("function renderCpuOverview", self.javascript)
         self.assertIn("cpu-load-values", self.javascript)
-        self.assertIn("下方“进程 CPU”沿用 nvitop 的口径", self.javascript)
-        self.assertIn("多线程进程可以超过 100%", self.javascript)
+        self.assertNotIn("下方“进程 CPU”沿用 nvitop 的口径", self.javascript)
+        self.assertNotIn("多线程进程可以超过 100%", self.javascript)
         self.assertIn("function formatCpuPercent", direct_module)
         cpu_formatter = direct_module[
             direct_module.index("function formatCpuPercent"):

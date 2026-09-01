@@ -842,8 +842,7 @@ BENCHMARK_JAVASCRIPT = r"""
       && englishCpuOverview.includes('0.37')
       && englishCpuOverview.includes('0.31')
       && englishCpuOverview.includes('Running / waiting tasks')
-      && englishCpuOverview.includes('follows the nvitop convention')
-      && englishCpuOverview.includes('100% means one logical core')
+      && englishCpuOverview.includes('average number of tasks running')
       && englishCpuProcess.includes('12.5%');
     const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
       .map(row => row.innerText);

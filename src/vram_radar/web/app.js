@@ -352,8 +352,8 @@ function renderCpuOverview(server) {
     : `<div class="cpu-load-unavailable">${escapeHtml(localizedText('不可用'))}</div>`;
   const english = window.VRAMRadarI18n?.language === 'en';
   const explanation = english
-    ? 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O. The Process CPU column below follows the nvitop convention: about 100% means one logical core, and a multithreaded process can exceed 100%.'
-    : '1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。下方“进程 CPU”沿用 nvitop 的口径：约 100% 表示占用一个逻辑核心，多线程进程可以超过 100%。';
+    ? 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O.'
+    : '1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。';
   return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong></div><div class="cpu-overview-load"><span class="cpu-overview-load-label">${escapeHtml(localizedText('运行 / 等待任务数'))}</span><div class="cpu-load-values">${loadMarkup}</div><details class="cpu-overview-help"><summary>${escapeHtml(localizedText('说明'))}</summary><p>${escapeHtml(explanation)}</p></details></div></section>`;
 }
 

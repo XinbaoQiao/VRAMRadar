@@ -352,7 +352,7 @@
     ['个逻辑核心', 'logical cores'],
     ['逻辑核心未知', 'Logical cores unavailable'],
     ['运行 / 等待任务数', 'Running / waiting tasks'],
-    ['1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。下方“进程 CPU”沿用 nvitop 的口径：约 100% 表示占用一个逻辑核心，多线程进程可以超过 100%。', 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O. The Process CPU column below follows the nvitop convention: about 100% means one logical core, and a multithreaded process can exceed 100%.'],
+    ['1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。', 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O.'],
     ['进程 CPU', 'Process CPU'],
     ['1 分钟', '1 min'],
     ['5 分钟', '5 min'],
