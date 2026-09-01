@@ -3275,7 +3275,45 @@ class ShellApiTests(unittest.TestCase):
 
         self.assertTrue(result["shown"])
         self.assertTrue(result["update_bridge"]["ok"])
+        self.assertEqual(result["update_bridge_status"], "passed")
         self.assertIn("window.pywebview.api.check_for_updates()", window.evaluate_js.call_args_list[0].args[0])
+        window.destroy.assert_called_once_with()
+
+    def test_gui_update_smoke_accepts_rate_limit_only_with_sibling_proof(self):
+        shown = threading.Event()
+        shown.set()
+        loaded = threading.Event()
+        loaded.set()
+        window = Mock()
+        window.events.shown = shown
+        window.events.loaded = loaded
+        window.evaluate_js.side_effect = [
+            None,
+            {
+                "settled": True,
+                "ok": False,
+                "code": "update_rate_limited",
+                "currentVersion": "0.8.8",
+            },
+        ]
+        result = {}
+
+        with patch.dict(
+            os.environ,
+            {"VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF": "1"},
+        ):
+            window_smoke_worker(
+                window,
+                result,
+                timeout_seconds=0.5,
+                verify_update_bridge=True,
+            )
+
+        self.assertTrue(result["shown"])
+        self.assertEqual(
+            result["update_bridge_status"],
+            "rate-limited-requires-sibling-proof",
+        )
         window.destroy.assert_called_once_with()
 
     def test_activation_shutdown_wakeup_never_restores_a_disposed_window(self):

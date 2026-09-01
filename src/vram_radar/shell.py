@@ -648,10 +648,19 @@ def window_smoke_worker(
                         break
                     time.sleep(0.1)
                 result["update_bridge"] = bridge_result
-                if not isinstance(bridge_result, dict) or not bridge_result.get("ok"):
+                rate_limited_with_sibling_proof = bool(
+                    isinstance(bridge_result, dict)
+                    and bridge_result.get("code") == "update_rate_limited"
+                    and os.environ.get("VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF") == "1"
+                )
+                if rate_limited_with_sibling_proof:
+                    result["update_bridge_status"] = "rate-limited-requires-sibling-proof"
+                elif not isinstance(bridge_result, dict) or not bridge_result.get("ok"):
                     result["shown"] = False
                     code = bridge_result.get("code") if isinstance(bridge_result, dict) else None
                     result["error"] = f"desktop update bridge smoke failed: {code or 'timeout'}"
+                else:
+                    result["update_bridge_status"] = "passed"
     except Exception as exc:
         result["shown"] = False
         result["error"] = f"desktop window smoke failed: {exc}"
@@ -4300,9 +4309,9 @@ def main(argv: list[str] | None = None) -> int:
                     if smoke_worker is not None:
                         smoke_worker.join(timeout=1)
                 if gui_smoke and not smoke_result.get("shown"):
-                    logging.getLogger("vram_radar").error(
-                        "%s", smoke_result.get("error") or "desktop window smoke failed"
-                    )
+                    smoke_error = smoke_result.get("error") or "desktop window smoke failed"
+                    logging.getLogger("vram_radar").error("%s", smoke_error)
+                    print(smoke_error, file=sys.stderr)
                     return 1
     except InstanceAlreadyRunning:
         if not request_existing_instance(activation_path):

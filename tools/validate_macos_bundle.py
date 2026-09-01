@@ -183,14 +183,17 @@ def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
         command,
         cwd=ROOT,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
         timeout=timeout,
         check=False,
         env=finder_like_environment(),
     )
     if result.returncode != 0:
-        raise RuntimeError(f"packaged macOS smoke failed with exit code {result.returncode}")
+        detail = result.stderr.strip()[-500:] or "no diagnostic detail"
+        raise RuntimeError(
+            f"packaged macOS smoke failed with exit code {result.returncode}: {detail}"
+        )
 
 
 def validate_release_tag() -> str:
