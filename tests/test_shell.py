@@ -3717,9 +3717,15 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result["current_version"], "0.8.8")
         self.assertEqual(result["update_action"], "browser")
 
-    def test_update_check_notifies_packaged_gui_smoke_observer(self):
+    def test_update_check_notifies_packaged_gui_smoke_observer_after_return(self):
         api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]
-        observer = Mock()
+        observed = []
+        completed = threading.Event()
+
+        def observer(value):
+            observed.append(value)
+            completed.set()
+
         api._bind_update_check_observer(observer)
         release = {
             "ok": True,
@@ -3732,10 +3738,10 @@ class ShellApiTests(unittest.TestCase):
             result = api.check_for_updates()
 
         self.assertTrue(result["ok"])
-        observer.assert_called_once()
-        observed = observer.call_args.args[0]
-        self.assertTrue(observed["ok"])
-        self.assertEqual(observed["current_version"], "0.8.8")
+        self.assertTrue(completed.wait(1.0))
+        self.assertEqual(len(observed), 1)
+        self.assertTrue(observed[0]["ok"])
+        self.assertEqual(observed[0]["current_version"], "0.8.8")
 
     def test_available_update_survives_notification_delivery_failure(self):
         api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]

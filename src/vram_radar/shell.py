@@ -3631,12 +3631,22 @@ class AppApi:
             )
         observer = self._update_check_observer
         if observer is not None:
-            try:
-                observer(dict(result))
-            except Exception:
-                logging.getLogger("vram_radar").exception(
-                    "packaged GUI update-check observer failed"
-                )
+            observed_result = dict(result)
+
+            def notify_observer_after_bridge_return() -> None:
+                try:
+                    observer(observed_result)
+                except Exception:
+                    logging.getLogger("vram_radar").exception(
+                        "packaged GUI update-check observer failed"
+                    )
+
+            # The observer requests native window shutdown.  Running it inside
+            # this pywebview RPC would destroy Cocoa while the result is still
+            # being marshalled back to JavaScript and can deadlock the app.
+            observer_timer = threading.Timer(0.25, notify_observer_after_bridge_return)
+            observer_timer.daemon = True
+            observer_timer.start()
         return result
 
     def _set_update_progress(self, **changes: Any) -> dict[str, Any]:
