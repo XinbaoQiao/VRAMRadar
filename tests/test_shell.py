@@ -3254,16 +3254,13 @@ class ShellApiTests(unittest.TestCase):
         window = Mock()
         window.events.shown = shown
         window.events.loaded = loaded
-        window.evaluate_js.side_effect = [
-            None,
-            None,
-            {
-                "settled": True,
-                "ok": True,
-                "code": None,
-                "currentVersion": "0.8.8",
-            },
-        ]
+        completed = threading.Event()
+        completed.set()
+        update_result = {
+            "ok": True,
+            "code": None,
+            "current_version": "0.8.8",
+        }
         result = {}
 
         window_smoke_worker(
@@ -3271,12 +3268,14 @@ class ShellApiTests(unittest.TestCase):
             result,
             timeout_seconds=0.5,
             verify_update_bridge=True,
+            update_check_completed=completed,
+            update_check_result=update_result,
         )
 
         self.assertTrue(result["shown"])
         self.assertTrue(result["update_bridge"]["ok"])
         self.assertEqual(result["update_bridge_status"], "passed")
-        self.assertIn("window.pywebview.api.check_for_updates()", window.evaluate_js.call_args_list[0].args[0])
+        window.evaluate_js.assert_not_called()
         window.destroy.assert_called_once_with()
 
     def test_gui_update_smoke_accepts_rate_limit_only_with_sibling_proof(self):
@@ -3287,15 +3286,13 @@ class ShellApiTests(unittest.TestCase):
         window = Mock()
         window.events.shown = shown
         window.events.loaded = loaded
-        window.evaluate_js.side_effect = [
-            None,
-            {
-                "settled": True,
-                "ok": False,
-                "code": "update_rate_limited",
-                "currentVersion": "0.8.8",
-            },
-        ]
+        completed = threading.Event()
+        completed.set()
+        update_result = {
+            "ok": False,
+            "code": "update_rate_limited",
+            "current_version": "0.8.8",
+        }
         result = {}
 
         with patch.dict(
@@ -3307,6 +3304,8 @@ class ShellApiTests(unittest.TestCase):
                 result,
                 timeout_seconds=0.5,
                 verify_update_bridge=True,
+                update_check_completed=completed,
+                update_check_result=update_result,
             )
 
         self.assertTrue(result["shown"])
@@ -3697,6 +3696,26 @@ class ShellApiTests(unittest.TestCase):
         self.assertFalse(result["update_available"])
         self.assertEqual(result["current_version"], "0.8.8")
         self.assertEqual(result["update_action"], "browser")
+
+    def test_update_check_notifies_packaged_gui_smoke_observer(self):
+        api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]
+        observer = Mock()
+        api._bind_update_check_observer(observer)
+        release = {
+            "ok": True,
+            "update_available": False,
+            "current_version": "0.8.8",
+            "latest_version": "0.8.8",
+        }
+
+        with patch("vram_radar.shell.check_latest_release", return_value=release):
+            result = api.check_for_updates()
+
+        self.assertTrue(result["ok"])
+        observer.assert_called_once()
+        observed = observer.call_args.args[0]
+        self.assertTrue(observed["ok"])
+        self.assertEqual(observed["current_version"], "0.8.8")
 
     def test_available_update_survives_notification_delivery_failure(self):
         api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]

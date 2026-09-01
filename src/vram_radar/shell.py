@@ -607,6 +607,8 @@ def window_smoke_worker(
     timeout_seconds: float = 20.0,
     request_shutdown: Callable[[], None] | None = None,
     verify_update_bridge: bool = False,
+    update_check_completed: threading.Event | None = None,
+    update_check_result: dict[str, Any] | None = None,
 ) -> None:
     try:
         result["shown"] = bool(window.events.shown.wait(timeout_seconds))
@@ -618,35 +620,11 @@ def window_smoke_worker(
                 result["shown"] = False
                 result["error"] = "desktop frontend did not load before the update smoke timeout"
             else:
-                window.evaluate_js(
-                    """(() => {
-                      window.__vramRadarUpdateSmokeResult = null;
-                      Promise.resolve(window.pywebview.api.check_for_updates())
-                        .then((value) => {
-                          window.__vramRadarUpdateSmokeResult = {
-                            settled: true,
-                            ok: value?.ok === true,
-                            code: value?.code || null,
-                            currentVersion: value?.current_version || null,
-                          };
-                        })
-                        .catch((error) => {
-                          window.__vramRadarUpdateSmokeResult = {
-                            settled: true,
-                            ok: false,
-                            code: 'bridge_exception',
-                            errorName: error?.name || 'Error',
-                          };
-                        });
-                    })()"""
+                completed = bool(
+                    update_check_completed is not None
+                    and update_check_completed.wait(timeout_seconds)
                 )
-                deadline = time.monotonic() + max(0.1, timeout_seconds)
-                bridge_result: Any = None
-                while time.monotonic() < deadline:
-                    bridge_result = window.evaluate_js("window.__vramRadarUpdateSmokeResult")
-                    if isinstance(bridge_result, dict) and bridge_result.get("settled"):
-                        break
-                    time.sleep(0.1)
+                bridge_result = dict(update_check_result or {}) if completed else None
                 result["update_bridge"] = bridge_result
                 rate_limited_with_sibling_proof = bool(
                     isinstance(bridge_result, dict)
@@ -870,6 +848,7 @@ class AppApi:
         self.latest_release_url: str | None = None
         self._latest_release: dict[str, Any] | None = None
         self._notification_callback: Callable[[str, str], bool] | None = None
+        self._update_check_observer: Callable[[dict[str, Any]], None] | None = None
         self._tray_controller: WindowsTrayController | None = None
         self._favorite_alert_state_lock = threading.Lock()
         self._favorite_alert_active_ids: set[str] = set()
@@ -1442,6 +1421,14 @@ class AppApi:
             snapshot = self.service.snapshot()
             self._evaluate_favorite_alerts(snapshot)
             self._evaluate_task_completion_alerts(snapshot)
+
+    def _bind_update_check_observer(
+        self,
+        callback: Callable[[dict[str, Any]], None] | None,
+    ) -> None:
+        """Bind the packaged GUI smoke observer outside the public WebView API."""
+
+        self._update_check_observer = callback
 
     @staticmethod
     def _task_alert_server_signature(profile: Profile) -> tuple[tuple[str, str, bool], ...]:
@@ -3642,6 +3629,14 @@ class AppApi:
             logging.getLogger("vram_radar").exception(
                 "could not attach auxiliary notification state to update result"
             )
+        observer = self._update_check_observer
+        if observer is not None:
+            try:
+                observer(dict(result))
+            except Exception:
+                logging.getLogger("vram_radar").exception(
+                    "packaged GUI update-check observer failed"
+                )
         return result
 
     def _set_update_progress(self, **changes: Any) -> dict[str, Any]:
@@ -4136,6 +4131,15 @@ def main(argv: list[str] | None = None) -> int:
             *(["--no-auto-import"] if args.no_auto_import else []),
         ],
     )
+    update_smoke_completed = threading.Event()
+    update_smoke_result: dict[str, Any] = {}
+    if args.gui_update_smoke:
+        def observe_update_smoke(value: dict[str, Any]) -> None:
+            update_smoke_result.clear()
+            update_smoke_result.update(value)
+            update_smoke_completed.set()
+
+        api._bind_update_check_observer(observe_update_smoke)
     index_path = resource_path("web/index.html")
     icon_path = resource_path("assets/app-icon.png")
     activation_path = paths.runtime / f"{profile.id}.activation.json"
@@ -4280,6 +4284,8 @@ def main(argv: list[str] | None = None) -> int:
                             30.0 if args.gui_update_smoke else 20.0,
                             shutdown.request,
                             args.gui_update_smoke,
+                            update_smoke_completed,
+                            update_smoke_result,
                         ),
                         name="vram-radar-gui-smoke",
                         daemon=True,
@@ -4290,6 +4296,7 @@ def main(argv: list[str] | None = None) -> int:
                     webview.start(**start_options)
                 finally:
                     shutdown.request()
+                    api._bind_update_check_observer(None)
                     if not shutdown.wait(timeout=15):
                         logging.getLogger("vram_radar").error(
                             "desktop shutdown did not finish within 15 seconds"
