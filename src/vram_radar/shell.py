@@ -610,14 +610,19 @@ def window_smoke_worker(
     update_check_completed: threading.Event | None = None,
     update_check_result: dict[str, Any] | None = None,
 ) -> None:
+    deadline = time.monotonic() + max(0.0, timeout_seconds)
+
+    def remaining_seconds() -> float:
+        return max(0.0, deadline - time.monotonic())
+
     try:
-        result["shown"] = bool(window.events.shown.wait(timeout_seconds))
+        result["shown"] = bool(window.events.shown.wait(remaining_seconds()))
         if not result["shown"]:
             result["error"] = "desktop window did not become visible before the smoke timeout"
         elif verify_update_bridge:
             completed = bool(
                 update_check_completed is not None
-                and update_check_completed.wait(timeout_seconds)
+                and update_check_completed.wait(remaining_seconds())
             )
             bridge_result = dict(update_check_result or {}) if completed else None
             result["update_bridge"] = bridge_result
