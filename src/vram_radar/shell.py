@@ -615,30 +615,25 @@ def window_smoke_worker(
         if not result["shown"]:
             result["error"] = "desktop window did not become visible before the smoke timeout"
         elif verify_update_bridge:
-            loaded = bool(window.events.loaded.wait(timeout_seconds))
-            if not loaded:
+            completed = bool(
+                update_check_completed is not None
+                and update_check_completed.wait(timeout_seconds)
+            )
+            bridge_result = dict(update_check_result or {}) if completed else None
+            result["update_bridge"] = bridge_result
+            rate_limited_with_sibling_proof = bool(
+                isinstance(bridge_result, dict)
+                and bridge_result.get("code") == "update_rate_limited"
+                and os.environ.get("VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF") == "1"
+            )
+            if rate_limited_with_sibling_proof:
+                result["update_bridge_status"] = "rate-limited-requires-sibling-proof"
+            elif not isinstance(bridge_result, dict) or not bridge_result.get("ok"):
                 result["shown"] = False
-                result["error"] = "desktop frontend did not load before the update smoke timeout"
+                code = bridge_result.get("code") if isinstance(bridge_result, dict) else None
+                result["error"] = f"desktop update bridge smoke failed: {code or 'timeout'}"
             else:
-                completed = bool(
-                    update_check_completed is not None
-                    and update_check_completed.wait(timeout_seconds)
-                )
-                bridge_result = dict(update_check_result or {}) if completed else None
-                result["update_bridge"] = bridge_result
-                rate_limited_with_sibling_proof = bool(
-                    isinstance(bridge_result, dict)
-                    and bridge_result.get("code") == "update_rate_limited"
-                    and os.environ.get("VRAM_RADAR_ALLOW_RATE_LIMIT_WITH_SIBLING_PROOF") == "1"
-                )
-                if rate_limited_with_sibling_proof:
-                    result["update_bridge_status"] = "rate-limited-requires-sibling-proof"
-                elif not isinstance(bridge_result, dict) or not bridge_result.get("ok"):
-                    result["shown"] = False
-                    code = bridge_result.get("code") if isinstance(bridge_result, dict) else None
-                    result["error"] = f"desktop update bridge smoke failed: {code or 'timeout'}"
-                else:
-                    result["update_bridge_status"] = "passed"
+                result["update_bridge_status"] = "passed"
     except Exception as exc:
         result["shown"] = False
         result["error"] = f"desktop window smoke failed: {exc}"

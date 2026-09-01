@@ -3249,11 +3249,8 @@ class ShellApiTests(unittest.TestCase):
     def test_gui_update_smoke_calls_packaged_webview_bridge(self):
         shown = threading.Event()
         shown.set()
-        loaded = threading.Event()
-        loaded.set()
         window = Mock()
         window.events.shown = shown
-        window.events.loaded = loaded
         completed = threading.Event()
         completed.set()
         update_result = {
@@ -3281,11 +3278,8 @@ class ShellApiTests(unittest.TestCase):
     def test_gui_update_smoke_accepts_rate_limit_only_with_sibling_proof(self):
         shown = threading.Event()
         shown.set()
-        loaded = threading.Event()
-        loaded.set()
         window = Mock()
         window.events.shown = shown
-        window.events.loaded = loaded
         completed = threading.Event()
         completed.set()
         update_result = {
