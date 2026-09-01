@@ -348,18 +348,13 @@ function renderCpuOverview(server) {
     : localizedText('逻辑核心未知');
   const periods = ['1 分钟', '5 分钟', '15 分钟'];
   const loadMarkup = hasLoadAverage
-    ? loadAverage.map((value, index) => {
-      const capacityReference = hasCores ? Math.max(0, value / logicalCores * 100) : null;
-      return `<div class="cpu-load-item"><span>${escapeHtml(localizedText(periods[index]))}</span><strong>${escapeHtml(number(value))}</strong>${capacityReference == null ? '' : `<small>${escapeHtml(localizedText('核心容量参考'))} ${escapeHtml(number(capacityReference))}%</small>`}</div>`;
-    }).join('')
+    ? loadAverage.map((value, index) => `<span class="cpu-load-item"><small>${escapeHtml(localizedText(periods[index]))}</small><strong>${escapeHtml(number(value))}</strong></span>`).join('')
     : `<div class="cpu-load-unavailable">${escapeHtml(localizedText('不可用'))}</div>`;
   const english = window.VRAMRadarI18n?.language === 'en';
-  const explanation = hasCores
-    ? (english
-      ? `Load average counts tasks running or waiting for CPU or uninterruptible I/O. On this ${number(logicalCores)}-core host, a load of ${number(logicalCores)} means about one task per logical core; it is not CPU usage.`
-      : `系统负载统计正在运行或等待 CPU、不可中断 I/O 的平均任务数。以这台 ${number(logicalCores)} 核主机为例，负载 ${number(logicalCores)} 约等于每个逻辑核心 1 个任务；它不等同于 CPU 使用率。`)
-    : localizedText('系统负载是正在运行或等待 CPU、不可中断 I/O 的平均任务数，不等同于 CPU 使用率。');
-  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong><small>${escapeHtml(localizedText('逻辑核心数'))}</small></div><div class="cpu-overview-load"><div class="cpu-overview-load-title"><strong>${escapeHtml(localizedText('系统负载'))}</strong><span>${escapeHtml(localizedText('平均运行/等待任务数'))}</span></div><div class="cpu-load-values">${loadMarkup}</div></div><p class="cpu-overview-note">${escapeHtml(explanation)}</p></section>`;
+  const explanation = english
+    ? 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O. The Process CPU column below follows the nvitop convention: about 100% means one logical core, and a multithreaded process can exceed 100%.'
+    : '1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。下方“进程 CPU”沿用 nvitop 的口径：约 100% 表示占用一个逻辑核心，多线程进程可以超过 100%。';
+  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong></div><div class="cpu-overview-load"><span class="cpu-overview-load-label">${escapeHtml(localizedText('运行 / 等待任务数'))}</span><div class="cpu-load-values">${loadMarkup}</div><details class="cpu-overview-help"><summary>${escapeHtml(localizedText('说明'))}</summary><p>${escapeHtml(explanation)}</p></details></div></section>`;
 }
 
 function renderLiveTable(server) {
@@ -528,7 +523,7 @@ function renderProcessAllocations(process) {
 
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {

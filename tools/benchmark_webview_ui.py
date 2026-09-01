@@ -835,15 +835,15 @@ BENCHMARK_JAVASCRIPT = r"""
     const englishCpuOverview = document.querySelector('#server-card-synthetic-003 .cpu-overview')?.textContent || '';
     const englishCpuProcess = document.querySelector('#server-card-synthetic-003 .process-table tbody tr')?.textContent || '';
     const directCpuInformationRendered = englishCpuOverview.includes('16 logical cores')
-      && englishCpuOverview.includes('Load average')
       && englishCpuOverview.includes('1 min')
       && englishCpuOverview.includes('5 min')
       && englishCpuOverview.includes('15 min')
       && englishCpuOverview.includes('0.42')
       && englishCpuOverview.includes('0.37')
       && englishCpuOverview.includes('0.31')
-      && englishCpuOverview.includes('Core-capacity reference')
-      && englishCpuOverview.includes('it is not CPU usage')
+      && englishCpuOverview.includes('Running / waiting tasks')
+      && englishCpuOverview.includes('follows the nvitop convention')
+      && englishCpuOverview.includes('100% means one logical core')
       && englishCpuProcess.includes('12.5%');
     const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
       .map(row => row.innerText);

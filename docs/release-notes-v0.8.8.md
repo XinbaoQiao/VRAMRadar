@@ -17,9 +17,10 @@ This repair build makes the update action visibly responsive from the first
 click. It reports real downloaded bytes as a determinate progress bar, then
 shows verification and installation-preparation phases; hover, pressed, focus,
 busy, and disabled button states now provide clearer pointer feedback. The CPU
-panel also labels each 1/5/15-minute value separately, compares load with the
-host's logical-core capacity, and explains that load average is task pressure,
-not CPU utilization.
+panel keeps the compact one-line layout while labeling the 1/5/15-minute values
+as average running/waiting task counts. The process table labels its separate
+nvitop-style percentage as Process CPU, where about 100% represents one logical
+core and multithreaded processes can exceed 100%.
 
 ### Downloads
 
@@ -47,8 +48,9 @@ CPU 使用率。缺失或因权限受限而不可读取的 CPU 数据会显示�
 
 此修复构建让更新按钮从点击开始就有明确反馈：下载阶段按真实字节显示确定进度，随后
 显示校验和准备安装状态；按钮也补齐悬停、按下、键盘焦点、忙碌和禁用反馈。CPU 区域
-会分别标出 1/5/15 分钟负载、给出相对逻辑核心容量的参考比例，并明确说明系统负载反映
-任务压力，不等同于 CPU 使用率。
+保持紧凑单行布局，将 1/5/15 分钟数值标为平均运行/等待任务数。进程表中的独立指标标为
+“进程 CPU”，沿用 nvitop 口径：约 100% 表示占用一个逻辑核心，多线程进程可以超过
+100%。
 
 ### 下载
 
