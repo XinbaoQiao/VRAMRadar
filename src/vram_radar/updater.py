@@ -37,6 +37,7 @@ def download_verified_asset(
     *,
     opener: Callable[..., Any] = urlopen,
     timeout_seconds: float = 30.0,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> Path:
     name = asset.get("name")
     url = asset.get("url")
@@ -64,6 +65,8 @@ def download_verified_asset(
     digest = hashlib.sha256()
     total = 0
     try:
+        if progress_callback is not None:
+            progress_callback(0, expected_size)
         with opener(request, timeout=max(1.0, float(timeout_seconds))) as response, partial.open("xb") as handle:
             final_url = response.geturl() if hasattr(response, "geturl") else url
             if _host(final_url) not in _ALLOWED_DOWNLOAD_HOSTS:
@@ -77,6 +80,8 @@ def download_verified_asset(
                     raise ValueError("更新文件大小与 Release 元数据不一致")
                 digest.update(chunk)
                 handle.write(chunk)
+                if progress_callback is not None:
+                    progress_callback(total, expected_size)
             handle.flush()
             os.fsync(handle.fileno())
         if total != expected_size or digest.hexdigest() != expected_hash:

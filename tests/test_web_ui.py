@@ -86,7 +86,10 @@ class WebUiContractTests(unittest.TestCase):
             "主机 CPU",
             "个逻辑核心",
             "逻辑核心未知",
-            "系统负载（1/5/15 分钟）",
+            "逻辑核心数",
+            "系统负载",
+            "平均运行/等待任务数",
+            "核心容量参考",
             "查看命令摘要",
             "清空通知",
         ):
@@ -189,6 +192,9 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("其他用户摘要还需在服务器设置中开启", direct_module)
         self.assertIn("process.command_visibility", direct_module)
         self.assertIn("function renderCpuOverview", self.javascript)
+        self.assertIn("cpu-load-values", self.javascript)
+        self.assertIn("核心容量参考", self.javascript)
+        self.assertIn("它不等同于 CPU 使用率", self.javascript)
         self.assertIn("function formatCpuPercent", direct_module)
         cpu_formatter = direct_module[
             direct_module.index("function formatCpuPercent"):
@@ -205,6 +211,8 @@ class WebUiContractTests(unittest.TestCase):
             ".process-command-details",
             ".process-gpu-list",
             ".cpu-overview",
+            ".cpu-load-item",
+            ".cpu-overview-note",
         ):
             self.assertIn(selector, self.styles)
         self.assertIn(
@@ -1457,12 +1465,22 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("未能检查更新", self.javascript)
         self.assertIn("checkForUpdates({interactive: true})", self.javascript)
         self.assertIn("async function installLatestUpdate", self.javascript)
+        self.assertIn("api.start_latest_update()", self.javascript)
+        self.assertIn("api.get_update_progress()", self.javascript)
+        self.assertIn("function pollUpdateProgress", self.javascript)
         self.assertIn("api.install_latest_update()", self.javascript)
         self.assertIn("window.confirm(explanation)", self.javascript)
         self.assertIn(".update-notice", self.styles)
         self.assertIn("发现新版本后会进入通知中心", self.markup)
         self.assertIn("下载并校验安装包", self.javascript)
         self.assertIn("notification-update-action", self.javascript)
+        self.assertIn("update-download-progress", self.javascript)
+        self.assertIn('aria-live="polite"', self.javascript)
+        self.assertIn(".button.is-busy", self.styles)
+        self.assertIn(".button:active", self.styles)
+        self.assertIn(".update-download-progress", self.styles)
+        self.assertIn("Confirming the official update", self.localization)
+        self.assertIn("Downloading and verifying the update", self.localization)
 
 
 if __name__ == "__main__":

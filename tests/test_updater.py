@@ -97,6 +97,28 @@ class UpdateDownloadTests(unittest.TestCase):
             self.assertEqual(result.read_bytes(), data)
             self.assertFalse(result.with_suffix(result.suffix + ".part").exists())
 
+    def test_download_reports_real_monotonic_byte_progress(self):
+        data = b"0123456789" * 200_000
+        url = "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe"
+        asset = {
+            "name": "VRAMRadar-Setup-0.7.0.exe",
+            "url": url,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        progress: list[tuple[int, int]] = []
+        with tempfile.TemporaryDirectory() as temporary:
+            download_verified_asset(
+                asset,
+                Path(temporary),
+                opener=lambda _request, timeout: FakeDownload(data, url),
+                progress_callback=lambda downloaded, total: progress.append((downloaded, total)),
+            )
+
+        self.assertEqual(progress[0], (0, len(data)))
+        self.assertEqual(progress[-1], (len(data), len(data)))
+        self.assertEqual([item[0] for item in progress], sorted(item[0] for item in progress))
+
     def test_hash_mismatch_removes_partial_stage(self):
         data = b"tampered"
         url = "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe"

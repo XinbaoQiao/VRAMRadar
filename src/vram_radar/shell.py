@@ -845,6 +845,16 @@ class AppApi:
         self._profile_revision = 0
         self._automatic_import_enabled = bool(automatic_import_enabled)
         self._restart_arguments = list(restart_arguments or ["--profile", profile.id])
+        self._update_progress_lock = threading.Lock()
+        self._update_progress: dict[str, Any] = {
+            "state": "idle",
+            "phase": "idle",
+            "downloaded_bytes": 0,
+            "total_bytes": 0,
+            "percent": None,
+            "message": "",
+        }
+        self._update_worker: threading.Thread | None = None
 
     @staticmethod
     def _normalize_persisted_task(raw: object) -> dict[str, str] | None:
@@ -3576,9 +3586,100 @@ class AppApi:
         self._attach_notification_state(result)
         return result
 
+    def _set_update_progress(self, **changes: Any) -> dict[str, Any]:
+        with self._update_progress_lock:
+            self._update_progress.update(changes)
+            return dict(self._update_progress)
+
+    def get_update_progress(self) -> dict[str, Any]:
+        with self._update_progress_lock:
+            return {"ok": True, **self._update_progress}
+
+    def start_latest_update(self) -> dict[str, Any]:
+        with self._update_progress_lock:
+            if self._update_worker is not None and self._update_worker.is_alive():
+                return {"ok": True, "accepted": False, **self._update_progress}
+            self._update_progress = {
+                "state": "running",
+                "phase": "checking",
+                "downloaded_bytes": 0,
+                "total_bytes": 0,
+                "percent": None,
+                "message": "正在确认官方更新文件…",
+            }
+            worker = threading.Thread(target=self._run_latest_update, name="vram-radar-update", daemon=True)
+            self._update_worker = worker
+            worker.start()
+            return {"ok": True, "accepted": True, **self._update_progress}
+
+    def _run_latest_update(self) -> None:
+        def phase_callback(phase: str, total_bytes: int = 0) -> None:
+            total = max(0, int(total_bytes))
+            changes: dict[str, Any] = {
+                "state": "running",
+                "phase": phase,
+                "total_bytes": total,
+            }
+            if phase == "checking":
+                changes.update(downloaded_bytes=0, percent=None, message="正在确认官方更新文件…")
+            elif phase == "downloading":
+                changes.update(downloaded_bytes=0, percent=0.0, message="正在下载并校验更新…")
+            elif phase == "preparing":
+                changes.update(
+                    downloaded_bytes=total,
+                    percent=100.0,
+                    message="下载完成，正在准备安装…",
+                )
+            self._set_update_progress(**changes)
+
+        def progress_callback(downloaded_bytes: int, total_bytes: int) -> None:
+            total = max(0, int(total_bytes))
+            downloaded = max(0, min(int(downloaded_bytes), total)) if total else 0
+            percent = round(downloaded * 100 / total, 1) if total else None
+            self._set_update_progress(
+                state="running",
+                phase="downloading",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                percent=percent,
+                message="正在下载并校验更新…",
+            )
+
+        try:
+            result = self._perform_latest_update(
+                progress_callback=progress_callback,
+                phase_callback=phase_callback,
+            )
+        except Exception as exc:
+            logging.getLogger("vram_radar").exception("unexpected background update failure")
+            result = {"ok": False, "error": str(exc) or "更新失败，当前版本未被修改"}
+        if result.get("ok"):
+            self._set_update_progress(
+                state="completed",
+                phase="scheduled" if result.get("scheduled") else "completed",
+                percent=100.0,
+                message=result.get("message") or "更新已准备完成",
+            )
+        else:
+            self._set_update_progress(
+                state="failed",
+                phase="failed",
+                message=result.get("error") or "更新失败，当前版本未被修改",
+            )
+
     def install_latest_update(self) -> dict[str, Any]:
+        return self._perform_latest_update()
+
+    def _perform_latest_update(
+        self,
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
+        phase_callback: Callable[[str, int], None] | None = None,
+    ) -> dict[str, Any]:
         # Re-read authoritative GitHub metadata at the action boundary. The UI
         # cache is presentation state and must never authorize code execution.
+        if phase_callback is not None:
+            phase_callback("checking", 0)
         result = check_latest_release()
         if not result.get("ok") or not result.get("update_available"):
             return {"ok": False, "error": result.get("error") or "当前没有可安装的新版本"}
@@ -3592,7 +3693,19 @@ class AppApi:
                     pass
             return {"ok": False, "error": "Release 缺少可验证的安装资产，已打开下载页面"}
         try:
-            installer = download_verified_asset(asset, Path(self.paths.cache) / "updates")
+            expected_size = int(asset.get("size") or 0)
+            if phase_callback is not None:
+                phase_callback("downloading", expected_size)
+            download_arguments: dict[str, Any] = {}
+            if progress_callback is not None:
+                download_arguments["progress_callback"] = progress_callback
+            installer = download_verified_asset(
+                asset,
+                Path(self.paths.cache) / "updates",
+                **download_arguments,
+            )
+            if phase_callback is not None:
+                phase_callback("preparing", expected_size)
             if sys.platform == "win32":
                 capable, reason = windows_update_capability()
                 if not capable:

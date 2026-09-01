@@ -522,6 +522,24 @@ BENCHMARK_JAVASCRIPT = r"""
       && ui.notificationList.querySelectorAll('.notification-update-action').length === 1
       && ui.clearNotifications && !ui.clearNotifications.disabled
       && ui.clearNotifications.textContent.includes('清空通知');
+    latestUpdateProgress = {
+      state: 'running',
+      phase: 'downloading',
+      downloaded_bytes: 4,
+      total_bytes: 10,
+      percent: 40,
+      message: '',
+    };
+    renderNotificationCenter(currentSnapshot);
+    const updateProgress = ui.notificationList.querySelector('.update-download-progress');
+    const updateDownloadProgressIsVisibleAndDeterminate = Boolean(
+      updateProgress
+      && Number(updateProgress.value) === 40
+      && ui.notificationList.querySelector('.install-latest-update')?.getAttribute('aria-busy') === 'true'
+      && ui.notificationList.querySelector('.update-download-percent')?.textContent.includes('40%')
+    );
+    latestUpdateProgress = {state: 'idle', phase: 'idle'};
+    renderNotificationCenter(currentSnapshot);
     document.body.dispatchEvent(new MouseEvent('click', {bubbles: true}));
     const notificationCenterCloses = ui.notificationCenter.hidden
       && ui.taskAlertIndicator.getAttribute('aria-expanded') === 'false';
@@ -817,8 +835,15 @@ BENCHMARK_JAVASCRIPT = r"""
     const englishCpuOverview = document.querySelector('#server-card-synthetic-003 .cpu-overview')?.textContent || '';
     const englishCpuProcess = document.querySelector('#server-card-synthetic-003 .process-table tbody tr')?.textContent || '';
     const directCpuInformationRendered = englishCpuOverview.includes('16 logical cores')
-      && englishCpuOverview.includes('Load average (1/5/15 min)')
-      && englishCpuOverview.includes('0.42 / 0.37 / 0.31')
+      && englishCpuOverview.includes('Load average')
+      && englishCpuOverview.includes('1 min')
+      && englishCpuOverview.includes('5 min')
+      && englishCpuOverview.includes('15 min')
+      && englishCpuOverview.includes('0.42')
+      && englishCpuOverview.includes('0.37')
+      && englishCpuOverview.includes('0.31')
+      && englishCpuOverview.includes('Core-capacity reference')
+      && englishCpuOverview.includes('it is not CPU usage')
       && englishCpuProcess.includes('12.5%');
     const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
       .map(row => row.innerText);
@@ -852,6 +877,7 @@ BENCHMARK_JAVASCRIPT = r"""
       notification_bell_is_always_visible: bellAlwaysVisible,
       notification_center_opens_renders_and_closes: notificationCenterOpens && notificationCenterCloses,
       notification_center_exposes_clear_action: notificationCenterOpens,
+      update_download_progress_is_visible_and_determinate: updateDownloadProgressIsVisibleAndDeterminate,
       repeated_render_does_not_recreate_cards: metricDelta(repeatMetricsAfter, repeatMetricsBefore).serverCardCreates === 0,
       repeated_render_counts_all_iterations: metricDelta(repeatMetricsAfter, repeatMetricsBefore).fullRenders === 100,
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,

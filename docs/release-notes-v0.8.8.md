@@ -13,6 +13,14 @@ Direct SSH servers can now show logical CPU cores, 1/5/15-minute load averages,
 and per-process CPU usage alongside GPU memory. Missing or permission-limited CPU
 metadata is shown as unavailable instead of being misreported as 0%.
 
+This repair build makes the update action visibly responsive from the first
+click. It reports real downloaded bytes as a determinate progress bar, then
+shows verification and installation-preparation phases; hover, pressed, focus,
+busy, and disabled button states now provide clearer pointer feedback. The CPU
+panel also labels each 1/5/15-minute value separately, compares load with the
+host's logical-core capacity, and explains that load average is task pressure,
+not CPU utilization.
+
 ### Downloads
 
 - Windows: `VRAMRadar-Setup-0.8.8.exe`.
@@ -36,6 +44,11 @@ CPU 信息。
 Direct SSH 服务器现在可以显示 CPU 逻辑核心数、1/5/15 分钟系统负载和各 GPU 进程的
 CPU 使用率。缺失或因权限受限而不可读取的 CPU 数据会显示为“不可用”，不会误报为
 `0%`。
+
+此修复构建让更新按钮从点击开始就有明确反馈：下载阶段按真实字节显示确定进度，随后
+显示校验和准备安装状态；按钮也补齐悬停、按下、键盘焦点、忙碌和禁用反馈。CPU 区域
+会分别标出 1/5/15 分钟负载、给出相对逻辑核心容量的参考比例，并明确说明系统负载反映
+任务压力，不等同于 CPU 使用率。
 
 ### 下载
 

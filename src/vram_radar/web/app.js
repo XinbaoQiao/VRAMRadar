@@ -101,6 +101,8 @@ let updateCheckTimer = null;
 let updateCheckInFlight = false;
 let updateAvailableShown = false;
 let latestUpdateAction = 'browser';
+let latestUpdateProgress = {state: 'idle', phase: 'idle'};
+let updateProgressPollTimer = null;
 let lastUpdateCheckAt = 0;
 let api = null;
 let settingsMode = 'settings';
@@ -344,10 +346,20 @@ function renderCpuOverview(server) {
   const coreLabel = hasCores
     ? `${number(logicalCores)} ${localizedText('个逻辑核心')}`
     : localizedText('逻辑核心未知');
-  const loadLabel = hasLoadAverage
-    ? loadAverage.map(value => number(value)).join(' / ')
-    : localizedText('不可用');
-  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong></div><div class="cpu-overview-load"><span>${escapeHtml(localizedText('系统负载（1/5/15 分钟）'))}</span><strong>${escapeHtml(loadLabel)}</strong></div></section>`;
+  const periods = ['1 分钟', '5 分钟', '15 分钟'];
+  const loadMarkup = hasLoadAverage
+    ? loadAverage.map((value, index) => {
+      const capacityReference = hasCores ? Math.max(0, value / logicalCores * 100) : null;
+      return `<div class="cpu-load-item"><span>${escapeHtml(localizedText(periods[index]))}</span><strong>${escapeHtml(number(value))}</strong>${capacityReference == null ? '' : `<small>${escapeHtml(localizedText('核心容量参考'))} ${escapeHtml(number(capacityReference))}%</small>`}</div>`;
+    }).join('')
+    : `<div class="cpu-load-unavailable">${escapeHtml(localizedText('不可用'))}</div>`;
+  const english = window.VRAMRadarI18n?.language === 'en';
+  const explanation = hasCores
+    ? (english
+      ? `Load average counts tasks running or waiting for CPU or uninterruptible I/O. On this ${number(logicalCores)}-core host, a load of ${number(logicalCores)} means about one task per logical core; it is not CPU usage.`
+      : `系统负载统计正在运行或等待 CPU、不可中断 I/O 的平均任务数。以这台 ${number(logicalCores)} 核主机为例，负载 ${number(logicalCores)} 约等于每个逻辑核心 1 个任务；它不等同于 CPU 使用率。`)
+    : localizedText('系统负载是正在运行或等待 CPU、不可中断 I/O 的平均任务数，不等同于 CPU 使用率。');
+  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong><small>${escapeHtml(localizedText('逻辑核心数'))}</small></div><div class="cpu-overview-load"><div class="cpu-overview-load-title"><strong>${escapeHtml(localizedText('系统负载'))}</strong><span>${escapeHtml(localizedText('平均运行/等待任务数'))}</span></div><div class="cpu-load-values">${loadMarkup}</div></div><p class="cpu-overview-note">${escapeHtml(explanation)}</p></section>`;
 }
 
 function renderLiveTable(server) {
@@ -1290,6 +1302,35 @@ function notificationEventMessage(event) {
   return localizedText(String(event.message || ''));
 }
 
+function updateProgressLabel(status) {
+  const phase = status?.phase || 'idle';
+  if (phase === 'checking') return localizedText('正在确认官方更新文件…');
+  if (phase === 'downloading') return localizedText('正在下载并校验更新…');
+  if (phase === 'preparing') return localizedText('下载完成，正在准备安装…');
+  if (phase === 'scheduled') return localizedText('更新已准备完成，应用即将重启');
+  if (phase === 'completed') return localizedText('更新包已下载并通过校验');
+  if (phase === 'failed') return localizedText(status?.message || '更新失败，当前版本未被修改');
+  return '';
+}
+
+function updateActionMarkup() {
+  const defaultLabel = localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '查看更新');
+  const active = latestUpdateProgress?.state && latestUpdateProgress.state !== 'idle';
+  const busy = latestUpdateProgress?.state === 'running';
+  const terminal = latestUpdateProgress?.state === 'completed';
+  const percent = Number(latestUpdateProgress?.percent);
+  const hasPercent = latestUpdateProgress?.percent != null && Number.isFinite(percent) && percent >= 0;
+  const statusLabel = updateProgressLabel(latestUpdateProgress);
+  const progressAttribute = hasPercent ? ` value="${Math.min(100, percent)}"` : '';
+  const progressMarkup = busy || terminal
+    ? `<progress class="update-download-progress" max="100"${progressAttribute}>${hasPercent ? `${number(percent)}%` : ''}</progress>`
+    : '';
+  const buttonLabel = busy
+    ? (hasPercent ? `${localizedText('正在下载')} ${number(percent)}%` : localizedText('已开始，请稍候…'))
+    : (terminal ? statusLabel : defaultLabel);
+  return `<div class="notification-update-control"><button class="button notification-update-action install-latest-update${busy ? ' is-busy' : ''}" type="button"${busy || terminal ? ` disabled${busy ? ' aria-busy="true"' : ''}` : ''}>${escapeHtml(buttonLabel)}</button><div class="update-download-status" role="status" aria-live="polite"${active ? '' : ' hidden'}><div><span class="update-download-label">${escapeHtml(statusLabel)}</span><strong class="update-download-percent">${hasPercent && (busy || terminal) ? `${number(percent)}%` : ''}</strong></div>${progressMarkup}</div></div>`;
+}
+
 function renderNotificationCenter(snapshot) {
   const state = snapshot?.notifications || {events: [], read_sequence: 0};
   const readSequence = Number(state.read_sequence || 0);
@@ -1297,7 +1338,7 @@ function renderNotificationCenter(snapshot) {
   ui.notificationList.innerHTML = events.length
     ? events.map(event => {
       const updateAction = event.kind === 'update_available'
-        ? `<button class="button notification-update-action install-latest-update" type="button">${escapeHtml(localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '查看更新'))}</button>`
+        ? updateActionMarkup()
         : '';
       return `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p>${updateAction}</article>`;
     }).join('')
@@ -3354,18 +3395,51 @@ async function installLatestUpdate(button) {
     ? '将从官方 GitHub Release 下载并校验安装包。校验成功后应用会关闭、安装并自动重启；失败时保留当前版本。是否继续？'
     : '将从官方 GitHub Release 下载并校验更新包。校验成功后会在 Finder 中显示，仍需你手动替换应用。是否继续？';
   if (!window.confirm(explanation)) return;
-  button.disabled = true;
-  const previousLabel = button.textContent;
-  button.textContent = '正在下载并校验…';
+  latestUpdateProgress = {state: 'running', phase: 'checking', percent: null, message: ''};
+  renderNotificationCenter(currentSnapshot);
   try {
+    if (api?.start_latest_update && api?.get_update_progress) {
+      const result = await api.start_latest_update();
+      if (!result?.ok) throw new Error(result?.error || '更新操作未完成');
+      latestUpdateProgress = result;
+      renderNotificationCenter(currentSnapshot);
+      scheduleUpdateProgressPoll(0);
+      return;
+    }
     const result = await api.install_latest_update();
-    showToast(result?.message || result?.error || '更新操作未完成');
-    if (!result?.ok) button.disabled = false;
+    latestUpdateProgress = result?.ok
+      ? {state: 'completed', phase: result.scheduled ? 'scheduled' : 'completed', percent: 100, message: result.message || ''}
+      : {state: 'failed', phase: 'failed', percent: null, message: result?.error || '更新操作未完成'};
+    renderNotificationCenter(currentSnapshot);
+    showToast(localizedText(result?.message || result?.error || '更新操作未完成'));
   } catch (error) {
-    showToast(error?.message || '更新失败，当前版本未被修改');
-    button.disabled = false;
-  } finally {
-    if (!button.disabled) button.textContent = previousLabel;
+    latestUpdateProgress = {state: 'failed', phase: 'failed', percent: null, message: error?.message || '更新失败，当前版本未被修改'};
+    renderNotificationCenter(currentSnapshot);
+    showToast(localizedText(error?.message || '更新失败，当前版本未被修改'));
+  }
+}
+
+function scheduleUpdateProgressPoll(delay = 300) {
+  window.clearTimeout(updateProgressPollTimer);
+  updateProgressPollTimer = window.setTimeout(() => void pollUpdateProgress(), delay);
+}
+
+async function pollUpdateProgress() {
+  if (!api?.get_update_progress) return;
+  try {
+    const status = await api.get_update_progress();
+    if (!status?.ok) throw new Error(status?.error || '无法读取更新进度');
+    latestUpdateProgress = status;
+    renderNotificationCenter(currentSnapshot);
+    if (status.state === 'running') {
+      scheduleUpdateProgressPoll();
+      return;
+    }
+    showToast(localizedText(status.message || updateProgressLabel(status) || '更新操作已结束'));
+  } catch (error) {
+    latestUpdateProgress = {state: 'failed', phase: 'failed', percent: null, message: error?.message || '无法读取更新进度'};
+    renderNotificationCenter(currentSnapshot);
+    showToast(localizedText(latestUpdateProgress.message));
   }
 }
 

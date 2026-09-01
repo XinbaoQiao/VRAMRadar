@@ -3642,6 +3642,60 @@ class ShellApiTests(unittest.TestCase):
                 restart_arguments=["--profile", "local"],
             )
 
+    def test_background_update_exposes_real_download_progress_and_terminal_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            api = AppApi(Profile.empty("local"), store=None, paths=paths, service=None)  # type: ignore[arg-type]
+            asset = {
+                "name": "VRAMRadar-Setup-0.7.0.exe",
+                "url": "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe",
+                "sha256": "ab" * 32,
+                "size": 10,
+            }
+            installer = Path(temporary) / asset["name"]
+            progress_seen = threading.Event()
+            finish_download = threading.Event()
+
+            def download(_asset, _root, *, progress_callback):
+                progress_callback(4, 10)
+                progress_seen.set()
+                self.assertTrue(finish_download.wait(2))
+                progress_callback(10, 10)
+                return installer
+
+            with patch(
+                "vram_radar.shell.check_latest_release",
+                return_value={
+                    "ok": True,
+                    "update_available": True,
+                    "latest_version": "0.7.0",
+                    "release_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.7.0",
+                    "asset": asset,
+                },
+            ), patch("vram_radar.shell.sys.platform", "win32"), patch(
+                "vram_radar.shell.download_verified_asset", side_effect=download
+            ), patch(
+                "vram_radar.shell.windows_update_capability", return_value=(True, None)
+            ), patch("vram_radar.shell.schedule_windows_update"):
+                started = api.start_latest_update()
+                duplicate = api.start_latest_update()
+                self.assertTrue(progress_seen.wait(2))
+                active = api.get_update_progress()
+                finish_download.set()
+                assert api._update_worker is not None
+                api._update_worker.join(2)
+                completed = api.get_update_progress()
+
+            self.assertTrue(started["accepted"])
+            self.assertFalse(duplicate["accepted"])
+            self.assertEqual(active["state"], "running")
+            self.assertEqual(active["downloaded_bytes"], 4)
+            self.assertEqual(active["total_bytes"], 10)
+            self.assertEqual(active["percent"], 40.0)
+            self.assertEqual(completed["state"], "completed")
+            self.assertEqual(completed["phase"], "scheduled")
+            self.assertEqual(completed["percent"], 100.0)
+
     def test_macos_update_download_is_verified_before_finder_reveal(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = storage_paths(Path(temporary))
