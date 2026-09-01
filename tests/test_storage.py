@@ -242,10 +242,15 @@ class WindowStatePersistenceTests(unittest.TestCase):
         normal = {"value": True}
         probes = []
         saved = threading.Event()
+        commit_probe_entered = threading.Event()
+        release_commit_probe = threading.Event()
         store = SimpleNamespace(load=lambda: WindowGeometry(), save=lambda _geometry: saved.set())
 
         def normal_state():
             probes.append(threading.get_ident())
+            if len(probes) > 1:
+                commit_probe_entered.set()
+                release_commit_probe.wait(1)
             return normal["value"]
 
         controller = WindowStateController(
@@ -267,6 +272,8 @@ class WindowStatePersistenceTests(unittest.TestCase):
         # threaded maximized handler is scheduled. The commit boundary must
         # reject the resize even while that handler is intentionally delayed.
         normal["value"] = False
+        self.assertTrue(commit_probe_entered.wait(1))
+        release_commit_probe.set()
 
         self.assertFalse(saved.wait(0.08))
         release_maximize_handler.set()

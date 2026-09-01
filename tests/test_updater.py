@@ -195,7 +195,7 @@ class UpdateDownloadTests(unittest.TestCase):
             result = download_verified_asset(
                 asset,
                 Path(temporary),
-                opener=lambda _request, timeout: FakeDownload(data, url),
+                opener=lambda _request, **_kwargs: FakeDownload(data, url),
             )
             self.assertEqual(result.read_bytes(), data)
             self.assertFalse(result.with_suffix(result.suffix + ".part").exists())
@@ -214,7 +214,7 @@ class UpdateDownloadTests(unittest.TestCase):
             download_verified_asset(
                 asset,
                 Path(temporary),
-                opener=lambda _request, timeout: FakeDownload(data, url),
+                opener=lambda _request, **_kwargs: FakeDownload(data, url),
                 progress_callback=lambda downloaded, total: progress.append((downloaded, total)),
             )
 
@@ -236,7 +236,7 @@ class UpdateDownloadTests(unittest.TestCase):
                 download_verified_asset(
                     asset,
                     Path(temporary),
-                    opener=lambda _request, timeout: FakeDownload(data, url),
+                    opener=lambda _request, **_kwargs: FakeDownload(data, url),
                 )
             self.assertEqual(list(Path(temporary).iterdir()), [])
 
@@ -254,7 +254,7 @@ class UpdateDownloadTests(unittest.TestCase):
                 download_verified_asset(
                     asset,
                     Path(temporary),
-                    opener=lambda _request, timeout: FakeDownload(data, "https://evil.example/update.exe"),
+                    opener=lambda _request, **_kwargs: FakeDownload(data, "https://evil.example/update.exe"),
                 )
 
     def test_failed_installer_restores_and_relaunches_previous_installation(self):
