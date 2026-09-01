@@ -404,8 +404,7 @@ function taskCompletionKey(kind, task) {
     return submittedAt ? `slurm:${jobId}:${submittedAt}` : `slurm:${jobId}`;
   }
   const pid = String(task.pid || '').trim();
-  const startedAt = String(task.started_at || '').trim();
-  return startedAt ? `process:${pid}:${startedAt}` : `process:${pid}`;
+  return `process:${pid}`;
 }
 
 function taskCompletionWatchButton(serverId, kind, task, currentUser) {
@@ -413,9 +412,12 @@ function taskCompletionWatchButton(serverId, kind, task, currentUser) {
   const taskId = String(kind === 'slurm' ? task.job_id : task.pid || '').trim();
   if (!taskId) return '';
   const taskKey = taskCompletionKey(kind, task);
-  const watched = (currentProfile?.task_completion_watches || []).some(
-    item => item.server_id === serverId && item.task_key === taskKey,
-  );
+  const watched = (currentProfile?.task_completion_watches || []).some(item => (
+    item.server_id === serverId
+    && (item.task_key === taskKey || (
+      kind === 'process' && item.task_kind === 'process' && String(item.task_id) === taskId
+    ))
+  ));
   const label = String(task.name || task.command_preview || (kind === 'slurm' ? taskId : `PID ${taskId}`)).trim();
   const owner = String(task.user || '').trim();
   const ownerScope = mine ? 'mine' : (owner ? 'other' : 'unknown');

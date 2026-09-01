@@ -217,6 +217,16 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
     task_id = require_bounded_text(
         raw.get("task_id"), "task completion watch id", maximum_bytes=128
     )
+    if task_kind == "process":
+        legacy_prefix = f"process:{task_id}:"
+        if task_key != f"process:{task_id}" and not task_key.startswith(legacy_prefix):
+            raise ConfigError("process completion watch key does not match its PID")
+        # A process start time derived from a sampled elapsed duration can
+        # drift by a second between polls. PID plus a generation fingerprint
+        # owns lifecycle identity; canonicalize older persisted watch keys.
+        task_key = f"process:{task_id}"
+    elif task_key != f"slurm:{task_id}" and not task_key.startswith(f"slurm:{task_id}:"):
+        raise ConfigError("Slurm completion watch key does not match its job id")
     label = require_bounded_text(
         raw.get("label", task_id),
         "task completion watch label",
@@ -501,15 +511,23 @@ class Profile:
                 "profile task_completion_watches cannot contain more than "
                 f"{MAX_TASK_COMPLETION_WATCHES} entries"
             )
-        task_completion_watches = tuple(
+        normalized_watches = [
             normalize_task_completion_watch(item) for item in task_completion_watch_rows
-        )
-        watch_keys = [
-            (watch["server_id"], watch["task_key"])
-            for watch in task_completion_watches
         ]
-        if len(watch_keys) != len(set(watch_keys)):
-            raise ConfigError("profile task_completion_watches must be unique")
+        task_completion_watches_list: list[dict[str, str]] = []
+        watch_keys: set[tuple[str, str]] = set()
+        for watch in normalized_watches:
+            watch_key = (watch["server_id"], watch["task_key"])
+            if watch_key in watch_keys:
+                # Older releases could save the same PID more than once under
+                # slightly different derived start timestamps. They now map to
+                # one canonical process lifecycle watch.
+                if watch["task_kind"] == "process":
+                    continue
+                raise ConfigError("profile task_completion_watches must be unique")
+            watch_keys.add(watch_key)
+            task_completion_watches_list.append(watch)
+        task_completion_watches = tuple(task_completion_watches_list)
         saved_view_rows = raw.get("saved_views", [])
         if not isinstance(saved_view_rows, (list, tuple)):
             raise ConfigError("profile saved_views must be an array")

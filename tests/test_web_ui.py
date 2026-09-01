@@ -53,6 +53,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.set_task_completion_watch", self.javascript)
         self.assertIn("api.mark_task_completion_alerts_read", self.javascript)
         self.assertIn("task-watch-toggle", self.javascript)
+        self.assertIn("return `process:${pid}`;", self.javascript)
+        self.assertNotIn("return startedAt ? `process:${pid}:${startedAt}`", self.javascript)
         self.assertIn("function taskCompletionWatchRenderSignature(serverId)", self.javascript)
         self.assertIn("taskCompletionWatchRenderSignature(server.server_id)", self.javascript)
 

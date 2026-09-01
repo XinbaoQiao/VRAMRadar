@@ -174,6 +174,30 @@ class ModelStorageTests(unittest.TestCase):
                 **raw["task_completion_watches"][0], "task_kind": "shell"
             }]))
 
+        migrated = Profile.from_dict(dict(raw, task_completion_watches=[{
+            "server_id": "gpu-1",
+            "task_key": "process:7312:2026-09-02T10:00:00Z",
+            "task_kind": "process",
+            "task_id": "7312",
+            "label": "python train.py",
+        }]))
+        self.assertEqual(migrated.task_completion_watches[0]["task_key"], "process:7312")
+        duplicate_legacy = Profile.from_dict(dict(raw, task_completion_watches=[
+            {
+                **migrated.task_completion_watches[0],
+                "task_key": "process:7312:2026-09-02T10:00:00Z",
+            },
+            {
+                **migrated.task_completion_watches[0],
+                "task_key": "process:7312:2026-09-02T10:00:01Z",
+            },
+        ]))
+        self.assertEqual(len(duplicate_legacy.task_completion_watches), 1)
+        with self.assertRaisesRegex(ConfigError, "does not match its PID"):
+            Profile.from_dict(dict(raw, task_completion_watches=[{
+                **migrated.task_completion_watches[0], "task_key": "process:9999"
+            }]))
+
     def test_ui_language_round_trip_and_validation(self):
         english = Profile.from_dict(dict(PROFILE, ui_language="en"))
 

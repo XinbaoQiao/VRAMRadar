@@ -701,12 +701,16 @@ class ShellApiTests(unittest.TestCase):
             }],
         })
 
-        def snapshot(active: bool) -> dict[str, object]:
+        def snapshot(active: bool, revision: int, sampled_at: str) -> dict[str, object]:
             return {
-                "monitoring": {"paused": False, "in_flight": False},
+                "monitoring": {"paused": False, "in_flight": False, "revision": revision},
                 "servers": [{
                     "server_id": "gpu",
-                    "connection": {"state": "online", "data_origin": "live"},
+                    "connection": {
+                        "state": "online",
+                        "data_origin": "live",
+                        "last_success_at": sampled_at,
+                    },
                     "processes": {"supported": True, "active": ([{
                         "pid": "7312", "name": "python train.py", "owner_scope": "unknown",
                     }] if active else [])},
@@ -718,12 +722,18 @@ class ShellApiTests(unittest.TestCase):
             store = ProfileStore(paths)
             store.save(profile)
             service = Mock()
-            service.snapshot.return_value = snapshot(True)
+            service.snapshot.return_value = snapshot(True, 1, "2026-09-02T10:00:01Z")
             api = AppApi(profile, store=store, paths=paths, service=service)
             notify = Mock(return_value=True)
             api.bind_notification_callback(notify)
 
-            service.snapshot.return_value = snapshot(False)
+            service.snapshot.return_value = snapshot(False, 2, "2026-09-02T10:00:02Z")
+            first_missing = api.get_snapshot()
+            notify.assert_not_called()
+            self.assertEqual(first_missing["notifications"]["events"], [])
+            api.get_snapshot()
+            notify.assert_not_called()
+            service.snapshot.return_value = snapshot(False, 3, "2026-09-02T10:00:03Z")
             completed = api.get_snapshot()
 
             notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
@@ -749,9 +759,9 @@ class ShellApiTests(unittest.TestCase):
             }],
         })
 
-        def snapshot(*, supported: bool, active: bool) -> dict[str, object]:
+        def snapshot(*, supported: bool, active: bool, revision: int) -> dict[str, object]:
             return {
-                "monitoring": {"paused": False, "in_flight": False},
+                "monitoring": {"paused": False, "in_flight": False, "revision": revision},
                 "servers": [{
                     "server_id": "gpu",
                     "connection": {"state": "online", "data_origin": "live"},
@@ -762,21 +772,26 @@ class ShellApiTests(unittest.TestCase):
             }
 
         service = Mock()
-        service.snapshot.return_value = snapshot(supported=True, active=True)
+        service.snapshot.return_value = snapshot(supported=True, active=True, revision=1)
         api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
         notify = Mock(return_value=True)
         api.bind_notification_callback(notify)
 
-        service.snapshot.return_value = snapshot(supported=False, active=False)
+        service.snapshot.return_value = snapshot(supported=False, active=False, revision=2)
         unavailable = api.get_snapshot()
         notify.assert_not_called()
         self.assertEqual(unavailable["notifications"]["events"], [])
 
-        service.snapshot.return_value = snapshot(supported=True, active=True)
+        service.snapshot.return_value = snapshot(supported=True, active=True, revision=3)
         api.get_snapshot()
         notify.assert_not_called()
 
-        service.snapshot.return_value = snapshot(supported=True, active=False)
+        service.snapshot.return_value = snapshot(supported=True, active=False, revision=4)
+        api.get_snapshot()
+        notify.assert_not_called()
+        api.get_snapshot()
+        notify.assert_not_called()
+        service.snapshot.return_value = snapshot(supported=True, active=False, revision=5)
         api.get_snapshot()
         notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
 
@@ -795,9 +810,9 @@ class ShellApiTests(unittest.TestCase):
             }],
         })
 
-        def snapshot(*, active: bool, in_flight: bool) -> dict[str, object]:
+        def snapshot(*, active: bool, in_flight: bool, revision: int) -> dict[str, object]:
             return {
-                "monitoring": {"paused": False, "in_flight": in_flight},
+                "monitoring": {"paused": False, "in_flight": in_flight, "revision": revision},
                 "servers": [{
                     "server_id": "gpu",
                     "connection": {"state": "online", "data_origin": "live"},
@@ -812,24 +827,130 @@ class ShellApiTests(unittest.TestCase):
             store = ProfileStore(paths)
             store.save(profile)
             first_service = Mock()
-            first_service.snapshot.return_value = snapshot(active=True, in_flight=False)
+            first_service.snapshot.return_value = snapshot(active=True, in_flight=False, revision=1)
             first = AppApi(profile, store=store, paths=paths, service=first_service)
             first.bind_notification_callback(Mock(return_value=True))
 
             startup_service = Mock()
-            startup_service.snapshot.return_value = snapshot(active=False, in_flight=True)
+            startup_service.snapshot.return_value = snapshot(active=False, in_flight=True, revision=2)
             notify = Mock(return_value=True)
             restarted = AppApi(profile, store=store, paths=paths, service=startup_service)
             restarted.bind_notification_callback(notify)
             notify.assert_not_called()
 
-            startup_service.snapshot.return_value = snapshot(active=True, in_flight=False)
+            startup_service.snapshot.return_value = snapshot(active=True, in_flight=False, revision=3)
             restarted.get_snapshot()
             notify.assert_not_called()
 
-            startup_service.snapshot.return_value = snapshot(active=False, in_flight=False)
+            startup_service.snapshot.return_value = snapshot(active=False, in_flight=False, revision=4)
+            restarted.get_snapshot()
+            notify.assert_not_called()
+            restarted.get_snapshot()
+            notify.assert_not_called()
+            startup_service.snapshot.return_value = snapshot(active=False, in_flight=False, revision=5)
             restarted.get_snapshot()
             notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
+
+    def test_process_started_at_jitter_does_not_claim_completion(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu",
+                "task_key": "process:7312:2026-09-02T10:00:00Z",
+                "task_kind": "process",
+                "task_id": "7312",
+                "label": "python train.py",
+                "owner_scope": "unknown",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(started_at: str) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live"},
+                    "processes": {"supported": True, "active": [{
+                        "pid": "7312",
+                        "name": "python train.py",
+                        "command_preview": "python train.py",
+                        "owner_scope": "unknown",
+                        "started_at": started_at,
+                    }]},
+                }],
+            }
+
+        service = Mock()
+        service.snapshot.return_value = snapshot("2026-09-02T10:00:00Z")
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = snapshot("2026-09-02T10:00:01Z")
+        current = api.get_snapshot()
+
+        notify.assert_not_called()
+        self.assertEqual(current["notifications"]["events"], [])
+        self.assertEqual(api.get_profile()["task_completion_watches"][0]["task_key"], "process:7312")
+
+    def test_one_authoritative_empty_process_sample_requires_confirmation(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(active: bool, revision: int, sampled_at: str) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False, "revision": revision},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {
+                        "state": "online",
+                        "data_origin": "live",
+                        "last_success_at": sampled_at,
+                    },
+                    "processes": {"supported": True, "active": ([{
+                        "pid": "7312", "name": "python train.py", "owner_scope": "mine",
+                    }] if active else [])},
+                }],
+            }
+
+        service = Mock()
+        service.snapshot.return_value = snapshot(True, 1, "2026-09-02T10:00:01Z")
+        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
+        notify = Mock(return_value=True)
+        api.bind_notification_callback(notify)
+
+        service.snapshot.return_value = snapshot(False, 2, "2026-09-02T10:00:02Z")
+        api.get_snapshot()
+        notify.assert_not_called()
+        # An unrelated server can advance the fleet revision while this
+        # server's process sample remains unchanged. It is still one absence.
+        service.snapshot.return_value = snapshot(False, 3, "2026-09-02T10:00:02Z")
+        api.get_snapshot()
+        notify.assert_not_called()
+        service.snapshot.return_value = snapshot(True, 4, "2026-09-02T10:00:03Z")
+        api.get_snapshot()
+        notify.assert_not_called()
+
+        service.snapshot.return_value = snapshot(False, 5, "2026-09-02T10:00:04Z")
+        api.get_snapshot()
+        notify.assert_not_called()
+        api.get_snapshot()
+        notify.assert_not_called()
+        service.snapshot.return_value = snapshot(False, 6, "2026-09-02T10:00:05Z")
+        api.get_snapshot()
+        notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
 
     def test_pid_reuse_completes_the_previous_process_generation(self):
         profile = Profile.from_dict({

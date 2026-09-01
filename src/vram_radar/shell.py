@@ -859,6 +859,7 @@ class AppApi:
         self._native_retry_failures = 0
         self._native_retry_not_before = 0.0
         self._task_alert_active: dict[str, dict[str, dict[str, str]]] = {}
+        self._task_alert_process_missing_once: dict[tuple[str, str], str] = {}
         self._notification_events: list[dict[str, Any]] = []
         self._notification_sequence = 0
         self._notification_read_sequence = 0
@@ -966,9 +967,11 @@ class AppApi:
                     if total >= 4_096 or not isinstance(task_key, str):
                         break
                     task = self._normalize_persisted_task(raw_task)
-                    if task is None or task["server_id"] != server_id or task["task_key"] != task_key:
+                    if task is None or task["server_id"] != server_id:
                         continue
-                    normalized[task_key] = task
+                    if task["task_kind"] != "process" and task["task_key"] != task_key:
+                        continue
+                    normalized[task["task_key"]] = task
                     total += 1
                 active[server_id] = normalized
         self._task_alert_active = active
@@ -1448,6 +1451,11 @@ class AppApi:
                 for server_id, tasks in self._task_alert_active.items()
                 if server_id in retained
             }
+            self._task_alert_process_missing_once = {
+                key: sample_marker
+                for key, sample_marker in self._task_alert_process_missing_once.items()
+                if key[0] in retained
+            }
         self._persist_notification_state()
 
     @staticmethod
@@ -1488,8 +1496,7 @@ class AppApi:
             owner_scope = raw_scope if raw_scope in {"mine", "other"} else (
                 "mine" if process_user and owner == process_user else ("other" if owner else "unknown")
             )
-            started_at = str(process.get("started_at") or "").strip()
-            task_key = f"process:{task_id}:{started_at}" if started_at else f"process:{task_id}"
+            task_key = f"process:{task_id}"
             fingerprint_payload = {
                 "name": str(process.get("name") or "").strip(),
                 "command": str(process.get("command_preview") or "").strip(),
@@ -1664,10 +1671,38 @@ class AppApi:
                 process_sample_supported = (
                     isinstance(processes, dict) and processes.get("supported") is True
                 )
+                process_sample_marker = str(connection.get("last_success_at") or "").strip()
+                if not process_sample_marker:
+                    revision = monitoring.get("revision")
+                    if isinstance(revision, int) and not isinstance(revision, bool):
+                        process_sample_marker = f"revision:{revision}"
                 if not process_sample_supported and previous:
                     for task_key, task in previous.items():
                         if task.get("task_kind") == "process":
                             all_current.setdefault(task_key, task)
+                elif process_sample_supported and previous:
+                    for task_key, task in previous.items():
+                        if task.get("task_kind") != "process":
+                            continue
+                        missing_key = (server_id, task_key)
+                        if task_key in all_current:
+                            self._task_alert_process_missing_once.pop(missing_key, None)
+                            continue
+                        previous_missing_marker = self._task_alert_process_missing_once.get(missing_key)
+                        if (
+                            not process_sample_marker
+                            or previous_missing_marker is None
+                            or previous_missing_marker == process_sample_marker
+                        ):
+                            # One otherwise-successful direct-process sample can
+                            # still be transiently empty. Re-reading the same
+                            # snapshot is not a second sample, so preserve the
+                            # baseline until a distinct authoritative absence.
+                            if process_sample_marker:
+                                self._task_alert_process_missing_once[missing_key] = process_sample_marker
+                            all_current[task_key] = task
+                        else:
+                            self._task_alert_process_missing_once.pop(missing_key, None)
                 current = {
                     task_key: task
                     for task_key, task in all_current.items()
@@ -1715,6 +1750,16 @@ class AppApi:
                             matching_watch["server_id"],
                             matching_watch["task_key"],
                         ))
+                retained_missing = {
+                    (server_id, task_key)
+                    for task_key, task in current.items()
+                    if task.get("task_kind") == "process"
+                }
+                self._task_alert_process_missing_once = {
+                    key: sample_marker
+                    for key, sample_marker in self._task_alert_process_missing_once.items()
+                    if key[0] != server_id or key in retained_missing
+                }
         profile_update = self._remove_completed_task_watches(completed_watch_keys)
         if profile_update is not None:
             snapshot["profile_update"] = profile_update
