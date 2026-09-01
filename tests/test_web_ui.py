@@ -43,6 +43,11 @@ class WebUiContractTests(unittest.TestCase):
     def test_task_completion_alerts_support_default_and_per_task_watches(self):
         self.assertIn('id="task-completion-alert-enabled"', self.markup)
         self.assertIn('id="task-alert-indicator"', self.markup)
+        self.assertIn("if (snapshot.profile_update) acceptProfile(snapshot.profile_update);", self.javascript)
+        self.assertIn(
+            "snapshot.profile_update || revision == null || revision !== lastRenderedRevision",
+            self.javascript,
+        )
         self.assertIn("currentProfile?.task_completion_alert_enabled !== false", self.javascript)
         self.assertIn("task_completion_watches:", self.javascript)
         self.assertIn("api.set_task_completion_watch", self.javascript)

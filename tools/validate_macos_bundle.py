@@ -214,9 +214,17 @@ def validate_release_tag() -> str:
     return actual
 
 
-def validate_packaged_update_transport(release_tag: str) -> tuple[str, str]:
+def validate_packaged_update_transport(release_tag: str, home: Path) -> tuple[str, str]:
     result = subprocess.run(
-        [str(EXECUTABLE), "--check-updates-json"],
+        [
+            str(EXECUTABLE),
+            "--home",
+            str(home),
+            "--profile",
+            "macos-bundle-smoke",
+            "--no-auto-import",
+            "--download-update-smoke-json",
+        ],
         cwd=ROOT,
         stdin=subprocess.DEVNULL,
         capture_output=True,
@@ -240,6 +248,19 @@ def validate_packaged_update_transport(release_tag: str) -> tuple[str, str]:
     expected_version = release_tag.removeprefix("v")
     if payload.get("current_version") != expected_version:
         raise RuntimeError("packaged macOS update transport used the wrong release identity")
+    if payload.get("name") != f"VRAMRadar-{expected_version}-macos.zip":
+        raise RuntimeError("packaged macOS updater downloaded the wrong release asset")
+    digest = payload.get("sha256")
+    size = payload.get("size")
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+        or not isinstance(size, int)
+        or isinstance(size, bool)
+        or size <= 0
+    ):
+        raise RuntimeError("packaged macOS updater did not verify the downloaded release asset")
     return str(payload.get("latest_version") or ""), "passed"
 
 
@@ -260,7 +281,8 @@ def main() -> int:
         validate_packaged_askpass()
         release_tag = validate_release_tag()
         latest_checked_version, update_transport_status = validate_packaged_update_transport(
-            release_tag
+            release_tag,
+            home,
         )
         run_bundle_smoke(home, "--show-paths", timeout=20)
         run_bundle_smoke(home, "--gui-smoke", timeout=45)
@@ -285,6 +307,7 @@ def main() -> int:
                     "packaged_askpass": "passed",
                     "expected_architectures": sorted(architectures),
                     "github_update_transport": update_transport_status,
+                    "github_update_download": update_transport_status,
                     "finder_tls_environment": "sanitized",
                     "latest_checked_version": latest_checked_version,
                     "assets_match_source": True,

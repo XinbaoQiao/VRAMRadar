@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -9,7 +10,14 @@ import subprocess
 import sys
 import uuid
 from typing import Any, Callable
+from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+from .updates import (
+    _is_tls_failure,
+    _macos_system_ca_file_context,
+    _macos_system_trust_context,
+)
 
 
 MAX_UPDATE_BYTES = 250 * 1024 * 1024
@@ -31,13 +39,50 @@ def _host(url: str) -> str:
     return (parts.hostname or "").lower()
 
 
+def _open_asset_response(
+    request: Request,
+    timeout_seconds: float,
+    opener: Callable[..., Any],
+    *,
+    platform_name: str,
+) -> Any:
+    open_kwargs: dict[str, Any] = {"timeout": max(1.0, float(timeout_seconds))}
+    if platform_name != "darwin":
+        return opener(request, **open_kwargs)
+
+    try:
+        context = _macos_system_trust_context()
+    except RuntimeError:
+        pass
+    else:
+        try:
+            return opener(request, **open_kwargs, context=context)
+        except (URLError, OSError) as exc:
+            if not _is_tls_failure(exc):
+                raise
+
+    fallback_context = _macos_system_ca_file_context()
+    if fallback_context is None:
+        raise RuntimeError("无法验证 GitHub 下载服务器的 HTTPS 证书") from None
+    logging.getLogger("vram_radar").warning(
+        "macOS native trust update download failed; retrying with the system CA file"
+    )
+    try:
+        return opener(request, **open_kwargs, context=fallback_context)
+    except (URLError, OSError) as exc:
+        if _is_tls_failure(exc):
+            raise RuntimeError("无法验证 GitHub 下载服务器的 HTTPS 证书") from None
+        raise
+
+
 def download_verified_asset(
     asset: dict[str, Any],
     staging_root: Path,
     *,
-    opener: Callable[..., Any] = urlopen,
+    opener: Callable[..., Any] | None = None,
     timeout_seconds: float = 30.0,
     progress_callback: Callable[[int, int], None] | None = None,
+    platform_name: str = sys.platform,
 ) -> Path:
     name = asset.get("name")
     url = asset.get("url")
@@ -67,7 +112,13 @@ def download_verified_asset(
     try:
         if progress_callback is not None:
             progress_callback(0, expected_size)
-        with opener(request, timeout=max(1.0, float(timeout_seconds))) as response, partial.open("xb") as handle:
+        response = _open_asset_response(
+            request,
+            timeout_seconds,
+            opener or urlopen,
+            platform_name=platform_name,
+        )
+        with response, partial.open("xb") as handle:
             final_url = response.geturl() if hasattr(response, "geturl") else url
             if _host(final_url) not in _ALLOWED_DOWNLOAD_HOSTS:
                 raise ValueError("更新下载被重定向到非 GitHub 地址")

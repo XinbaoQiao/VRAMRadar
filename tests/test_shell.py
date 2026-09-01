@@ -1,6 +1,7 @@
 from pathlib import Path
 import base64
 import copy
+import hashlib
 import json
 import os
 import socket
@@ -679,9 +680,11 @@ class ShellApiTests(unittest.TestCase):
         api.bind_notification_callback(notify)
         service.snapshot.return_value = self.task_alert_snapshot(active=False)
 
-        api.get_snapshot()
+        completed = api.get_snapshot()
 
         notify.assert_called_once()
+        self.assertEqual(completed["profile_update"]["task_completion_watches"], [])
+        self.assertEqual(api.get_profile()["task_completion_watches"], [])
 
     def test_exact_unknown_owner_process_watch_arms_and_notifies_on_disappearance(self):
         profile = Profile.from_dict({
@@ -710,19 +713,26 @@ class ShellApiTests(unittest.TestCase):
                 }],
             }
 
-        service = Mock()
-        service.snapshot.return_value = snapshot(True)
-        api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
-        notify = Mock(return_value=True)
-        api.bind_notification_callback(notify)
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.snapshot.return_value = snapshot(True)
+            api = AppApi(profile, store=store, paths=paths, service=service)
+            notify = Mock(return_value=True)
+            api.bind_notification_callback(notify)
 
-        service.snapshot.return_value = snapshot(False)
-        completed = api.get_snapshot()
+            service.snapshot.return_value = snapshot(False)
+            completed = api.get_snapshot()
 
-        notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
-        event = completed["notifications"]["events"][0]
-        self.assertEqual(event["task_key"], "process:7312")
-        self.assertEqual(event["native_delivery"], "shown")
+            notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
+            event = completed["notifications"]["events"][0]
+            self.assertEqual(event["task_key"], "process:7312")
+            self.assertEqual(event["native_delivery"], "shown")
+            self.assertEqual(completed["profile_update"]["task_completion_watches"], [])
+            self.assertEqual(api.get_profile()["task_completion_watches"], [])
+            self.assertEqual(store.load("local").task_completion_watches, ())
 
     def test_unsupported_process_sample_does_not_claim_completion(self):
         profile = Profile.from_dict({
@@ -769,6 +779,57 @@ class ShellApiTests(unittest.TestCase):
         service.snapshot.return_value = snapshot(supported=True, active=False)
         api.get_snapshot()
         notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
+
+    def test_startup_refresh_in_flight_cannot_claim_process_completion(self):
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": "process:7312", "task_kind": "process",
+                "task_id": "7312", "label": "python train.py", "owner_scope": "unknown",
+            }],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(*, active: bool, in_flight: bool) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": in_flight},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live"},
+                    "processes": {"supported": True, "active": ([{
+                        "pid": "7312", "name": "python train.py", "owner_scope": "unknown",
+                    }] if active else [])},
+                }],
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            first_service = Mock()
+            first_service.snapshot.return_value = snapshot(active=True, in_flight=False)
+            first = AppApi(profile, store=store, paths=paths, service=first_service)
+            first.bind_notification_callback(Mock(return_value=True))
+
+            startup_service = Mock()
+            startup_service.snapshot.return_value = snapshot(active=False, in_flight=True)
+            notify = Mock(return_value=True)
+            restarted = AppApi(profile, store=store, paths=paths, service=startup_service)
+            restarted.bind_notification_callback(notify)
+            notify.assert_not_called()
+
+            startup_service.snapshot.return_value = snapshot(active=True, in_flight=False)
+            restarted.get_snapshot()
+            notify.assert_not_called()
+
+            startup_service.snapshot.return_value = snapshot(active=False, in_flight=False)
+            restarted.get_snapshot()
+            notify.assert_called_once_with("任务已完成", "python train.py 已结束。")
 
     def test_pid_reuse_completes_the_previous_process_generation(self):
         profile = Profile.from_dict({
@@ -3925,6 +3986,40 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(result, 0)
         build_runtime.assert_not_called()
         self.assertEqual(json.loads(print_value.call_args.args[0]), update_result)
+
+    def test_download_update_smoke_exits_without_building_runtime(self):
+        data = b"verified update archive"
+        asset = {
+            "name": "VRAMRadar-0.8.8-macos.zip",
+            "url": "https://github.com/example-owner/VRAMRadar/releases/download/v0.8.8/VRAMRadar-0.8.8-macos.zip",
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        update_result = {
+            "ok": True,
+            "current_version": "0.8.8",
+            "latest_version": "0.8.8",
+            "asset": asset,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / asset["name"]
+            destination.write_bytes(data)
+            with patch("vram_radar.shell.check_latest_release", return_value=update_result), patch(
+                "vram_radar.shell.download_verified_asset", return_value=destination
+            ) as download, patch("vram_radar.shell.build_runtime") as build_runtime, patch(
+                "builtins.print"
+            ) as print_value:
+                result = main(["--home", temporary, "--download-update-smoke-json"])
+
+        self.assertEqual(result, 0)
+        build_runtime.assert_not_called()
+        download.assert_called_once_with(
+            asset,
+            storage_paths(Path(temporary)).cache / "update-download-smoke",
+        )
+        payload = json.loads(print_value.call_args.args[0])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["sha256"], asset["sha256"])
 
 
 if __name__ == "__main__":

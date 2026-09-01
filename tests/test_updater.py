@@ -1,10 +1,12 @@
 import hashlib
 import json
 from pathlib import Path
+import ssl
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch, sentinel
+from urllib.error import URLError
 
 from vram_radar.update_helper import run_update
 from vram_radar.updater import download_verified_asset
@@ -32,6 +34,107 @@ class FakeDownload:
 
 
 class UpdateDownloadTests(unittest.TestCase):
+    @staticmethod
+    def asset(data: bytes) -> tuple[dict[str, object], str]:
+        url = "https://github.com/example-owner/VRAMRadar/releases/download/v0.7.0/VRAMRadar-Setup-0.7.0.exe"
+        return ({
+            "name": "VRAMRadar-Setup-0.7.0.exe",
+            "url": url,
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }, url)
+
+    def test_macos_download_uses_native_system_trust(self):
+        data = b"official macOS archive"
+        asset, url = self.asset(data)
+        opener = Mock(return_value=FakeDownload(data, url))
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.updater._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updater._macos_system_ca_file_context",
+        ) as fallback:
+            result = download_verified_asset(
+                asset,
+                Path(temporary),
+                opener=opener,
+                platform_name="darwin",
+            )
+            downloaded = result.read_bytes()
+
+        self.assertEqual(downloaded, data)
+        self.assertIs(opener.call_args.kwargs["context"], sentinel.native_context)
+        fallback.assert_not_called()
+
+    def test_macos_native_tls_failure_uses_ca_file_fallback(self):
+        data = b"official macOS archive"
+        asset, url = self.asset(data)
+        certificate_error = URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+        opener = Mock(side_effect=[certificate_error, FakeDownload(data, url)])
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.updater._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updater._macos_system_ca_file_context",
+            return_value=sentinel.ca_file_context,
+        ):
+            result = download_verified_asset(
+                asset,
+                Path(temporary),
+                opener=opener,
+                platform_name="darwin",
+            )
+            downloaded = result.read_bytes()
+
+        self.assertEqual(downloaded, data)
+        self.assertEqual(opener.call_count, 2)
+        self.assertIs(opener.call_args_list[1].kwargs["context"], sentinel.ca_file_context)
+
+    def test_macos_non_tls_failure_does_not_retry(self):
+        data = b"official macOS archive"
+        asset, _url = self.asset(data)
+        opener = Mock(side_effect=URLError("network unavailable"))
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.updater._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updater._macos_system_ca_file_context",
+        ) as fallback:
+            with self.assertRaises(URLError):
+                download_verified_asset(
+                    asset,
+                    Path(temporary),
+                    opener=opener,
+                    platform_name="darwin",
+                )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+        opener.assert_called_once()
+        fallback.assert_not_called()
+
+    def test_macos_exhausted_tls_trust_is_actionable_and_cleans_stage(self):
+        data = b"official macOS archive"
+        asset, _url = self.asset(data)
+        certificate_error = URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+        opener = Mock(side_effect=[certificate_error, certificate_error])
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "vram_radar.updater._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updater._macos_system_ca_file_context",
+            return_value=sentinel.ca_file_context,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "无法验证 GitHub 下载服务器"):
+                download_verified_asset(
+                    asset,
+                    Path(temporary),
+                    opener=opener,
+                    platform_name="darwin",
+                )
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+        self.assertEqual(opener.call_count, 2)
+
     def test_validation_update_keeps_installer_out_of_user_registration(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

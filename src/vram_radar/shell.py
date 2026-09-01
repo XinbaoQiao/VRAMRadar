@@ -1605,13 +1605,41 @@ class AppApi:
             return evidence
         return {}
 
+    def _remove_completed_task_watches(
+        self,
+        completed_watch_keys: set[tuple[str, str]],
+    ) -> dict[str, Any] | None:
+        if not completed_watch_keys:
+            return None
+        with self._profile_mutation_lock:
+            current_profile = self.profile
+            retained = tuple(
+                watch
+                for watch in current_profile.task_completion_watches
+                if (watch["server_id"], watch["task_key"]) not in completed_watch_keys
+            )
+            if retained == current_profile.task_completion_watches:
+                return None
+            result = self._persist_local_preferences(
+                replace(current_profile, task_completion_watches=retained),
+                expected_profile=current_profile,
+            )
+        if not result.get("ok"):
+            logging.getLogger("vram_radar").warning(
+                "could not remove completed task watches: %s",
+                result.get("code") or "profile_save_failed",
+            )
+            return None
+        profile = result.get("profile")
+        return profile if isinstance(profile, dict) else None
+
     def _evaluate_task_completion_alerts(self, snapshot: dict[str, Any]) -> None:
         if not isinstance(snapshot, dict):
             return
         with self._profile_mutation_lock:
             profile = self.profile
         monitoring = snapshot.get("monitoring") or {}
-        if monitoring.get("paused") is True:
+        if monitoring.get("paused") is True or monitoring.get("in_flight") is True:
             self._attach_notification_state(snapshot)
             return
         watched = {
@@ -1619,6 +1647,7 @@ class AppApi:
             for watch in profile.task_completion_watches
         }
         completed: list[dict[str, str]] = []
+        completed_watch_keys: set[tuple[str, str]] = set()
         events: list[dict[str, Any]] = []
         state_changed = False
         with self._task_alert_state_lock:
@@ -1658,9 +1687,8 @@ class AppApi:
                     current_task = current.get(task_key)
                     if current_task is not None and not self._task_generation_changed(task, current_task):
                         continue
-                    explicitly_watched = self._task_watch_matches(
-                        self._task_watch_for_task(watched, server_id, task), task
-                    )
+                    matching_watch = self._task_watch_for_task(watched, server_id, task)
+                    explicitly_watched = self._task_watch_matches(matching_watch, task)
                     if not explicitly_watched and not (
                         profile.task_completion_alert_enabled and task.get("owner_scope") == "mine"
                     ):
@@ -1682,6 +1710,14 @@ class AppApi:
                         "native_delivery": "pending",
                     })
                     completed.append(task)
+                    if explicitly_watched and matching_watch is not None:
+                        completed_watch_keys.add((
+                            matching_watch["server_id"],
+                            matching_watch["task_key"],
+                        ))
+        profile_update = self._remove_completed_task_watches(completed_watch_keys)
+        if profile_update is not None:
+            snapshot["profile_update"] = profile_update
         created = self._record_notifications(events)
         if state_changed and not events:
             self._persist_notification_state()
@@ -4053,6 +4089,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show-paths", action="store_true", help="print resolved per-user storage paths and exit")
     parser.add_argument("--show-release", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--check-updates-json", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--download-update-smoke-json", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="enable the embedded webview developer tools")
     parser.add_argument("--gui-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--gui-update-smoke", action="store_true", help=argparse.SUPPRESS)
@@ -4067,6 +4104,34 @@ def main(argv: list[str] | None = None) -> int:
         result = check_latest_release()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
+
+    if args.download_update_smoke_json:
+        result = check_latest_release()
+        asset = result.get("asset") if isinstance(result, dict) else None
+        if not result.get("ok") or not isinstance(asset, dict):
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1
+        try:
+            destination = download_verified_asset(
+                asset,
+                storage_paths(args.home).cache / "update-download-smoke",
+            )
+        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+            print(json.dumps({
+                "ok": False,
+                "code": "update_download_failed",
+                "error": str(exc) or "更新下载验证失败",
+            }, ensure_ascii=False, indent=2))
+            return 1
+        print(json.dumps({
+            "ok": True,
+            "current_version": result.get("current_version"),
+            "latest_version": result.get("latest_version"),
+            "name": destination.name,
+            "size": destination.stat().st_size,
+            "sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
+        }, ensure_ascii=False, indent=2))
+        return 0
 
     if args.quit_existing:
         try:

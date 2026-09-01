@@ -1982,6 +1982,7 @@ function syncUnchangedSnapshotStatus(snapshot) {
 
 function render(snapshot) {
   uiRenderMetrics.fullRenders += 1;
+  if (snapshot.profile_update) acceptProfile(snapshot.profile_update);
   currentSnapshot = snapshot;
   lastRenderedRevision = snapshotRevision(snapshot);
   renderTaskAlertIndicator(snapshot);
@@ -2166,7 +2167,7 @@ function scheduleRefreshCompletion(generation, attempt = 0) {
       const snapshot = await api.get_snapshot();
       if (generation !== refreshPollGeneration) return;
       const revision = snapshotRevision(snapshot);
-      if (revision == null || revision !== lastRenderedRevision) {
+      if (snapshot.profile_update || revision == null || revision !== lastRenderedRevision) {
         render(snapshot);
       } else {
         syncUnchangedSnapshotStatus(snapshot);
@@ -2195,7 +2196,7 @@ async function refresh(force = false, serverId = null) {
     const snapshot = await api.get_status(force, serverId);
     if (generation !== refreshPollGeneration) return;
     const revision = snapshotRevision(snapshot);
-    if (revision == null || revision !== lastRenderedRevision) render(snapshot);
+    if (snapshot.profile_update || revision == null || revision !== lastRenderedRevision) render(snapshot);
     else syncUnchangedSnapshotStatus(snapshot);
     if (snapshot.monitoring?.in_flight && api?.get_snapshot) {
       scheduleRefreshCompletion(generation);
