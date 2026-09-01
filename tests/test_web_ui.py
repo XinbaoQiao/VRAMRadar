@@ -77,6 +77,10 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn('data-server-navigator-filter="recent"', self.markup)
         self.assertNotIn('id="task-completion-watch-list"', self.markup)
         self.assertIn("navigator-task-watches", self.javascript)
+        self.assertIn('data-server-navigator-filter="watches" aria-pressed="false">关注</button>', self.markup)
+        self.assertIn('class="navigator-watch-marker"', self.javascript)
+        self.assertIn("navigator-watch-summary-copy", self.javascript)
+        self.assertIn(".navigator-watch-marker", self.styles)
 
     def test_connection_type_defaults_to_auto_with_manual_fallback(self):
         self.assertIn('<option value="auto">自动识别（推荐）</option>', self.markup)
@@ -150,6 +154,7 @@ class WebUiContractTests(unittest.TestCase):
         ):
             self.assertIn(text, direct_module)
         self.assertIn("process.command_preview", direct_module)
+        self.assertIn('<details class="process-command-details" open>', direct_module)
         self.assertIn("其他用户命令摘要未启用", direct_module)
         self.assertIn("敏感参数已遮盖", direct_module)
         self.assertIn("其他用户摘要还需在服务器设置中开启", direct_module)
@@ -298,7 +303,7 @@ class WebUiContractTests(unittest.TestCase):
             "--font-body: 15px",
             ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 62px",
             ".button { min-height: 36px",
-            "main { grid-column: 1; width: 100%; max-width: 1320px",
+            "main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1320px",
             ".capacity-metric { min-height: 174px",
             ".server-card { display: grid; grid-template-columns: 46px",
             ".server-head { display: grid; grid-template-columns:",
@@ -604,6 +609,9 @@ class WebUiContractTests(unittest.TestCase):
             ".server-navigator-position",
         ):
             self.assertIn(selector, self.styles)
+        self.assertIn(".server-navigator { position: sticky; z-index: 15; top:", self.styles)
+        self.assertIn("grid-row: 2; grid-column: 2", self.styles)
+        self.assertIn("main { grid-row: 2; grid-column: 1", self.styles)
         search_index = self.javascript[
             self.javascript.index("function serverNavigatorSearchText"):self.javascript.index("function serverMatchesNavigator")
         ]

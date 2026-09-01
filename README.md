@@ -65,12 +65,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.8.6**.
+The current public stable release is **v0.8.7**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.8.6.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.8.6-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-0.8.7.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-0.8.7-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -79,7 +79,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.8.6 release notes](docs/release-notes-v0.8.6.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.8.7 release notes](docs/release-notes-v0.8.7.md) for the exact boundaries.
 
 ## Local-first by design
 

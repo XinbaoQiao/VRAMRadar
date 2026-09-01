@@ -69,7 +69,6 @@
     ['任务', 'Jobs'],
     ['异常', 'Issues'],
     ['收藏', 'Favorites'],
-    ['关注任务', 'Watching'],
     ['没有匹配的服务器', 'No matching servers'],
     ['上一台服务器', 'Previous server'],
     ['上一台', 'Previous'],

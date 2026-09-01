@@ -540,6 +540,25 @@ BENCHMARK_JAVASCRIPT = r"""
     const watchedPanelExpands = Boolean(watchedPanel?.open)
       && watchedPanel.querySelectorAll('.remove-task-watch').length === 1
       && Boolean(watchedPanel.querySelector('.clear-task-watches'));
+    if (watchedPanel) watchedPanel.open = false;
+    document.activeElement?.blur();
+    ui.serverNavigator.classList.remove('dragging');
+    applyServerNavigatorSide('right');
+    forceLayout(ui.serverNavigator);
+    const watchedMarker = watchedPanel?.querySelector('.navigator-watch-marker');
+    const watchRightRailBounds = ui.serverNavigator.getBoundingClientRect();
+    const watchRightMarkerBounds = watchedMarker?.getBoundingClientRect();
+    const watchedMarkerVisibleRight = Boolean(watchRightMarkerBounds)
+      && watchRightMarkerBounds.left >= watchRightRailBounds.left - 0.5
+      && watchRightMarkerBounds.right <= watchRightRailBounds.right + 0.5;
+    applyServerNavigatorSide('left');
+    forceLayout(ui.serverNavigator);
+    const watchLeftRailBounds = ui.serverNavigator.getBoundingClientRect();
+    const watchLeftMarkerBounds = watchedMarker?.getBoundingClientRect();
+    const watchedMarkerVisibleLeft = Boolean(watchLeftMarkerBounds)
+      && watchLeftMarkerBounds.left >= watchLeftRailBounds.left - 0.5
+      && watchLeftMarkerBounds.right <= watchLeftRailBounds.right + 0.5;
+    applyServerNavigatorSide('right');
     const watchedManagementIsOutsideSettings = !document.getElementById('task-completion-watch-list');
     currentProfile = {
       ...currentProfile,
@@ -570,6 +589,7 @@ BENCHMARK_JAVASCRIPT = r"""
     applyServerNavigatorSide('left');
     forceLayout(appShell);
     const leftCollapsedMainBounds = mainContent.getBoundingClientRect();
+    const leftRailBounds = ui.serverNavigator.getBoundingClientRect();
     const leftCollapsedTrackWidth = leftCollapsedMainBounds.left - appBounds.left;
     ui.serverNavigator.classList.add('dragging');
     forceLayout(appShell);
@@ -812,8 +832,10 @@ BENCHMARK_JAVASCRIPT = r"""
       repeated_render_does_not_rebuild_navigator: metricDelta(repeatMetricsAfter, repeatMetricsBefore).navigatorBuilds === 0,
       task_watch_state_repaints_without_server_refresh: taskWatchStateRepaintsImmediately,
       watched_tasks_live_in_collapsible_sidebar: watchedPanelStartsCollapsed && watchedPanelExpands && watchedManagementIsOutsideSettings,
+      watched_task_compact_marker_survives_both_sides: watchedMarkerVisibleRight && watchedMarkerVisibleLeft,
       navigator_right_collapsed_track_is_compact: rightCollapsedTrackWidth <= 50.5 && rightCollapsedTrackWidth >= rightRailBounds.width,
       navigator_left_collapsed_track_is_compact: leftCollapsedTrackWidth <= 50.5 && leftCollapsedTrackWidth >= rightRailBounds.width,
+      navigator_left_stays_in_the_same_grid_row: Math.abs(leftRailBounds.top - rightRailBounds.top) < 0.5,
       navigator_expansion_does_not_reflow_main: Math.abs(rightExpandedMainBounds.width - rightCollapsedMainBounds.width) < 0.5
         && Math.abs(leftExpandedMainBounds.width - leftCollapsedMainBounds.width) < 0.5,
       directory_fixture_has_160_entries: directoryEntries.length === 160,
