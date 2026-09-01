@@ -7,7 +7,6 @@ import socket
 import subprocess
 import tempfile
 import threading
-import time
 import unittest
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -3250,24 +3249,26 @@ class ShellApiTests(unittest.TestCase):
     def test_gui_update_smoke_shares_one_timeout_budget(self):
         window = Mock()
         window.events.shown = Mock()
-        window.events.shown.wait.side_effect = lambda _timeout: (time.sleep(0.03) or True)
+        window.events.shown.wait.return_value = True
         completed = Mock()
         completed.wait.return_value = False
         result = {}
 
-        started = time.monotonic()
-        window_smoke_worker(
-            window,
-            result,
-            timeout_seconds=0.04,
-            verify_update_bridge=True,
-            update_check_completed=completed,
-            update_check_result={},
-        )
-        elapsed = time.monotonic() - started
+        with patch(
+            "vram_radar.shell.time.monotonic",
+            side_effect=[10.0, 10.01, 10.035],
+        ):
+            window_smoke_worker(
+                window,
+                result,
+                timeout_seconds=0.04,
+                verify_update_bridge=True,
+                update_check_completed=completed,
+                update_check_result={},
+            )
 
-        self.assertLess(elapsed, 0.07)
-        self.assertLess(completed.wait.call_args.args[0], 0.025)
+        self.assertAlmostEqual(window.events.shown.wait.call_args.args[0], 0.03)
+        self.assertAlmostEqual(completed.wait.call_args.args[0], 0.005)
         self.assertFalse(result["shown"])
         self.assertIn("timeout", result["error"])
         window.destroy.assert_called_once_with()
