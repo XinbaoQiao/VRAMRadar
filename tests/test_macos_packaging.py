@@ -73,6 +73,8 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn('"REQUESTS_CA_BUNDLE"', self.validator)
         self.assertIn('env=finder_like_environment()', self.validator)
         self.assertIn('"finder_tls_environment": "sanitized"', self.validator)
+        self.assertIn('run_bundle_smoke(home, "--gui-update-smoke", timeout=60)', self.validator)
+        self.assertIn('"cocoa_update_bridge_smoke_exit": 0', self.validator)
         self.assertIn('code == "update_rate_limited"', self.validator)
         self.assertIn('"rate-limited-requires-sibling-proof"', self.validator)
         self.assertIn('"--check-updates-json"', self.validator)

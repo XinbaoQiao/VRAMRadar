@@ -606,11 +606,52 @@ def window_smoke_worker(
     result: dict[str, Any],
     timeout_seconds: float = 20.0,
     request_shutdown: Callable[[], None] | None = None,
+    verify_update_bridge: bool = False,
 ) -> None:
     try:
         result["shown"] = bool(window.events.shown.wait(timeout_seconds))
         if not result["shown"]:
             result["error"] = "desktop window did not become visible before the smoke timeout"
+        elif verify_update_bridge:
+            loaded = bool(window.events.loaded.wait(timeout_seconds))
+            if not loaded:
+                result["shown"] = False
+                result["error"] = "desktop frontend did not load before the update smoke timeout"
+            else:
+                window.evaluate_js(
+                    """(() => {
+                      window.__vramRadarUpdateSmokeResult = null;
+                      Promise.resolve(window.pywebview.api.check_for_updates())
+                        .then((value) => {
+                          window.__vramRadarUpdateSmokeResult = {
+                            settled: true,
+                            ok: value?.ok === true,
+                            code: value?.code || null,
+                            currentVersion: value?.current_version || null,
+                          };
+                        })
+                        .catch((error) => {
+                          window.__vramRadarUpdateSmokeResult = {
+                            settled: true,
+                            ok: false,
+                            code: 'bridge_exception',
+                            errorName: error?.name || 'Error',
+                          };
+                        });
+                    })()"""
+                )
+                deadline = time.monotonic() + max(0.1, timeout_seconds)
+                bridge_result: Any = None
+                while time.monotonic() < deadline:
+                    bridge_result = window.evaluate_js("window.__vramRadarUpdateSmokeResult")
+                    if isinstance(bridge_result, dict) and bridge_result.get("settled"):
+                        break
+                    time.sleep(0.1)
+                result["update_bridge"] = bridge_result
+                if not isinstance(bridge_result, dict) or not bridge_result.get("ok"):
+                    result["shown"] = False
+                    code = bridge_result.get("code") if isinstance(bridge_result, dict) else None
+                    result["error"] = f"desktop update bridge smoke failed: {code or 'timeout'}"
     except Exception as exc:
         result["shown"] = False
         result["error"] = f"desktop window smoke failed: {exc}"
@@ -4000,6 +4041,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-updates-json", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="enable the embedded webview developer tools")
     parser.add_argument("--gui-smoke", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--gui-update-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--quit-existing", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -4150,7 +4192,8 @@ def main(argv: list[str] | None = None) -> int:
                 shutdown.bind_worker(worker)
                 tray_controller: WindowsTrayController | None = None
                 macos_notification_bound = False
-                if sys.platform == "win32" and not args.gui_smoke:
+                gui_smoke = args.gui_smoke or args.gui_update_smoke
+                if sys.platform == "win32" and not gui_smoke:
                     candidate: WindowsTrayController | None = None
 
                     def notification_status() -> str:
@@ -4209,7 +4252,7 @@ def main(argv: list[str] | None = None) -> int:
                         api.bind_notification_callback(candidate.notify)
                     except Exception:
                         logging.getLogger("vram_radar").exception("failed to start the Windows notification icon")
-                elif sys.platform == "darwin" and not args.gui_smoke:
+                elif sys.platform == "darwin" and not gui_smoke:
                     api.bind_notification_callback(show_macos_notification)
                     macos_notification_bound = True
                 non_tray_closing_handler: Callable[[], bool] | None = None
@@ -4219,10 +4262,16 @@ def main(argv: list[str] | None = None) -> int:
                 worker.start()
                 smoke_result: dict[str, Any] = {}
                 smoke_worker: threading.Thread | None = None
-                if args.gui_smoke:
+                if gui_smoke:
                     smoke_worker = threading.Thread(
                         target=window_smoke_worker,
-                        args=(window, smoke_result, 20.0, shutdown.request),
+                        args=(
+                            window,
+                            smoke_result,
+                            30.0 if args.gui_update_smoke else 20.0,
+                            shutdown.request,
+                            args.gui_update_smoke,
+                        ),
                         name="vram-radar-gui-smoke",
                         daemon=True,
                     )
@@ -4250,7 +4299,7 @@ def main(argv: list[str] | None = None) -> int:
                                 pass
                     if smoke_worker is not None:
                         smoke_worker.join(timeout=1)
-                if args.gui_smoke and not smoke_result.get("shown"):
+                if gui_smoke and not smoke_result.get("shown"):
                     logging.getLogger("vram_radar").error(
                         "%s", smoke_result.get("error") or "desktop window smoke failed"
                     )

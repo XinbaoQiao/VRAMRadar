@@ -261,6 +261,7 @@ def main() -> int:
         )
         run_bundle_smoke(home, "--show-paths", timeout=20)
         run_bundle_smoke(home, "--gui-smoke", timeout=45)
+        run_bundle_smoke(home, "--gui-update-smoke", timeout=60)
         profile_path = home / "config" / "profiles" / "macos-bundle-smoke.toml"
         if profile_path.exists():
             raise RuntimeError("empty packaged smoke unexpectedly persisted a Profile")
@@ -286,6 +287,7 @@ def main() -> int:
                     "assets_match_source": True,
                     "show_paths_exit": 0,
                     "cocoa_window_smoke_exit": 0,
+                    "cocoa_update_bridge_smoke_exit": 0,
                     "real_server_contacted": False,
                 },
                 indent=2,
