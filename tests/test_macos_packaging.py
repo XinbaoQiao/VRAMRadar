@@ -1,5 +1,9 @@
+import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+
+from tools.validate_macos_bundle import TLS_ENVIRONMENT_KEYS, finder_like_environment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +68,11 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn("validate_packaged_askpass()", self.validator)
         self.assertIn("validate_release_tag()", self.validator)
         self.assertIn("validate_packaged_update_transport(", self.validator)
+        self.assertIn('"SSL_CERT_FILE"', self.validator)
+        self.assertIn('"SSL_CERT_DIR"', self.validator)
+        self.assertIn('"REQUESTS_CA_BUNDLE"', self.validator)
+        self.assertIn('env=finder_like_environment()', self.validator)
+        self.assertIn('"finder_tls_environment": "sanitized"', self.validator)
         self.assertIn('code == "update_rate_limited"', self.validator)
         self.assertIn('"rate-limited-requires-sibling-proof"', self.validator)
         self.assertIn('"--check-updates-json"', self.validator)
@@ -80,6 +89,15 @@ class MacOSPackagingContractTests(unittest.TestCase):
         self.assertIn('["spctl", "--assess", "--type", "execute"', self.validator)
         self.assertIn('"real_server_contacted": False', self.validator)
         self.assertIn('if sys.platform != "darwin"', self.validator)
+
+    def test_bundle_validator_removes_shell_only_ca_state(self) -> None:
+        injected = {key: f"secret-{index}" for index, key in enumerate(TLS_ENVIRONMENT_KEYS)}
+        with patch.dict(os.environ, {**injected, "VRAM_RADAR_RELEASE_TAG": "v0.8.8"}, clear=True):
+            environment = finder_like_environment()
+
+        for key in TLS_ENVIRONMENT_KEYS:
+            self.assertNotIn(key, environment)
+        self.assertEqual(environment["VRAM_RADAR_RELEASE_TAG"], "v0.8.8")
 
     def test_ci_builds_validated_native_apple_silicon_and_intel_packages_without_secrets(self) -> None:
         self.assertIn("runner: macos-14", self.workflow)

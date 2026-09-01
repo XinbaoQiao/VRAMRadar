@@ -3604,6 +3604,55 @@ class ShellApiTests(unittest.TestCase):
         self.assertEqual(first["notifications"]["events"][0]["kind"], "update_available")
         notify.assert_called_once_with("发现新版本", "VRAM Radar 0.9.0 已可下载。")
 
+    def test_update_check_success_survives_auxiliary_notification_failure(self):
+        api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]
+        release = {
+            "ok": True,
+            "update_available": False,
+            "current_version": "0.8.8",
+            "latest_version": "0.8.8",
+        }
+
+        with patch(
+            "vram_radar.shell.check_latest_release",
+            return_value=release,
+        ), patch.object(
+            api,
+            "_attach_notification_state",
+            side_effect=RuntimeError("corrupt auxiliary state"),
+        ), self.assertLogs("vram_radar", level="ERROR"):
+            result = api.check_for_updates()
+
+        self.assertTrue(result["ok"])
+        self.assertFalse(result["update_available"])
+        self.assertEqual(result["current_version"], "0.8.8")
+        self.assertEqual(result["update_action"], "browser")
+
+    def test_available_update_survives_notification_delivery_failure(self):
+        api = AppApi(Profile.empty("local"), store=None, paths=None, service=None)  # type: ignore[arg-type]
+        release_url = "https://github.com/example-org/VRAMRadar/releases/tag/v0.9.0"
+        release = {
+            "ok": True,
+            "update_available": True,
+            "latest_version": "0.9.0",
+            "release_url": release_url,
+        }
+
+        with patch(
+            "vram_radar.shell.check_latest_release",
+            return_value=release,
+        ), patch.object(
+            api,
+            "_record_notifications",
+            side_effect=RuntimeError("notification store unavailable"),
+        ), self.assertLogs("vram_radar", level="ERROR"):
+            result = api.check_for_updates()
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["update_available"])
+        self.assertEqual(result["release_url"], release_url)
+        self.assertEqual(api.latest_release_url, release_url)
+
     def test_windows_one_click_update_rechecks_downloads_verifies_and_schedules(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = storage_paths(Path(temporary))

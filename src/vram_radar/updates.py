@@ -25,6 +25,7 @@ _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_ASSET_BYTES = 250 * 1024 * 1024
 _SHA256_PATTERN = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+_MACOS_SYSTEM_CA_FILE = "/etc/ssl/cert.pem"
 
 
 def _version_tuple(value: str) -> tuple[int, int, int, int, int]:
@@ -59,6 +60,61 @@ def _macos_system_trust_context() -> ssl.SSLContext:
     except ImportError as exc:
         raise RuntimeError("macOS system trust support is unavailable") from exc
     return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+
+def _macos_system_ca_file_context() -> ssl.SSLContext | None:
+    """Load the maintained macOS CA bundle without relying on process state."""
+
+    try:
+        return ssl.create_default_context(cafile=_MACOS_SYSTEM_CA_FILE)
+    except (OSError, ssl.SSLError):
+        return None
+
+
+def _is_tls_failure(exc: BaseException) -> bool:
+    reason = exc.reason if isinstance(exc, URLError) else exc
+    return isinstance(reason, (ssl.SSLCertVerificationError, ssl.SSLError))
+
+
+def _read_macos_payload(
+    request: Request,
+    timeout_seconds: float,
+    opener: Callable[..., Any],
+) -> Any:
+    """Use native trust first, then the stable macOS CA file as a bounded fallback."""
+
+    primary_error: BaseException | None = None
+    try:
+        context = _macos_system_trust_context()
+    except RuntimeError as exc:
+        primary_error = exc
+    else:
+        try:
+            return _read_payload(
+                request,
+                timeout_seconds,
+                opener,
+                ssl_context=context,
+            )
+        except (URLError, OSError) as exc:
+            if not _is_tls_failure(exc):
+                raise
+            primary_error = exc
+
+    fallback_context = _macos_system_ca_file_context()
+    if fallback_context is None:
+        if primary_error is not None:
+            raise primary_error
+        raise RuntimeError("macOS certificate trust is unavailable")
+    logging.getLogger("vram_radar").warning(
+        "macOS native trust update check failed; retrying with the system CA file"
+    )
+    return _read_payload(
+        request,
+        timeout_seconds,
+        opener,
+        ssl_context=fallback_context,
+    )
 
 
 def _update_failure_details(exc: BaseException) -> tuple[str, str, int | None]:
@@ -173,13 +229,10 @@ def check_latest_release(
     )
     try:
         active_opener = opener or urlopen
-        ssl_context = _macos_system_trust_context() if opener is None and platform_name == "darwin" else None
-        payload = _read_payload(
-            request,
-            timeout_seconds,
-            active_opener,
-            ssl_context=ssl_context,
-        )
+        if opener is None and platform_name == "darwin":
+            payload = _read_macos_payload(request, timeout_seconds, active_opener)
+        else:
+            payload = _read_payload(request, timeout_seconds, active_opener)
         if beta_channel:
             if not isinstance(payload, list):
                 raise ValueError("unexpected release response")

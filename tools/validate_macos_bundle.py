@@ -21,6 +21,21 @@ EXECUTABLE = CONTENTS / "MacOS" / "VRAMRadar"
 ASKPASS_EXECUTABLE = CONTENTS / "MacOS" / "VRAMRadarAskPass"
 RESOURCES = CONTENTS / "Resources"
 EXPECTED_BUNDLE_ID = "com.vramradar.desktop"
+TLS_ENVIRONMENT_KEYS = (
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "PIP_CERT",
+    "GIT_SSL_CAINFO",
+)
+
+
+def finder_like_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    for key in TLS_ENVIRONMENT_KEYS:
+        environment.pop(key, None)
+    return environment
 
 
 def safe_cleanup(path: Path) -> None:
@@ -172,6 +187,7 @@ def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
         stderr=subprocess.DEVNULL,
         timeout=timeout,
         check=False,
+        env=finder_like_environment(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"packaged macOS smoke failed with exit code {result.returncode}")
@@ -187,6 +203,7 @@ def validate_release_tag() -> str:
         text=True,
         timeout=20,
         check=False,
+        env=finder_like_environment(),
     )
     actual = result.stdout.strip()
     if result.returncode != 0 or result.stderr or actual != expected:
@@ -203,6 +220,7 @@ def validate_packaged_update_transport(release_tag: str) -> tuple[str, str]:
         text=True,
         timeout=30,
         check=False,
+        env=finder_like_environment(),
     )
     try:
         payload = json.loads(result.stdout)
@@ -263,6 +281,7 @@ def main() -> int:
                     "packaged_askpass": "passed",
                     "expected_architectures": sorted(architectures),
                     "github_update_transport": update_transport_status,
+                    "finder_tls_environment": "sanitized",
                     "latest_checked_version": latest_checked_version,
                     "assets_match_source": True,
                     "show_paths_exit": 0,

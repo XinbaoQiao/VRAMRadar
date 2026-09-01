@@ -3320,8 +3320,9 @@ function showUpdateCheckFailure(message = '暂时无法连接 GitHub', interacti
     ui.updateNotice.hidden = true;
   }
   if (interactive) {
-    ui.updateCheckStatus.textContent = '检查失败，可稍后重试；服务器监控不受影响';
-    showToast(message || '暂时无法检查更新');
+    const reason = localizedText(message || '暂时无法连接 GitHub');
+    ui.updateCheckStatus.textContent = reason;
+    showToast(reason);
   }
 }
 

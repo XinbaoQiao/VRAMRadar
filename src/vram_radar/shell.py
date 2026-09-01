@@ -3554,36 +3554,44 @@ class AppApi:
             result["update_action"] = "verified_download"
         else:
             result["update_action"] = "browser"
-        if result.get("ok") and result.get("update_available"):
-            latest_version = str(result.get("latest_version") or "").strip()
-            latest_build = str(result.get("latest_build") or "").strip()
-            event_key = f"update_available:{latest_version}:{latest_build}"
-            with self._task_alert_state_lock:
-                already_recorded = any(
-                    event.get("event_key") == event_key
-                    for event in self._notification_events
-                )
-            if not already_recorded:
-                english = self.profile.ui_language == "en"
-                label = latest_version or latest_build or "latest"
-                title = "Update available" if english else "发现新版本"
-                message = (
-                    f"VRAM Radar {label} is ready to download."
-                    if english else f"VRAM Radar {label} 已可下载。"
-                )
-                created = self._record_notifications([{
-                    "kind": "update_available",
-                    "event_key": event_key,
-                    "latest_version": latest_version,
-                    "latest_build": latest_build,
-                    "release_url": str(result.get("release_url") or ""),
-                    "title": title,
-                    "message": message,
-                    "language": self.profile.ui_language,
-                    "native_delivery": "pending",
-                }])
-                self._deliver_notifications(created, title=title, message=message)
-        self._attach_notification_state(result)
+        try:
+            if result.get("ok") and result.get("update_available"):
+                latest_version = str(result.get("latest_version") or "").strip()
+                latest_build = str(result.get("latest_build") or "").strip()
+                event_key = f"update_available:{latest_version}:{latest_build}"
+                with self._task_alert_state_lock:
+                    already_recorded = any(
+                        event.get("event_key") == event_key
+                        for event in self._notification_events
+                    )
+                if not already_recorded:
+                    english = self.profile.ui_language == "en"
+                    label = latest_version or latest_build or "latest"
+                    title = "Update available" if english else "发现新版本"
+                    message = (
+                        f"VRAM Radar {label} is ready to download."
+                        if english else f"VRAM Radar {label} 已可下载。"
+                    )
+                    created = self._record_notifications([{
+                        "kind": "update_available",
+                        "event_key": event_key,
+                        "latest_version": latest_version,
+                        "latest_build": latest_build,
+                        "release_url": str(result.get("release_url") or ""),
+                        "title": title,
+                        "message": message,
+                        "language": self.profile.ui_language,
+                        "native_delivery": "pending",
+                    }])
+                    self._deliver_notifications(created, title=title, message=message)
+            self._attach_notification_state(result)
+        except Exception:
+            # Update availability is authoritative. Notification history and
+            # native delivery are auxiliary and must not turn a successful
+            # GitHub check into a GUI-visible update failure.
+            logging.getLogger("vram_radar").exception(
+                "could not attach auxiliary notification state to update result"
+            )
         return result
 
     def _set_update_progress(self, **changes: Any) -> dict[str, Any]:

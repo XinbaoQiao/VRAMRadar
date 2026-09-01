@@ -4,7 +4,13 @@ import unittest
 from urllib.error import HTTPError, URLError
 from unittest.mock import ANY, patch, sentinel
 
-from vram_radar.updates import LATEST_RELEASE_API, RELEASES_API, check_latest_release
+from vram_radar.updates import (
+    LATEST_RELEASE_API,
+    RELEASES_API,
+    _MACOS_SYSTEM_CA_FILE,
+    _macos_system_ca_file_context,
+    check_latest_release,
+)
 
 
 class FakeResponse:
@@ -45,6 +51,101 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         system_trust.assert_called_once_with()
         open_release.assert_called_once_with(ANY, timeout=4.0, context=sentinel.context)
+
+    def test_macos_native_tls_failure_uses_explicit_system_ca_file_fallback(self):
+        payload = {
+            "tag_name": "v0.8.8",
+            "html_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.8.8",
+            "draft": False,
+            "prerelease": False,
+        }
+
+        def open_release(_request, *, timeout, context):
+            self.assertEqual(timeout, 4.0)
+            if context is sentinel.native_context:
+                raise URLError(ssl.SSLCertVerificationError(1, "native trust failed"))
+            self.assertIs(context, sentinel.ca_file_context)
+            return FakeResponse(payload)
+
+        with patch(
+            "vram_radar.updates._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updates._macos_system_ca_file_context",
+            return_value=sentinel.ca_file_context,
+        ) as ca_fallback, patch(
+            "vram_radar.updates.urlopen",
+            side_effect=open_release,
+        ) as urlopen_mock, self.assertLogs("vram_radar", level="WARNING"):
+            result = check_latest_release(
+                "0.8.7",
+                current_tag="v0.8.7",
+                platform_name="darwin",
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["update_available"])
+        ca_fallback.assert_called_once_with()
+        self.assertEqual(urlopen_mock.call_count, 2)
+
+    def test_macos_non_tls_failure_does_not_retry_with_ca_file(self):
+        with patch(
+            "vram_radar.updates._macos_system_trust_context",
+            return_value=sentinel.native_context,
+        ), patch(
+            "vram_radar.updates._macos_system_ca_file_context",
+            return_value=sentinel.ca_file_context,
+        ) as ca_fallback, patch(
+            "vram_radar.updates.urlopen",
+            side_effect=URLError("offline"),
+        ):
+            result = check_latest_release(
+                "0.8.7",
+                current_tag="v0.8.7",
+                platform_name="darwin",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "update_network_failed")
+        ca_fallback.assert_not_called()
+
+    def test_macos_missing_native_trust_uses_explicit_ca_file(self):
+        payload = {
+            "tag_name": "v0.8.8",
+            "html_url": "https://github.com/example-owner/VRAMRadar/releases/tag/v0.8.8",
+            "draft": False,
+            "prerelease": False,
+        }
+        with patch(
+            "vram_radar.updates._macos_system_trust_context",
+            side_effect=RuntimeError("truststore unavailable"),
+        ), patch(
+            "vram_radar.updates._macos_system_ca_file_context",
+            return_value=sentinel.ca_file_context,
+        ) as ca_fallback, patch(
+            "vram_radar.updates.urlopen",
+            return_value=FakeResponse(payload),
+        ) as open_release, self.assertLogs("vram_radar", level="WARNING"):
+            result = check_latest_release(
+                "0.8.7",
+                current_tag="v0.8.7",
+                platform_name="darwin",
+            )
+
+        self.assertTrue(result["ok"])
+        ca_fallback.assert_called_once_with()
+        open_release.assert_called_once_with(
+            ANY,
+            timeout=4.0,
+            context=sentinel.ca_file_context,
+        )
+
+    def test_macos_ca_file_context_does_not_depend_on_environment(self):
+        with patch("vram_radar.updates.ssl.create_default_context", return_value=sentinel.context) as create:
+            context = _macos_system_ca_file_context()
+
+        self.assertIs(context, sentinel.context)
+        create.assert_called_once_with(cafile=_MACOS_SYSTEM_CA_FILE)
 
     def test_tls_failure_is_actionable_and_logged_without_exception_text(self):
         def opener(_request, *, timeout):
