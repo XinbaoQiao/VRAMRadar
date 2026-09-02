@@ -3160,7 +3160,15 @@ class ShellApiTests(unittest.TestCase):
                 "id": "local",
                 "display_name": "Local",
                 "servers": [
-                    {"id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.invalid"}
+                    {
+                        "id": "gpu",
+                        "display_name": "GPU",
+                        "backend": "slurm_ssh",
+                        "host": "gpu.invalid",
+                        "slurm_module": "slurm/24.05",
+                        "slurm_bin_directory": "/software/slurm/bin",
+                        "slurm_init_script": "/site/slurm.sh",
+                    }
                 ],
             }
         )
@@ -3172,7 +3180,23 @@ class ShellApiTests(unittest.TestCase):
                     "connection": {
                         "state": "auth_required",
                         "data_origin": "none",
-                        "error": {"code": "auth_failed", "retryable": False},
+                        "error": {
+                            "code": "slurm_command_missing",
+                            "retryable": False,
+                            "stage": "sinfo",
+                            "remote_exit_code": 127,
+                            "reason": "command_missing_or_path",
+                            "environment_attempts": ["login_shell", "environment_modules", "interactive_bash"],
+                        },
+                    },
+                    "slurm_capabilities": {
+                        "node_allocation_detail": False,
+                        "node_allocation_exit_code": 1,
+                        "task_gpu_request_detail": False,
+                        "queue_scope": "current",
+                        "queue_scope_limited": True,
+                        "inventory_mode": "scontrol",
+                        "environment_mode": "interactive_bash",
                     },
                 }
             ]
@@ -3184,7 +3208,25 @@ class ShellApiTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertTrue(result["copied"])
-        self.assertEqual(result["diagnostics"]["servers"][0]["error_code"], "auth_failed")
+        server_diagnostics = result["diagnostics"]["servers"][0]
+        self.assertEqual(server_diagnostics["error_code"], "slurm_command_missing")
+        self.assertEqual(server_diagnostics["error_stage"], "sinfo")
+        self.assertEqual(server_diagnostics["remote_exit_code"], 127)
+        self.assertEqual(server_diagnostics["error_reason"], "command_missing_or_path")
+        self.assertEqual(
+            server_diagnostics["environment_attempts"],
+            ["login_shell", "environment_modules", "interactive_bash"],
+        )
+        self.assertFalse(server_diagnostics["slurm_node_allocation_detail"])
+        self.assertEqual(server_diagnostics["slurm_node_allocation_exit_code"], 1)
+        self.assertFalse(server_diagnostics["slurm_task_gpu_request_detail"])
+        self.assertEqual(server_diagnostics["slurm_queue_scope"], "current")
+        self.assertTrue(server_diagnostics["slurm_queue_scope_limited"])
+        self.assertEqual(server_diagnostics["slurm_inventory_mode"], "scontrol")
+        self.assertEqual(server_diagnostics["slurm_environment_mode"], "interactive_bash")
+        self.assertTrue(server_diagnostics["slurm_custom_module_configured"])
+        self.assertTrue(server_diagnostics["slurm_custom_bin_directory_configured"])
+        self.assertTrue(server_diagnostics["slurm_custom_init_script_configured"])
         self.assertIn('"local_ssh"', result["text"])
         self.assertIn('"servers"', result["text"])
         copy_text.assert_called_once_with(result["text"])

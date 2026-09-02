@@ -1369,10 +1369,14 @@ class ServiceTests(unittest.TestCase):
 
     def test_connection_probe_failure_updates_runtime_before_returning_the_error(self):
         failure = ConnectorFailure(
-            "auth_failed",
-            "Permission denied (publickey)",
+            "slurm_command_missing",
+            "sinfo unavailable",
             retryable=False,
-            state="auth_required",
+            state="misconfigured",
+            stage="sinfo",
+            remote_exit_code=127,
+            reason="command_missing_or_path",
+            environment_attempts=("login_shell", "environment_modules", "interactive_bash"),
         )
         with tempfile.TemporaryDirectory() as temporary:
             service = DashboardService(
@@ -1385,9 +1389,16 @@ class ServiceTests(unittest.TestCase):
                 service.probe_server("cluster")
             server = service.snapshot()["servers"][0]
 
-        self.assertEqual(captured.exception.code, "auth_failed")
-        self.assertEqual(server["connection"]["state"], "auth_required")
-        self.assertEqual(server["connection"]["error"]["code"], "auth_failed")
+        self.assertEqual(captured.exception.code, "slurm_command_missing")
+        self.assertEqual(server["connection"]["state"], "misconfigured")
+        self.assertEqual(server["connection"]["error"]["code"], "slurm_command_missing")
+        self.assertEqual(server["connection"]["error"]["stage"], "sinfo")
+        self.assertEqual(server["connection"]["error"]["remote_exit_code"], 127)
+        self.assertEqual(server["connection"]["error"]["reason"], "command_missing_or_path")
+        self.assertEqual(
+            server["connection"]["error"]["environment_attempts"],
+            ["login_shell", "environment_modules", "interactive_bash"],
+        )
 
     def test_pause_skips_only_periodic_fleet_refresh_and_preserves_latest_revision(self):
         query = Mock(side_effect=lambda server: payload(server.id))

@@ -2431,7 +2431,9 @@ class AppApi:
                 "remote_command_failed",
                 "response_too_large",
                 "node_list_too_large",
-            }
+                "interactive_gateway_required",
+                "remote_shell_incompatible",
+            } or exc.code.startswith("slurm_")
             if collection_failure and server.auto_detect_backend:
                 detected_backend = (
                     "slurm_ssh" if server.backend == "direct_ssh" else "direct_ssh"
@@ -3531,6 +3533,9 @@ class AppApi:
                 row_free_vram_gib = round(max(0.0, float(row.get("free_vram_gib") or 0)), 2)
             except (TypeError, ValueError):
                 row_free_vram_gib = 0.0
+            slurm_capabilities = row.get("slurm_capabilities", {}) if isinstance(row, dict) else {}
+            if not isinstance(slurm_capabilities, dict):
+                slurm_capabilities = {}
             server_diagnostics.append(
                 {
                     "label": f"server_{index}",
@@ -3551,6 +3556,20 @@ class AppApi:
                     "data_origin": connection.get("data_origin") or "none",
                     "error_code": error.get("code"),
                     "error_retryable": error.get("retryable"),
+                    "error_stage": error.get("stage"),
+                    "remote_exit_code": error.get("remote_exit_code"),
+                    "error_reason": error.get("reason"),
+                    "environment_attempts": error.get("environment_attempts") or [],
+                    "slurm_node_allocation_detail": slurm_capabilities.get("node_allocation_detail"),
+                    "slurm_node_allocation_exit_code": slurm_capabilities.get("node_allocation_exit_code"),
+                    "slurm_task_gpu_request_detail": slurm_capabilities.get("task_gpu_request_detail"),
+                    "slurm_queue_scope": slurm_capabilities.get("queue_scope"),
+                    "slurm_queue_scope_limited": slurm_capabilities.get("queue_scope_limited"),
+                    "slurm_inventory_mode": slurm_capabilities.get("inventory_mode"),
+                    "slurm_environment_mode": slurm_capabilities.get("environment_mode"),
+                    "slurm_custom_module_configured": bool(server.slurm_module),
+                    "slurm_custom_bin_directory_configured": bool(server.slurm_bin_directory),
+                    "slurm_custom_init_script_configured": bool(server.slurm_init_script),
                     "last_attempt_at": connection.get("last_attempt_at"),
                     "last_success_at": connection.get("last_success_at"),
                     "total_gpus": row_total_gpus,

@@ -756,6 +756,13 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("if (firstEditor) firstEditor.open = true", self.javascript)
         self.assertIn(".settings-group > summary", self.styles)
 
+    def test_slurm_environment_fallbacks_are_editable_and_safely_validated(self):
+        for field in ("slurm_module", "slurm_bin_directory", "slurm_init_script"):
+            self.assertIn(f'data-field="{field}"', self.markup)
+            self.assertIn(field, self.javascript)
+        self.assertIn("[data-slurm-environment]", self.javascript)
+        self.assertIn("Slurm 远端路径必须是以 / 开头的绝对路径", self.javascript)
+
     def test_server_navigator_avoids_layout_bound_animation_and_linear_scroll_scans(self):
         for contract in (
             "let serverNavigationCards = []",
@@ -1163,6 +1170,26 @@ class WebUiContractTests(unittest.TestCase):
             cluster_load.count("clusterNodeRequestGenerations.get(serverId) !== requestGeneration"),
             3,
         )
+
+    def test_scheduler_allocation_detail_failure_is_visible_and_conservative(self):
+        scheduler = self.javascript[
+            self.javascript.index("function renderSchedulerTable"):
+            self.javascript.index("function accountForServer")
+        ]
+        navigator = self.javascript[
+            self.javascript.index("function serverNavigatorResourceSummary"):
+            self.javascript.index("function serverNavigatorHasAvailableResource")
+        ]
+        self.assertIn("server.slurm_capabilities?.node_allocation_detail === false", scheduler)
+        self.assertIn("空闲容量按未知处理", scheduler)
+        self.assertIn("server.slurm_capabilities?.task_gpu_request_detail === false", scheduler)
+        self.assertIn("server.slurm_capabilities?.queue_scope_limited === true", scheduler)
+        self.assertIn("已自动回退为当前账号任务", scheduler)
+        self.assertIn("尚未分配节点的 GPU 排队任务可能不可识别", scheduler)
+        self.assertIn("server.slurm_capabilities?.node_allocation_detail === false", navigator)
+        self.assertIn("空闲容量未知", navigator)
+        self.assertIn("node.allocation_detail_supported === false", self.javascript)
+        self.assertIn("节点分配明细不可读", self.javascript)
 
     def test_directory_requests_ignore_stale_results_and_merge_into_latest_tree(self):
         directory_load = self.javascript[

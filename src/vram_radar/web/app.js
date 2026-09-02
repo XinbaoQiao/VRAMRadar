@@ -579,6 +579,9 @@ function renderDirectProcessModule(server) {
 }
 
 function schedulerMemoryMeter(node) {
+  if (node.allocation_detail_supported === false) {
+    return '<span class="scheduler-memory-unavailable">节点分配明细不可读</span>';
+  }
   const total = node.total_vram_gib == null ? Number.NaN : Number(node.total_vram_gib);
   const free = node.free_vram_gib == null ? Number.NaN : Number(node.free_vram_gib);
   const perGpu = node.memory_per_gpu_gib == null ? Number.NaN : Number(node.memory_per_gpu_gib);
@@ -630,7 +633,7 @@ function renderClusterModule(server) {
 }
 
 function renderSchedulerNodeRows(nodes) {
-  return (nodes || []).slice(0, CLUSTER_NODE_PAGE_SIZE).map(node => `<tr><td class="copyable-cell">${copyableValue(node.node, '节点名')}</td><td title="${escapeHtml(node.partition)}">${escapeHtml(node.partition)}</td><td title="${escapeHtml(formatGpuType(node.gpu_type))} · ${number(node.memory_per_gpu_gib)} GiB/卡">${escapeHtml(formatGpuType(node.gpu_type))} · ${number(node.memory_per_gpu_gib)} GiB/卡</td><td>${number(node.free_gpus)} 张（共 ${number(node.total_gpus)} 张）</td><td>${schedulerMemoryMeter(node)}</td><td>${number((node.tasks || []).length)}</td><td><span class="node-state ${schedulerStateClass(node.state)}" title="Slurm: ${escapeHtml(node.state)}">${escapeHtml(schedulerStateLabel(node.state))}</span></td></tr>`).join('');
+  return (nodes || []).slice(0, CLUSTER_NODE_PAGE_SIZE).map(node => `<tr><td class="copyable-cell">${copyableValue(node.node, '节点名')}</td><td title="${escapeHtml(node.partition)}">${escapeHtml(node.partition)}</td><td title="${escapeHtml(formatGpuType(node.gpu_type))} · ${number(node.memory_per_gpu_gib)} GiB/卡">${escapeHtml(formatGpuType(node.gpu_type))} · ${number(node.memory_per_gpu_gib)} GiB/卡</td><td>${node.allocation_detail_supported === false ? `未知（共 ${number(node.total_gpus)} 张）` : `${number(node.free_gpus)} 张（共 ${number(node.total_gpus)} 张）`}</td><td>${schedulerMemoryMeter(node)}</td><td>${number((node.tasks || []).length)}</td><td><span class="node-state ${schedulerStateClass(node.state)}" title="Slurm: ${escapeHtml(node.state)}">${escapeHtml(schedulerStateLabel(node.state))}</span></td></tr>`).join('');
 }
 
 function renderSchedulerNodeTable(nodes, label = 'GPU 节点容量') {
@@ -757,7 +760,16 @@ function renderSchedulerTable(server) {
   const capacity = largeCluster
     ? renderLargeClusterModule(server)
     : renderSchedulerNodeTable(server.nodes || []);
-  return capacity + renderClusterModule(server);
+  const allocationWarning = server.slurm_capabilities?.node_allocation_detail === false
+    ? '<div class="module-empty scheduler-capability-warning">当前账号无法读取 Slurm 全局节点分配明细。节点和可见任务仍会显示；为避免把其他用户占用误报为空闲，空闲容量按未知处理。</div>'
+    : '';
+  const queueWarning = server.slurm_capabilities?.task_gpu_request_detail === false
+    ? '<div class="module-empty scheduler-capability-warning">当前 Slurm 不支持完整任务字段，已使用兼容查询；运行中节点任务仍会显示，尚未分配节点的 GPU 排队任务可能不可识别。</div>'
+    : '';
+  const scopeWarning = server.slurm_capabilities?.queue_scope_limited === true
+    ? '<div class="module-empty scheduler-capability-warning">当前账号不能读取全局 Slurm 队列，已自动回退为当前账号任务；GPU 节点仍会继续显示。</div>'
+    : '';
+  return allocationWarning + queueWarning + scopeWarning + capacity + renderClusterModule(server);
 }
 
 function accountForServer(server) {
@@ -1583,6 +1595,9 @@ function serverNavigatorOwnTaskSummary(server) {
 function serverNavigatorResourceSummary(server) {
   if (server.connection?.state !== 'online') return stateLabel(server.connection?.state || 'offline');
   const gpus = Number(server.total_gpus) || 0;
+  if (server.backend === 'slurm_ssh' && server.slurm_capabilities?.node_allocation_detail === false) {
+    return `${number(gpus)} GPU · 空闲容量未知`;
+  }
   const free = server.free_vram_gib;
   const freeLabel = free == null ? '可用显存未知' : `${number(free)} GiB 可用`;
   if (server.backend === 'slurm_ssh' && server.free_gpus != null) {
@@ -1907,6 +1922,12 @@ function serverCardRenderSignature(server, index) {
     connection.retry_at,
     error.code,
     error.message,
+    server.slurm_capabilities?.node_allocation_detail,
+    server.slurm_capabilities?.node_allocation_exit_code,
+    server.slurm_capabilities?.task_gpu_request_detail,
+    server.slurm_capabilities?.queue_scope,
+    server.slurm_capabilities?.queue_scope_limited,
+    server.slurm_capabilities?.inventory_mode,
     favoriteServerIds.has(server.server_id),
     serverIsEnabled(server.server_id),
     taskCompletionWatchRenderSignature(server.server_id),
@@ -2733,7 +2754,7 @@ function addServerEditor(server = {}, options = {}) {
   );
   let generatedIndex = 1;
   while (usedIds.has(`server-${generatedIndex}`)) generatedIndex += 1;
-  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'auto', auto_detect_backend: true, ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', has_password: false, show_other_user_commands: true, prefer_identity_auth: false, connect_timeout_seconds: 10};
+  const defaults = {id: `server-${generatedIndex}`, display_name: '', backend: 'auto', auto_detect_backend: true, ssh_alias: '', host: '', port: 22, port_override: false, username: '', identity_file: '', ssh_config_file: '', slurm_module: '', slurm_bin_directory: '', slurm_init_script: '', has_password: false, show_other_user_commands: true, prefer_identity_auth: false, connect_timeout_seconds: 10};
   const values = {...defaults, ...server};
   usedIds.add(values.id);
   editor.dataset.draftIndex = String(options.draftIndex ?? settingsServerDrafts.length);
@@ -2818,6 +2839,7 @@ function addServerEditor(server = {}, options = {}) {
   const refreshCapabilities = () => {
     const backend = editor.querySelector('[data-field="backend"]').value;
     const slurm = backend === 'slurm_ssh' || (backend === 'auto' && values._detected_backend === 'slurm_ssh');
+    editor.querySelectorAll('[data-slurm-environment]').forEach(field => { field.hidden = !slurm; });
     editor.querySelector('[data-command-summary-help]').textContent = slurm
       ? 'Slurm：显示其他用户的作业名、状态与时间；调度器视图不读取完整 shell 命令。'
       : 'SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。';
@@ -2903,6 +2925,14 @@ function invalidServerDraft() {
     }
     const port = Number(draft.port || 22);
     if (!Number.isInteger(port) || port < 1 || port > 65535) return {index, field: 'port', message: '端口必须在 1 到 65535 之间'};
+    if (draft.slurm_module && !/^[A-Za-z0-9][A-Za-z0-9._+/@:-]{0,255}$/.test(draft.slurm_module)) {
+      return {index, field: 'slurm_module', message: 'Slurm 模块名只能包含字母、数字和 . _ + / @ : -'};
+    }
+    for (const field of ['slurm_bin_directory', 'slurm_init_script']) {
+      if (draft[field] && !String(draft[field]).startsWith('/')) {
+        return {index, field, message: 'Slurm 远端路径必须是以 / 开头的绝对路径'};
+      }
+    }
   }
   return null;
 }
@@ -3145,6 +3175,9 @@ function collectProfile() {
       auto_detect_backend: selectedBackend === 'auto',
     };
     if (draft.default_work_directory || existing?.default_work_directory) server.default_work_directory = draft.default_work_directory || existing.default_work_directory;
+    for (const field of ['slurm_module', 'slurm_bin_directory', 'slurm_init_script']) {
+      if (draft[field] || existing?.[field]) server[field] = draft[field] || existing[field];
+    }
     if (draft.prefer_identity_auth || existing?.prefer_identity_auth) server.prefer_identity_auth = true;
     if (server.backend === 'slurm_ssh') server.gpu_memory_gib = draft.gpu_memory_gib || {};
     return server;

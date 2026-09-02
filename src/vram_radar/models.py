@@ -7,6 +7,7 @@ from typing import Any
 
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+SAFE_SLURM_MODULE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/@:-]{0,255}$")
 SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh"})
 SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
 SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
@@ -79,6 +80,17 @@ def require_optional_local_path(value: Any, label: str) -> str:
     ):
         raise ConfigError(f"{label} is too long or contains control characters")
     return path
+
+
+def require_optional_slurm_module(value: Any, label: str) -> str:
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str):
+        raise ConfigError(f"{label} must be a string")
+    module = value.strip()
+    if SAFE_SLURM_MODULE.fullmatch(module) is None:
+        raise ConfigError(f"{label} must be a bounded Slurm module name without shell syntax")
+    return module
 
 
 def require_optional_remote_directory(value: Any, label: str) -> str:
@@ -271,6 +283,9 @@ class ServerProfile:
     ssh_config_file: str = ""
     auth_ref: str = ""
     default_work_directory: str = ""
+    slurm_module: str = ""
+    slurm_bin_directory: str = ""
+    slurm_init_script: str = ""
     connect_timeout_seconds: int = 10
     show_other_user_commands: bool = True
     prefer_identity_auth: bool = False
@@ -349,6 +364,18 @@ class ServerProfile:
                 raw.get("default_work_directory", ""),
                 f"server {server_id} default_work_directory",
             ),
+            slurm_module=require_optional_slurm_module(
+                raw.get("slurm_module", ""),
+                f"server {server_id} slurm_module",
+            ),
+            slurm_bin_directory=require_optional_remote_directory(
+                raw.get("slurm_bin_directory", ""),
+                f"server {server_id} slurm_bin_directory",
+            ),
+            slurm_init_script=require_optional_remote_directory(
+                raw.get("slurm_init_script", ""),
+                f"server {server_id} slurm_init_script",
+            ),
             connect_timeout_seconds=timeout,
             show_other_user_commands=require_bool(
                 raw.get("show_other_user_commands", True),
@@ -389,6 +416,9 @@ class ServerProfile:
             "ssh_config_file",
             "auth_ref",
             "default_work_directory",
+            "slurm_module",
+            "slurm_bin_directory",
+            "slurm_init_script",
         ):
             value = getattr(self, key)
             if value:

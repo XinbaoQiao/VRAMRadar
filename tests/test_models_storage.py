@@ -360,6 +360,28 @@ class ModelStorageTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(ConfigError, "gpu_memory_gib"):
                 Profile.from_dict(raw)
 
+    def test_slurm_environment_overrides_round_trip_and_reject_shell_syntax(self):
+        server = dict(
+            PROFILE["servers"][0],
+            backend="slurm_ssh",
+            slurm_module="slurm/24.05",
+            slurm_bin_directory="/software/slurm/bin",
+            slurm_init_script="/site/profile.d/slurm.sh",
+        )
+        parsed = Profile.from_dict(dict(PROFILE, servers=[server]))
+        serialized = parsed.to_dict()["servers"][0]
+        self.assertEqual(serialized["slurm_module"], "slurm/24.05")
+        self.assertEqual(serialized["slurm_bin_directory"], "/software/slurm/bin")
+        self.assertEqual(serialized["slurm_init_script"], "/site/profile.d/slurm.sh")
+
+        for field, value in (
+            ("slurm_module", "slurm; touch /tmp/bad"),
+            ("slurm_bin_directory", "relative/slurm/bin"),
+            ("slurm_init_script", "../slurm.sh"),
+        ):
+            with self.subTest(field=field), self.assertRaises(ConfigError):
+                Profile.from_dict(dict(PROFILE, servers=[dict(server, **{field: value})]))
+
     def test_profile_rejects_control_characters_in_local_catalog_path(self):
         with self.assertRaisesRegex(ConfigError, "control characters"):
             Profile.from_dict(dict(PROFILE, server_config_path="D:/ssh/config\nother"))

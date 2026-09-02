@@ -26,6 +26,13 @@ SPLIT_MARKER = "__VRAM_RADAR_SPLIT__"
 LIVE_TASK_MARKER = "__VRAM_RADAR_LIVE_TASKS__"
 HISTORY_MARKER = "__VRAM_RADAR_TASK_HISTORY__"
 HISTORY_SUPPORT_MARKER = "__VRAM_RADAR_HISTORY_SUPPORTED__="
+SLURM_FAILURE_MARKER = "__VRAM_RADAR_SLURM_FAILURE__="
+SLURM_ALLOCATION_SUPPORT_MARKER = "__VRAM_RADAR_SLURM_ALLOCATION_SUPPORTED__="
+SLURM_QUEUE_DETAIL_MARKER = "__VRAM_RADAR_SLURM_QUEUE_DETAIL__="
+SLURM_QUEUE_SCOPE_MARKER = "__VRAM_RADAR_SLURM_QUEUE_SCOPE__="
+SLURM_ENVIRONMENT_MODE_MARKER = "__VRAM_RADAR_SLURM_ENVIRONMENT_MODE__="
+SLURM_INVENTORY_MODE_MARKER = "__VRAM_RADAR_SLURM_INVENTORY_MODE__="
+SLURM_PROTOCOL_HEADER = "VRAM_RADAR_SLURM|2"
 CURRENT_USER_MARKER = "__VRAM_RADAR_CURRENT_USER__="
 HOME_DIRECTORY_MARKER = "__VRAM_RADAR_HOME_HEX__="
 HOST_MARKER = "__VRAM_RADAR_HOST__="
@@ -86,11 +93,26 @@ SENSITIVE_PAIR_RE = re.compile(
 
 
 class ConnectorFailure(RuntimeError):
-    def __init__(self, code: str, message: str, *, retryable: bool, state: str = "offline") -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        retryable: bool,
+        state: str = "offline",
+        stage: str | None = None,
+        remote_exit_code: int | None = None,
+        reason: str | None = None,
+        environment_attempts: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.retryable = retryable
         self.state = state
+        self.stage = stage
+        self.remote_exit_code = remote_exit_code
+        self.reason = reason
+        self.environment_attempts = environment_attempts
 
 
 class _BoundedProcessResult:
@@ -150,6 +172,77 @@ def classify_process_error(
     password_auth: bool = False,
 ) -> ConnectorFailure:
     lower = detail.lower()
+    slurm_failure = re.search(
+        rf"^{re.escape(SLURM_FAILURE_MARKER)}([a-z_]+)\|([0-9]{{1,3}})$",
+        detail,
+        flags=re.MULTILINE,
+    )
+    if slurm_failure:
+        stage = slurm_failure.group(1)
+        remote_exit_code = int(slurm_failure.group(2))
+        stage_labels = {
+            "identity": "远端账号检测",
+            "environment": "远端基础环境检测",
+            "sinfo": "Slurm 节点清单读取（sinfo）",
+            "squeue": "Slurm 任务队列读取（squeue）",
+        }
+        stage_label = stage_labels.get(stage, "Slurm 环境检测")
+        if "command not found" in lower or remote_exit_code == 127:
+            code = "slurm_command_missing"
+            reason = "command_missing_or_path"
+            hint = "命令不存在，或 Slurm 只在交互式 module/.bashrc 环境中加入 PATH"
+            retryable = False
+            state = "misconfigured"
+        elif "permission denied" in lower or "access denied" in lower or "not authorized" in lower:
+            code = "slurm_permission_denied"
+            reason = "permission_denied"
+            hint = "当前账号被站点策略限制读取该类 Slurm 信息"
+            retryable = False
+            state = "misconfigured"
+        elif any(
+            token in lower
+            for token in (
+                "invalid option",
+                "unrecognized option",
+                "invalid job state",
+                "invalid state",
+                "invalid format",
+            )
+        ):
+            code = "slurm_command_incompatible"
+            reason = "slurm_version_incompatible"
+            hint = "服务器 Slurm 版本或站点命令包装与当前查询参数不兼容"
+            retryable = False
+            state = "misconfigured"
+        elif any(
+            token in lower
+            for token in (
+                "unable to contact slurm controller",
+                "slurm_load_",
+                "communication connection failure",
+                "socket timed out",
+            )
+        ):
+            code = "slurm_controller_unreachable"
+            reason = "controller_unreachable"
+            hint = "登录节点当前无法联系 Slurm 控制器"
+            retryable = True
+            state = "offline"
+        else:
+            code = f"slurm_{stage}_failed" if stage in stage_labels else "slurm_environment_failed"
+            reason = "remote_stage_failed"
+            hint = "该阶段返回了非零状态；原始远端输出未写入脱敏诊断"
+            retryable = stage in {"sinfo", "squeue"}
+            state = "offline" if retryable else "misconfigured"
+        return ConnectorFailure(
+            code,
+            f"SSH 已连接，但{stage_label}失败（远端退出码 {remote_exit_code}）：{hint}",
+            retryable=retryable,
+            state=state,
+            stage=stage,
+            remote_exit_code=remote_exit_code,
+            reason=reason,
+        )
     if "vram_radar_key_conflict" in lower:
         return ConnectorFailure(
             "ssh_key_remote_conflict",
@@ -328,6 +421,28 @@ def classify_process_error(
             "SSH 已连接并通过认证，但当前服务器类型缺少所需命令；集群登录节点请检查是否应选择 Slurm",
             retryable=False,
             state="misconfigured",
+        )
+    if returncode != 255 and any(
+        token in lower
+        for token in (
+            "must be run from a terminal",
+            "requires a terminal",
+            "requires a tty",
+            "pseudo-terminal",
+            "interactive login required",
+            "select a platform",
+            "select a cluster",
+            "use the web portal",
+        )
+    ):
+        return ConnectorFailure(
+            "interactive_gateway_required",
+            "SSH 已连接到交互式网关，但它不允许直接执行监控命令；请让 SSH Host/ProxyJump 最终落到 Slurm 登录节点",
+            retryable=False,
+            state="misconfigured",
+            stage="remote_shell",
+            remote_exit_code=returncode,
+            reason="interactive_gateway_or_second_hop_required",
         )
     if returncode != 255 and "permission denied" in lower:
         return ConnectorFailure(
@@ -1991,7 +2106,8 @@ def job_ids_by_node_from_tasks(tasks: list[dict[str, Any]]) -> dict[str, list[st
     return result
 
 
-def parse_live_task_rows(text: str) -> list[dict[str, Any]]:
+def parse_live_task_rows(text: str, gpu_nodes: set[str] | None = None) -> list[dict[str, Any]]:
+    gpu_nodes = gpu_nodes or set()
     tasks: list[dict[str, Any]] = []
     for raw in text.splitlines():
         if not raw.strip():
@@ -2007,9 +2123,9 @@ def parse_live_task_rows(text: str) -> list[dict[str, Any]]:
         except ValueError as exc:
             raise ConnectorFailure("parse_failed", "squeue 返回了无效的任务节点数", retryable=True) from exc
         gpu_count = _gpu_count(gres) * node_count
-        if gpu_count < 1:
-            continue
         node_list = "" if nodes in {"", "(null)", "N/A"} else nodes
+        if gpu_count < 1 and not (_expand_slurm_nodelist(node_list) & gpu_nodes):
+            continue
         tasks.append(
             {
                 "job_id": job_id,
@@ -2021,7 +2137,7 @@ def parse_live_task_rows(text: str) -> list[dict[str, Any]]:
                 "submitted_at": submitted_at,
                 "nodes": node_list,
                 "reason": reason if not node_list else "",
-                "gpu_count": gpu_count,
+            "gpu_count": gpu_count or None,
             }
         )
     return tasks
@@ -2125,19 +2241,253 @@ def query_slurm_ssh(
     identities_only: bool = False,
 ) -> dict[str, Any]:
     queue_scope = "-a" if server.show_other_user_commands else '-u "$current_user"'
+    queue_scope_name = "all" if server.show_other_user_commands else "current"
+    configured_slurm_module = shlex.quote(server.slurm_module)
+    configured_slurm_bin_directory = shlex.quote(server.slurm_bin_directory)
+    configured_slurm_init_script = shlex.quote(server.slurm_init_script)
     script = f"""\
 set -eu
 set -o pipefail
-current_user=$(id -un)
+slurm_fail() {{
+    stage=$1
+    status=$2
+    printf '{SLURM_FAILURE_MARKER}%s|%s\\n' "$stage" "$status" >&2
+    exit "$status"
+}}
+bootstrap_slurm_environment() {{
+    configured_slurm_module={configured_slurm_module}
+    configured_slurm_bin_directory={configured_slurm_bin_directory}
+    configured_slurm_init_script={configured_slurm_init_script}
+    append_path_directory() {{
+        candidate_dir=$1
+        if [ -d "$candidate_dir" ]; then
+            case ":$PATH:" in
+                *":$candidate_dir:"*) ;;
+                *) PATH="$PATH:$candidate_dir" ;;
+            esac
+        fi
+    }}
+    prepend_path_directory() {{
+        candidate_dir=$1
+        if [ -d "$candidate_dir" ]; then
+            case ":$PATH:" in
+                *":$candidate_dir:"*) ;;
+                *) PATH="$candidate_dir:$PATH" ;;
+            esac
+        fi
+    }}
+    append_candidate_lines() {{
+        candidate_lines=$1
+        saved_candidate_ifs=$IFS
+        IFS='
+'
+        for candidate in $candidate_lines; do
+            case "$candidate" in
+                /*)
+                    if [ -x "$candidate" ]; then
+                        append_path_directory "${{candidate%/*}}"
+                    fi
+                    ;;
+            esac
+        done
+        IFS=$saved_candidate_ifs
+    }}
+    if [ -n "$configured_slurm_init_script" ] && [ -r "$configured_slurm_init_script" ]; then
+        set +u
+        . "$configured_slurm_init_script" >/dev/null 2>&1 || true
+        set -u
+    fi
+    if [ -n "$configured_slurm_bin_directory" ]; then
+        prepend_path_directory "$configured_slurm_bin_directory"
+    fi
+    for slurm_prefix in "${{SLURM_ROOT:-}}" "${{SLURM_HOME:-}}" "${{SLURM_DIR:-}}"; do
+        case "$slurm_prefix" in
+            /*)
+                append_path_directory "$slurm_prefix/bin"
+                append_path_directory "$slurm_prefix"
+                ;;
+        esac
+    done
+    for candidate_dir in /usr/local/slurm/bin /usr/slurm/bin /opt/slurm/bin /opt/slurm/current/bin /opt/software/slurm/bin /software/slurm/bin /shared/slurm/bin /apps/slurm/current/bin /cm/shared/apps/slurm/current/bin /cm/local/apps/slurm/current/bin /run/current-system/sw/bin /run/current-system/profile/bin /nix/var/nix/profiles/default/bin "${{HOME:-}}/.nix-profile/bin" "${{HOME:-}}/.guix-profile/bin"; do
+        append_path_directory "$candidate_dir"
+    done
+    export PATH
+    if ! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1; then
+        set +u
+        for slurm_init in /etc/profile.d/slurm.sh /opt/slurm/etc/profile.d/slurm.sh; do
+            if [ -r "$slurm_init" ]; then
+                . "$slurm_init" >/dev/null 2>&1 || true
+            fi
+        done
+        set -u
+        if ! type module >/dev/null 2>&1; then
+            set +u
+            for module_init in /etc/profile.d/lmod.sh /etc/profile.d/modules.sh /usr/share/lmod/lmod/init/bash; do
+                if [ -r "$module_init" ]; then
+                    . "$module_init" >/dev/null 2>&1 || true
+                    type module >/dev/null 2>&1 && break
+                fi
+            done
+            set -u
+        fi
+        if type module >/dev/null 2>&1; then
+            if [ -n "$configured_slurm_module" ]; then
+                module load "$configured_slurm_module" >/dev/null 2>&1 || true
+            fi
+            module load slurm >/dev/null 2>&1 || true
+            if ! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1; then
+                module_listing=$(module -t avail slurm 2>&1 | sed -n '1,80p') || true
+                for module_candidate in $module_listing; do
+                    case "$module_candidate" in
+                        *[!A-Za-z0-9._+/@:-]*) continue ;;
+                        *slurm*|*SLURM*)
+                            if module load "$module_candidate" >/dev/null 2>&1; then
+                                break
+                            fi
+                            ;;
+                    esac
+                done
+            fi
+        elif type ml >/dev/null 2>&1; then
+            if [ -n "$configured_slurm_module" ]; then
+                ml "$configured_slurm_module" >/dev/null 2>&1 || true
+            fi
+            ml slurm >/dev/null 2>&1 || true
+        fi
+    fi
+    if ! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1; then
+        user_shell=${{SHELL:-}}
+        if [ -z "$user_shell" ] && command -v getent >/dev/null 2>&1; then
+            user_shell=$(getent passwd "$(id -u)" 2>/dev/null | awk -F: '{{print $7; exit}}') || true
+        fi
+        case "$user_shell" in
+            /*)
+                if [ -x "$user_shell" ]; then
+                    shell_candidates=$("$user_shell" -ic 'which sinfo 2>/dev/null; which squeue 2>/dev/null; which scontrol 2>/dev/null; which sacct 2>/dev/null' </dev/null 2>/dev/null) || true
+                    saved_ifs=$IFS
+                    IFS='
+'
+                    for candidate in $shell_candidates; do
+                        case "$candidate" in
+                            /*)
+                                if [ -x "$candidate" ]; then
+                                    append_path_directory "${{candidate%/*}}"
+                                fi
+                                ;;
+                        esac
+                    done
+                    IFS=$saved_ifs
+                fi
+                ;;
+        esac
+        export PATH
+    fi
+    if ! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1; then
+        direct_candidates=''
+        for slurm_tool in sinfo squeue scontrol sacct; do
+            if type -P "$slurm_tool" >/dev/null 2>&1; then
+                direct_candidates="$direct_candidates
+$(type -P "$slurm_tool" 2>/dev/null)"
+            fi
+            if command -v which >/dev/null 2>&1; then
+                direct_candidates="$direct_candidates
+$(which -a "$slurm_tool" 2>/dev/null || true)"
+            fi
+        done
+        append_candidate_lines "$direct_candidates"
+        export PATH
+    fi
+    if (! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1) && command -v whereis >/dev/null 2>&1; then
+        for slurm_tool in sinfo squeue scontrol sacct; do
+            tool_locations=$(whereis -b "$slurm_tool" 2>/dev/null) || true
+            tool_locations=${{tool_locations#*:}}
+            for candidate in $tool_locations; do
+                case "$candidate" in
+                    /*)
+                        if [ -x "$candidate" ]; then
+                            append_path_directory "${{candidate%/*}}"
+                        fi
+                        ;;
+                esac
+            done
+        done
+        export PATH
+    fi
+    if (! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1) && command -v timeout >/dev/null 2>&1; then
+        if command -v spack >/dev/null 2>&1; then
+            spack_prefix=$(timeout 3 spack location -i slurm 2>/dev/null | sed -n '1p') || true
+            case "$spack_prefix" in /*) append_path_directory "$spack_prefix/bin" ;; esac
+        fi
+        package_candidates=''
+        if command -v rpm >/dev/null 2>&1; then
+            package_candidates=$(timeout 3 rpm -ql slurm slurm-client 2>/dev/null) || true
+        elif command -v dpkg-query >/dev/null 2>&1; then
+            package_candidates=$(timeout 3 dpkg-query -L slurm-client slurm-wlm-basic-plugins 2>/dev/null) || true
+        fi
+        append_candidate_lines "$package_candidates"
+        scan_candidates=$(timeout 4 find /opt/slurm /usr/local/slurm /apps/slurm /software/slurm /shared/slurm /cm/shared/apps/slurm /cm/local/apps/slurm -maxdepth 6 -type f \\( -name sinfo -o -name squeue -o -name scontrol -o -name sacct \\) -perm -u+x -print 2>/dev/null | sed -n '1,64p') || true
+        append_candidate_lines "$scan_candidates"
+        export PATH
+    fi
+}}
+bootstrap_slurm_environment
+environment_mode=${{VRAM_RADAR_SLURM_ENVIRONMENT_MODE:-login}}
+case "$environment_mode" in login|interactive_bash) ;; *) environment_mode=login ;; esac
+printf '{SLURM_PROTOCOL_HEADER}\\n'
+printf '{SLURM_ENVIRONMENT_MODE_MARKER}%s\\n' "$environment_mode"
+current_user=$(id -un) || slurm_fail identity $?
 printf '{CURRENT_USER_MARKER}%s\\n' "$current_user"
 home_dir=${{HOME:-}}
 if [ -z "$home_dir" ] && command -v getent >/dev/null 2>&1; then
     home_dir=$(getent passwd "$(id -u)" 2>/dev/null | awk -F: '{{print $6; exit}}') || true
 fi
-printf '{HOME_DIRECTORY_MARKER}'; printf '%s' "$home_dir" | od -An -v -tx1 | tr -d ' \\n'; printf '\\n'
-sinfo -N -h -o '%N|%P|%t|%G'
+home_hex=$(printf '%s' "$home_dir" | od -An -v -tx1 | tr -d ' \\n') || slurm_fail environment $?
+printf '{HOME_DIRECTORY_MARKER}%s\\n' "$home_hex"
+inventory_mode=sinfo
+inventory_ready=0
+sinfo_succeeded=0
+sinfo_rows=''
+if node_rows=$(sinfo -N -h -o '%N|%P|%t|%G'); then
+    sinfo_succeeded=1
+    sinfo_rows=$node_rows
+    if printf '%s\n' "$node_rows" | awk -F'|' '$4 ~ /(^|,)gpu(:|,)/ {{ found = 1 }} END {{ exit(found ? 0 : 1) }}'; then
+        inventory_ready=1
+    fi
+else
+    inventory_status=$?
+fi
+if [ "$inventory_ready" != 1 ]; then
+    if command -v scontrol >/dev/null 2>&1 && node_rows=$(scontrol show nodes -o | awk '
+{{
+    node = ""
+    partitions = ""
+    state = ""
+    gres = ""
+    for (i = 1; i <= NF; i++) {{
+        if ($i ~ /^NodeName=/) {{ node = $i; sub(/^NodeName=/, "", node) }}
+        else if ($i ~ /^Partitions=/) {{ partitions = $i; sub(/^Partitions=/, "", partitions) }}
+        else if ($i ~ /^State=/) {{ state = $i; sub(/^State=/, "", state) }}
+        else if ($i ~ /^Gres=/) {{ gres = $i; sub(/^Gres=/, "", gres) }}
+    }}
+    if (node != "") printf "%s|%s|%s|%s\\n", node, partitions, state, gres
+}}'); then
+        inventory_mode=scontrol
+        inventory_ready=1
+    else
+        inventory_status=$?
+        if [ "$sinfo_succeeded" = 1 ]; then
+            node_rows=$sinfo_rows
+            inventory_mode=sinfo
+            inventory_ready=1
+        else
+            slurm_fail sinfo "$inventory_status"
+        fi
+    fi
+fi
+printf '{SLURM_INVENTORY_MODE_MARKER}%s\\n' "$inventory_mode"
+printf '%s\\n' "$node_rows"
 printf '{SPLIT_MARKER}\\n'
-scontrol show nodes -o | awk '
+if allocation_rows=$(scontrol show nodes -o | awk '
 {{
     node = ""
     alloc = ""
@@ -2152,9 +2502,50 @@ scontrol show nodes -o | awk '
     }}
     if (node != "")
         printf "%s|%s\\n", node, alloc
-}}'
+}}'); then
+    printf '{SLURM_ALLOCATION_SUPPORT_MARKER}1|0\\n'
+    printf '%s\\n' "$allocation_rows"
+else
+    allocation_status=$?
+    printf '{SLURM_ALLOCATION_SUPPORT_MARKER}0|%s\\n' "$allocation_status"
+fi
 printf '{LIVE_TASK_MARKER}\\n'
-squeue {queue_scope} -t PENDING,RUNNING,COMPLETING,CONFIGURING,SUSPENDED -h -o '%i|%T|%u|%M|%l|%V|%N|%R|%D|%b|%j' | sed -n '1,2000p'
+query_live_rows() {{
+    scope_name=$1
+    shift
+    if live_rows=$(squeue "$@" -h -o '%i|%T|%u|%M|%l|%V|%N|%R|%D|%b|%j' | sed -n '1,2000p'); then
+        printf '{SLURM_QUEUE_SCOPE_MARKER}%s\\n' "$scope_name"
+        printf '{SLURM_QUEUE_DETAIL_MARKER}1\\n'
+        printf '%s\\n' "$live_rows"
+        return 0
+    else
+        queue_status=$?
+    fi
+    if live_rows=$(squeue "$@" -h -o '%i|%T|%u|%M|%l||%N|%R|%D||%j' | sed -n '1,2000p'); then
+        printf '{SLURM_QUEUE_SCOPE_MARKER}%s\\n' "$scope_name"
+        printf '{SLURM_QUEUE_DETAIL_MARKER}0\\n'
+        printf '%s\\n' "$live_rows"
+        return 0
+    else
+        queue_status=$?
+    fi
+    return "$queue_status"
+}}
+if query_live_rows {queue_scope_name} {queue_scope}; then
+    :
+else
+    primary_queue_status=$?
+    if [ {"1" if server.show_other_user_commands else "0"} = 1 ]; then
+        if query_live_rows current -u "$current_user"; then
+            :
+        else
+            queue_status=$?
+            slurm_fail squeue "$queue_status"
+        fi
+    else
+        slurm_fail squeue "$primary_queue_status"
+    fi
+fi
 printf '{HISTORY_MARKER}\\n'
 if command -v sacct >/dev/null 2>&1; then
     if sacct {queue_scope} -X -S now-24hours -n -P --format=JobIDRaw,State,User,Elapsed,End,NodeList,ReqTRES,AllocTRES,ExitCode,JobName%256 2>/dev/null \
@@ -2168,7 +2559,57 @@ else
     printf '{HISTORY_SUPPORT_MARKER}0\\n'
 fi
 """
-    output = run_remote(server, script, password=password, identities_only=identities_only)
+    environment_attempts = (
+        "login_shell",
+        *(("configured_slurm_environment",) if (
+            server.slurm_module or server.slurm_bin_directory or server.slurm_init_script
+        ) else ()),
+        "common_slurm_paths",
+        "environment_modules",
+        "default_user_shell",
+        "shell_command_indexes",
+        "whereis",
+        "spack",
+        "package_database",
+        "bounded_filesystem_scan",
+        "interactive_bash",
+    )
+    try:
+        output = run_remote(server, script, password=password, identities_only=identities_only)
+    except ConnectorFailure as initial_failure:
+        if initial_failure.code != "slurm_command_missing":
+            raise
+        interactive_script = (
+            "export VRAM_RADAR_SLURM_ENVIRONMENT_MODE=interactive_bash; "
+            f"exec bash -ic {shlex.quote(script)}"
+        )
+        try:
+            output = run_remote(
+                server,
+                interactive_script,
+                password=password,
+                identities_only=identities_only,
+            )
+        except ConnectorFailure as final_failure:
+            final_failure.environment_attempts = environment_attempts
+            if final_failure.code == "slurm_command_missing":
+                final_failure.args = (
+                    f"{final_failure}；已尝试显式配置、环境变量、常见/Nix/Guix 路径、Modules 索引、账号默认 shell、command/type/which/whereis、Spack、系统包数据库、限时目录扫描和交互式 Bash",
+                )
+            raise
+    header_index = output.find(f"{SLURM_PROTOCOL_HEADER}\n")
+    if header_index < 0:
+        raise ConnectorFailure(
+            "remote_shell_incompatible",
+            "SSH 已连接，但远端没有启动 Slurm 采集协议；常见原因是公共平台/ForceCommand 交互菜单、必须二次跳转，或账号禁止直接执行远程命令",
+            retryable=False,
+            state="misconfigured",
+            stage="remote_shell",
+            remote_exit_code=0,
+            reason="remote_command_not_executed",
+            environment_attempts=environment_attempts,
+        )
+    output = output[header_index + len(SLURM_PROTOCOL_HEADER) + 1 :]
     node_text, allocation_marker, rest = output.partition(SPLIT_MARKER)
     allocation_text, live_marker, rest = rest.partition(LIVE_TASK_MARKER)
     live_text, history_marker, history_text = rest.partition(HISTORY_MARKER)
@@ -2176,15 +2617,27 @@ fi
         raise ConnectorFailure("parse_failed", "Slurm 返回了不完整的调度快照", retryable=True)
     current_user = ""
     home_directory = ""
+    environment_mode = "login"
+    inventory_mode = "sinfo"
     node_lines: list[str] = []
     for raw in node_text.splitlines():
         stripped = raw.strip()
         if stripped.startswith(CURRENT_USER_MARKER):
             current_user = stripped.removeprefix(CURRENT_USER_MARKER).strip()
+        elif stripped.startswith(SLURM_ENVIRONMENT_MODE_MARKER):
+            candidate_mode = stripped.removeprefix(SLURM_ENVIRONMENT_MODE_MARKER).strip()
+            if candidate_mode not in {"login", "interactive_bash"}:
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的环境探测模式", retryable=True)
+            environment_mode = candidate_mode
         elif stripped.startswith(HOME_DIRECTORY_MARKER):
             home_directory = _decode_hex(
                 stripped.removeprefix(HOME_DIRECTORY_MARKER).strip(), "账号主目录", limit=65_536
             )
+        elif stripped.startswith(SLURM_INVENTORY_MODE_MARKER):
+            candidate_mode = stripped.removeprefix(SLURM_INVENTORY_MODE_MARKER).strip()
+            if candidate_mode not in {"sinfo", "scontrol"}:
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点清单探测模式", retryable=True)
+            inventory_mode = candidate_mode
         elif stripped:
             node_lines.append(raw)
     parsed_nodes = parse_node_rows("\n".join(node_lines))
@@ -2195,16 +2648,55 @@ fi
             retryable=False,
             state="misconfigured",
         )
-    live_tasks = parse_live_task_rows(live_text)
+    queue_detail_supported = True
+    queue_scope_mode = "all" if server.show_other_user_commands else "current"
+    live_lines: list[str] = []
+    for raw in live_text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith(SLURM_QUEUE_DETAIL_MARKER):
+            support = stripped.removeprefix(SLURM_QUEUE_DETAIL_MARKER)
+            if support not in {"0", "1"}:
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的任务详情能力状态", retryable=True)
+            queue_detail_supported = support == "1"
+        elif stripped.startswith(SLURM_QUEUE_SCOPE_MARKER):
+            candidate_scope = stripped.removeprefix(SLURM_QUEUE_SCOPE_MARKER).strip()
+            if candidate_scope not in {"all", "current"}:
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的任务可见范围", retryable=True)
+            queue_scope_mode = candidate_scope
+        elif stripped:
+            live_lines.append(raw)
+    live_tasks = parse_live_task_rows(
+        "\n".join(live_lines), {node["node"] for node in parsed_nodes}
+    )
     history_supported, recent_tasks = parse_history_task_rows(
         history_text, {node["node"] for node in parsed_nodes}
     )
-    slurm_allocations = parse_job_rows(allocation_text)
+    allocation_detail_supported = True
+    allocation_detail_exit_code = 0
+    allocation_lines: list[str] = []
+    for raw in allocation_text.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith(SLURM_ALLOCATION_SUPPORT_MARKER):
+            support, separator, status = stripped.removeprefix(SLURM_ALLOCATION_SUPPORT_MARKER).partition("|")
+            if not separator or support not in {"0", "1"} or not status.isdigit():
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点分配能力状态", retryable=True)
+            allocation_detail_supported = support == "1"
+            allocation_detail_exit_code = int(status)
+        elif stripped:
+            allocation_lines.append(raw)
+    slurm_allocations = parse_job_rows("\n".join(allocation_lines))
     visible_task_allocations = allocated_gpus_from_tasks(live_tasks)
     used_by_node = {
-        node["node"]: max(
-            slurm_allocations.get(node["node"], 0),
-            visible_task_allocations.get(node["node"], 0),
+        node["node"]: (
+            max(
+                slurm_allocations.get(node["node"], 0),
+                visible_task_allocations.get(node["node"], 0),
+            )
+            if allocation_detail_supported
+            # Without scheduler-wide allocation detail, visible squeue rows may
+            # cover only the current account. Treat capacity as unavailable
+            # rather than inventing free GPUs that another user may own.
+            else node["total_gpus"]
         )
         for node in parsed_nodes
     }
@@ -2215,6 +2707,9 @@ fi
         job_ids_by_node=job_ids_by_node_from_tasks(live_tasks),
         live_tasks=live_tasks,
     )
+    if not allocation_detail_supported:
+        for node in nodes:
+            node["allocation_detail_supported"] = False
     counts: dict[str, int] = {}
     for task in [*live_tasks, *recent_tasks]:
         counts[task["state"]] = counts.get(task["state"], 0) + 1
@@ -2245,6 +2740,15 @@ fi
             "history_window_hours": 24,
         },
         "account": _account_summary(current_user, home_directory),
+        "slurm_capabilities": {
+            "node_allocation_detail": allocation_detail_supported,
+            "node_allocation_exit_code": allocation_detail_exit_code,
+            "task_gpu_request_detail": queue_detail_supported,
+            "queue_scope": queue_scope_mode,
+            "queue_scope_limited": server.show_other_user_commands and queue_scope_mode == "current",
+            "inventory_mode": inventory_mode,
+            "environment_mode": environment_mode,
+        },
     }
 
 

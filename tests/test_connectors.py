@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,60 @@ from vram_radar.models import ServerProfile
 
 
 class ConnectorTests(unittest.TestCase):
+    @staticmethod
+    def _posix_bash_path(path: Path) -> str:
+        bash = shutil.which("bash")
+        if not bash:
+            raise unittest.SkipTest("bash is not available")
+        if os.name != "nt":
+            return path.as_posix()
+        converted = subprocess.run(
+            [bash, "-lc", 'cygpath -u "$1"', "vram-radar-test", str(path)],
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        ).stdout.strip()
+        if not converted.startswith("/"):
+            raise unittest.SkipTest("the available bash cannot address Windows temporary paths")
+        return converted
+
+    @staticmethod
+    def _write_fake_command(directory: Path, name: str, body: str) -> None:
+        path = directory / name
+        path.write_text("#!/bin/sh\nset -eu\n" + body.strip() + "\n", encoding="utf-8", newline="\n")
+        path.chmod(0o755)
+
+    def _bash_remote_runner(self, path_value: str, extra_environment: dict[str, str] | None = None):
+        bash = shutil.which("bash")
+        if not bash:
+            raise unittest.SkipTest("bash is not available")
+
+        def execute(_server, script, **_kwargs):
+            environment = os.environ.copy()
+            environment.update({"PATH": path_value, "SHELL": "/bin/false", "LC_ALL": "C"})
+            environment.update(extra_environment or {})
+            result = subprocess.run(
+                [bash, "--noprofile", "--norc"],
+                input=script,
+                text=True,
+                capture_output=True,
+                env=environment,
+                timeout=20,
+            )
+            if result.returncode:
+                script_tail = "\n".join(
+                    f"{index}: {line}"
+                    for index, line in list(enumerate(script.splitlines(), 1))[-80:]
+                )
+                raise AssertionError(
+                    f"generated collector exited {result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}\n"
+                    + script_tail
+                )
+            return result.stdout
+
+        return execute
+
     @staticmethod
     def direct_protocol(
         *,
@@ -296,11 +351,13 @@ class ConnectorTests(unittest.TestCase):
     def test_slurm_query_uses_node_local_allocations_for_multi_node_job(self, remote):
         home_hex = "/srv/vram-radar-macos".encode("utf-8").hex()
         remote.return_value = (
+            "VRAM_RADAR_SLURM|2\n"
             "__VRAM_RADAR_CURRENT_USER__=alice\n"
             f"__VRAM_RADAR_HOME_HEX__={home_hex}\n"
             "a100-1|GPU-LARGE|mix|gpu:A100-40G:2\n"
             "a100-2|GPU-LARGE|mix|gpu:A100-40G:2\n"
             "__VRAM_RADAR_SPLIT__\n"
+            "__VRAM_RADAR_SLURM_ALLOCATION_SUPPORTED__=1|0\n"
             "a100-1|cpu=8,gres/gpu=1\n"
             "a100-2|cpu=8,gres/gpu=1\n"
             "__VRAM_RADAR_LIVE_TASKS__\n"
@@ -314,6 +371,9 @@ class ConnectorTests(unittest.TestCase):
             backend="slurm_ssh",
             ssh_alias="a100-alias",
             gpu_memory_gib={"A100-40G": 40},
+            slurm_module="slurm/24.05",
+            slurm_bin_directory="/site apps/slurm/bin",
+            slurm_init_script="/site profile/slurm.sh",
         )
 
         snapshot = query_slurm_ssh(server)
@@ -329,14 +389,280 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(snapshot["tasks"]["active"][0]["user"], "alice")
         self.assertEqual(snapshot["tasks"]["active"][0]["name"], "world-model-train")
         self.assertEqual(snapshot["tasks"]["active"][0]["gpu_count"], 4)
+        self.assertEqual(
+            snapshot["slurm_capabilities"],
+            {
+                "node_allocation_detail": True,
+                "node_allocation_exit_code": 0,
+                "task_gpu_request_detail": True,
+                "queue_scope": "all",
+                "queue_scope_limited": False,
+                "inventory_mode": "sinfo",
+                "environment_mode": "login",
+            },
+        )
         script = remote.call_args.args[1]
         self.assertIn("$(id -un)", script)
         self.assertIn("${HOME:-}", script)
+        self.assertIn("/opt/slurm/current/bin", script)
+        self.assertIn("/software/slurm/bin", script)
+        self.assertIn("whereis -b", script)
+        self.assertIn("module -t avail slurm", script)
+        self.assertIn("spack location -i slurm", script)
+        self.assertIn("dpkg-query -L slurm-client", script)
+        self.assertIn("timeout 4 find", script)
+        self.assertIn("SLURM_ROOT", script)
+        self.assertIn("/run/current-system/sw/bin", script)
+        self.assertIn("type -P", script)
+        self.assertIn('"$user_shell" -ic', script)
+        self.assertIn("configured_slurm_module=slurm/24.05", script)
+        self.assertIn("configured_slurm_bin_directory='/site apps/slurm/bin'", script)
+        self.assertIn('prepend_path_directory "$configured_slurm_bin_directory"', script)
+        self.assertIn("configured_slurm_init_script='/site profile/slurm.sh'", script)
+        self.assertIn('module load "$configured_slurm_module"', script)
+        self.assertIn("/etc/profile.d/lmod.sh", script)
+        self.assertIn("/etc/profile.d/slurm.sh", script)
+        self.assertIn("module load slurm", script)
+        self.assertIn("ml slurm", script)
         self.assertIn("scontrol show nodes -o", script)
+        self.assertIn("inventory_ready", script)
+        self.assertIn("found ? 0 : 1", script)
         self.assertIn("%i|%T|%u|%M|%l|%V|%N|%R|%D|%b|%j", script)
+        self.assertIn("%i|%T|%u|%M|%l||%N|%R|%D||%j", script)
         self.assertIn("JobIDRaw,State,User,Elapsed,End,NodeList,ReqTRES,AllocTRES,ExitCode,JobName%256", script)
         self.assertNotIn("scontrol show hostnames", script)
+        self.assertNotIn(" -t PENDING,RUNNING", script)
         self.assertNotIn("squeue -t RUNNING -h -o '%i|%N|%b'", script)
+
+    def test_generated_slurm_collector_executes_real_fallback_branches(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            broken = root / "broken-bin"
+            working = root / "working-bin"
+            broken.mkdir()
+            working.mkdir()
+            for name in ("sinfo", "squeue", "scontrol"):
+                self._write_fake_command(broken, name, "exit 9")
+            self._write_fake_command(
+                working,
+                "sinfo",
+                "printf '%s\\n' 'cpu-1|cpu|idle|(null)'",
+            )
+            self._write_fake_command(
+                working,
+                "scontrol",
+                "printf '%s\\n' 'NodeName=gpu-1 Partitions=gpu State=MIXED Gres=gpu:A100:2 AllocTRES=gres/gpu=1'",
+            )
+            self._write_fake_command(
+                working,
+                "squeue",
+                """
+case " $* " in
+  *" -a "*) exit 7 ;;
+esac
+printf '%s\n' '101|RUNNING|tester|00:01|01:00|2026-09-02T00:00:00|gpu-1|gpu-1|1|gres/gpu:1|train'
+""",
+            )
+            broken_posix = self._posix_bash_path(broken)
+            working_posix = self._posix_bash_path(working)
+            server = ServerProfile(
+                id="cluster",
+                display_name="Cluster",
+                backend="slurm_ssh",
+                ssh_alias="cluster",
+                slurm_bin_directory=working_posix,
+                gpu_memory_gib={"A100": 80},
+            )
+
+            with patch(
+                "vram_radar.connectors.run_remote",
+                side_effect=self._bash_remote_runner(f"{broken_posix}:/usr/bin:/bin"),
+            ):
+                snapshot = query_slurm_ssh(server)
+
+        self.assertEqual(snapshot["total_gpus"], 2)
+        self.assertEqual(snapshot["nodes"][0]["allocated_gpus"], 1)
+        self.assertEqual(snapshot["tasks"]["active"][0]["job_id"], "101")
+        self.assertEqual(snapshot["slurm_capabilities"]["inventory_mode"], "scontrol")
+        self.assertEqual(snapshot["slurm_capabilities"]["queue_scope"], "current")
+        self.assertTrue(snapshot["slurm_capabilities"]["queue_scope_limited"])
+
+    def test_generated_slurm_collector_executes_whereis_discovery(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            finder = root / "finder-bin"
+            hidden = root / "hidden-slurm-bin"
+            finder.mkdir()
+            hidden.mkdir()
+            hidden_posix = self._posix_bash_path(hidden)
+            self._write_fake_command(
+                finder,
+                "whereis",
+                f'printf "%s: %s/%s\\n" "$2" {hidden_posix!r} "$2"',
+            )
+            self._write_fake_command(hidden, "sinfo", "printf '%s\\n' 'gpu-2|gpu|idle|gpu:H100:1'")
+            self._write_fake_command(
+                hidden,
+                "scontrol",
+                "printf '%s\\n' 'NodeName=gpu-2 Partitions=gpu State=IDLE Gres=gpu:H100:1 AllocTRES='",
+            )
+            self._write_fake_command(hidden, "squeue", "exit 0")
+            finder_posix = self._posix_bash_path(finder)
+            server = ServerProfile(
+                id="cluster",
+                display_name="Cluster",
+                backend="slurm_ssh",
+                ssh_alias="cluster",
+                gpu_memory_gib={"H100": 80},
+            )
+
+            with patch(
+                "vram_radar.connectors.run_remote",
+                side_effect=self._bash_remote_runner(f"{finder_posix}:/usr/bin:/bin"),
+            ):
+                snapshot = query_slurm_ssh(server)
+
+        self.assertEqual(snapshot["total_gpus"], 1)
+        self.assertEqual(snapshot["slurm_capabilities"]["inventory_mode"], "sinfo")
+
+    def test_generated_slurm_collector_executes_installation_index_discovery(self):
+        for discovery in ("environment", "spack", "package_database"):
+            with self.subTest(discovery=discovery), tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+                root = Path(temporary)
+                finder = root / "finder-bin"
+                hidden_prefix = root / "hidden-slurm-prefix"
+                hidden = hidden_prefix / "bin" if discovery == "spack" else root / "hidden-slurm-bin"
+                finder.mkdir()
+                hidden.mkdir(parents=True)
+                hidden_posix = self._posix_bash_path(hidden)
+                hidden_prefix_posix = self._posix_bash_path(hidden_prefix)
+                self._write_fake_command(hidden, "sinfo", "printf '%s\\n' 'gpu-3|gpu|idle|gpu:L40:1'")
+                self._write_fake_command(
+                    hidden,
+                    "scontrol",
+                    "printf '%s\\n' 'NodeName=gpu-3 Partitions=gpu State=IDLE Gres=gpu:L40:1 AllocTRES='",
+                )
+                self._write_fake_command(hidden, "squeue", "exit 0")
+                extra_environment = {}
+                if discovery == "environment":
+                    extra_environment["SLURM_ROOT"] = hidden_posix.removesuffix("/bin")
+                elif discovery == "spack":
+                    self._write_fake_command(finder, "spack", f"printf '%s\\n' {hidden_prefix_posix!r}")
+                elif discovery == "package_database":
+                    candidate_lines = "\n".join(f"{hidden_posix}/{name}" for name in ("sinfo", "squeue", "scontrol"))
+                    self._write_fake_command(finder, "rpm", f"printf '%b\\n' {candidate_lines!r}")
+                finder_posix = self._posix_bash_path(finder)
+                server = ServerProfile(
+                    id="cluster",
+                    display_name="Cluster",
+                    backend="slurm_ssh",
+                    ssh_alias="cluster",
+                    gpu_memory_gib={"L40": 48},
+                )
+
+                with patch(
+                    "vram_radar.connectors.run_remote",
+                    side_effect=self._bash_remote_runner(
+                        f"{finder_posix}:/usr/bin:/bin",
+                        extra_environment,
+                    ),
+                ):
+                    snapshot = query_slurm_ssh(server)
+
+                self.assertEqual(snapshot["total_gpus"], 1)
+
+    @patch("vram_radar.connectors.run_remote")
+    def test_slurm_query_degrades_when_scontrol_node_details_are_restricted(self, remote):
+        remote.return_value = (
+            "VRAM_RADAR_SLURM|2\n"
+            "__VRAM_RADAR_CURRENT_USER__=alice\n"
+            "__VRAM_RADAR_HOME_HEX__=\n"
+            "__VRAM_RADAR_SLURM_INVENTORY_MODE__=scontrol\n"
+            "gpu-1|gpu|mix|gpu:A100:2\n"
+            "__VRAM_RADAR_SPLIT__\n"
+            "__VRAM_RADAR_SLURM_ALLOCATION_SUPPORTED__=0|1\n"
+            "__VRAM_RADAR_LIVE_TASKS__\n"
+            "__VRAM_RADAR_SLURM_QUEUE_SCOPE__=current\n"
+            "__VRAM_RADAR_SLURM_QUEUE_DETAIL__=0\n"
+            "91|RUNNING|alice|00:10|01:00||gpu-1|gpu-1|1||train\n"
+            "__VRAM_RADAR_TASK_HISTORY__\n"
+            "__VRAM_RADAR_HISTORY_SUPPORTED__=0\n"
+        )
+        server = ServerProfile(
+            id="cluster",
+            display_name="Cluster",
+            backend="slurm_ssh",
+            ssh_alias="cluster",
+            gpu_memory_gib={"A100": 80},
+        )
+
+        snapshot = query_slurm_ssh(server)
+
+        self.assertEqual(snapshot["nodes"][0]["allocated_gpus"], 2)
+        self.assertEqual(snapshot["nodes"][0]["free_gpus"], 0)
+        self.assertFalse(snapshot["nodes"][0]["allocation_detail_supported"])
+        self.assertEqual(snapshot["tasks"]["active"][0]["job_id"], "91")
+        self.assertIsNone(snapshot["tasks"]["active"][0]["gpu_count"])
+        self.assertEqual(
+            snapshot["slurm_capabilities"],
+            {
+                "node_allocation_detail": False,
+                "node_allocation_exit_code": 1,
+                "task_gpu_request_detail": False,
+                "queue_scope": "current",
+                "queue_scope_limited": True,
+                "inventory_mode": "scontrol",
+                "environment_mode": "login",
+            },
+        )
+
+    @patch("vram_radar.connectors.run_remote")
+    def test_slurm_query_retries_missing_commands_through_interactive_bash(self, remote):
+        remote.side_effect = [
+            ConnectorFailure(
+                "slurm_command_missing",
+                "sinfo missing",
+                retryable=False,
+                state="misconfigured",
+                stage="sinfo",
+                remote_exit_code=127,
+                reason="command_missing_or_path",
+            ),
+            (
+                "interactive startup banner\n"
+                "VRAM_RADAR_SLURM|2\n"
+                "__VRAM_RADAR_SLURM_ENVIRONMENT_MODE__=interactive_bash\n"
+                "__VRAM_RADAR_CURRENT_USER__=alice\n"
+                "__VRAM_RADAR_HOME_HEX__=\n"
+                "gpu-1|gpu|idle|gpu:A100:1\n"
+                "__VRAM_RADAR_SPLIT__\n"
+                "__VRAM_RADAR_SLURM_ALLOCATION_SUPPORTED__=1|0\n"
+                "gpu-1|\n"
+                "__VRAM_RADAR_LIVE_TASKS__\n"
+                "__VRAM_RADAR_SLURM_QUEUE_DETAIL__=1\n"
+                "__VRAM_RADAR_TASK_HISTORY__\n"
+                "__VRAM_RADAR_HISTORY_SUPPORTED__=0\n"
+            ),
+        ]
+        server = ServerProfile(id="cluster", display_name="Cluster", backend="slurm_ssh", ssh_alias="cluster")
+
+        snapshot = query_slurm_ssh(server)
+
+        self.assertEqual(remote.call_count, 2)
+        self.assertIn("exec bash -ic", remote.call_args.args[1])
+        self.assertEqual(snapshot["slurm_capabilities"]["environment_mode"], "interactive_bash")
+
+    @patch("vram_radar.connectors.run_remote", return_value="Select a cluster from the platform menu\n")
+    def test_slurm_query_identifies_gateway_that_never_executes_remote_commands(self, remote):
+        server = ServerProfile(id="gateway", display_name="Gateway", backend="slurm_ssh", ssh_alias="gateway")
+
+        with self.assertRaises(ConnectorFailure) as raised:
+            query_slurm_ssh(server)
+
+        self.assertEqual(raised.exception.code, "remote_shell_incompatible")
+        self.assertEqual(raised.exception.stage, "remote_shell")
+        self.assertEqual(raised.exception.reason, "remote_command_not_executed")
+        self.assertIn("interactive_bash", raised.exception.environment_attempts)
 
     @patch("vram_radar.connectors.run_remote")
     def test_account_directory_query_is_bounded_and_never_reads_file_contents(self, remote):
@@ -1111,6 +1437,39 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(failure.code, "proxy_command_missing")
         self.assertEqual(failure.state, "misconfigured")
         self.assertFalse(failure.retryable)
+
+    def test_slurm_stage_failures_preserve_safe_stage_exit_and_reason(self):
+        missing = classify_process_error(
+            "bash: sinfo: command not found\n__VRAM_RADAR_SLURM_FAILURE__=sinfo|127",
+            returncode=127,
+        )
+        controller = classify_process_error(
+            "sinfo: error: Unable to contact slurm controller\n"
+            "__VRAM_RADAR_SLURM_FAILURE__=sinfo|1",
+            returncode=1,
+        )
+        incompatible = classify_process_error(
+            "squeue: invalid job state specified\n__VRAM_RADAR_SLURM_FAILURE__=squeue|1",
+            returncode=1,
+        )
+
+        self.assertEqual(missing.code, "slurm_command_missing")
+        self.assertEqual(missing.stage, "sinfo")
+        self.assertEqual(missing.remote_exit_code, 127)
+        self.assertEqual(missing.reason, "command_missing_or_path")
+        self.assertFalse(missing.retryable)
+        self.assertEqual(controller.code, "slurm_controller_unreachable")
+        self.assertEqual(controller.state, "offline")
+        self.assertTrue(controller.retryable)
+        self.assertEqual(incompatible.code, "slurm_command_incompatible")
+        self.assertEqual(incompatible.reason, "slurm_version_incompatible")
+
+        gateway = classify_process_error(
+            "This service requires a TTY; select a platform after login",
+            returncode=1,
+        )
+        self.assertEqual(gateway.code, "interactive_gateway_required")
+        self.assertEqual(gateway.reason, "interactive_gateway_or_second_hop_required")
 
     @patch("vram_radar.connectors._run_bounded_process")
     def test_remote_query_is_noninteractive_and_windowless(self, run):

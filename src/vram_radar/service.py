@@ -826,6 +826,10 @@ class DashboardService:
                 "code": failure.code,
                 "message": str(failure),
                 "retryable": failure.retryable,
+                "stage": failure.stage,
+                "remote_exit_code": failure.remote_exit_code,
+                "reason": failure.reason,
+                "environment_attempts": list(failure.environment_attempts),
                 "occurred_at": occurred,
                 "retry_at": runtime.retry_at,
             }

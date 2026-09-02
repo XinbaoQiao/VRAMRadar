@@ -303,6 +303,9 @@
             <label><span>OpenSSH 配置文件（可选）</span><input data-field="ssh_config_file" placeholder="~/.ssh/config"><small>自动导入会填写来源；切换直连或文件移动后可在这里清除或修改。</small></label>
             <label class="password-field"><span>登录密码（可选）</span><input data-field="password" type="password" autocomplete="new-password" maxlength="4096" placeholder="留空则保持已有密码"><small data-password-status>未保存密码</small></label>
             <label class="check-label clear-password"><input data-field="clear_password" type="checkbox"><span>删除已保存的登录密码</span></label>
+            <label data-slurm-environment hidden><span>Slurm 模块名（可选）</span><input data-field="slurm_module" maxlength="256" placeholder="slurm/23.11"><small>仅填写模块名；程序会安全调用 Environment Modules/Lmod。</small></label>
+            <label data-slurm-environment hidden><span>Slurm bin 目录（可选）</span><input data-field="slurm_bin_directory" maxlength="4096" placeholder="/software/slurm/bin"><small>填写绝对目录，不需要修改服务器全局环境。</small></label>
+            <label data-slurm-environment hidden><span>环境初始化脚本（可选）</span><input data-field="slurm_init_script" maxlength="4096" placeholder="/etc/profile.d/site-slurm.sh"><small>填写远端绝对路径；仅在这台服务器的采集进程中读取。</small></label>
           </div>
           <label class="server-command-setting">
             <input data-field="show_other_user_commands" type="checkbox">

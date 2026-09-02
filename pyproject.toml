@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vram-radar"
-version = "0.8.8"
+version = "0.8.9"
 description = "Local-first GPU memory monitor for Windows and macOS"
 license = "MIT"
 requires-python = ">=3.12,<3.14"
