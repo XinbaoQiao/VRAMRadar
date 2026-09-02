@@ -4154,6 +4154,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--show-release", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--check-updates-json", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--download-update-smoke-json", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--download-published-update-smoke-json", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--debug", action="store_true", help="enable the embedded webview developer tools")
     parser.add_argument("--gui-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--gui-update-smoke", action="store_true", help=argparse.SUPPRESS)
@@ -4169,8 +4170,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
 
-    if args.download_update_smoke_json:
-        result = check_latest_release()
+    if args.download_update_smoke_json or args.download_published_update_smoke_json:
+        result = (
+            check_latest_release(current_tag="v0.0.0", current_commit="0" * 40)
+            if args.download_published_update_smoke_json
+            else check_latest_release()
+        )
         asset = result.get("asset") if isinstance(result, dict) else None
         if not result.get("ok") or not isinstance(asset, dict):
             print(json.dumps(result, ensure_ascii=False, indent=2))

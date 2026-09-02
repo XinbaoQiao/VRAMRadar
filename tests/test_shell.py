@@ -4184,6 +4184,37 @@ class ShellApiTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["sha256"], asset["sha256"])
 
+    def test_published_update_smoke_uses_a_pre_release_baseline(self):
+        data = b"published update archive"
+        asset = {
+            "name": "VRAMRadar-0.8.8-macos.zip",
+            "url": "https://github.com/example-owner/VRAMRadar/releases/download/v0.8.8/VRAMRadar-0.8.8-macos.zip",
+            "size": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        update_result = {
+            "ok": True,
+            "current_version": "0.0.0",
+            "latest_version": "0.8.8",
+            "asset": asset,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / asset["name"]
+            destination.write_bytes(data)
+            with patch("vram_radar.shell.check_latest_release", return_value=update_result) as check, patch(
+                "vram_radar.shell.download_verified_asset", return_value=destination
+            ), patch("vram_radar.shell.build_runtime") as build_runtime, patch(
+                "builtins.print"
+            ) as print_value:
+                result = main(["--home", temporary, "--download-published-update-smoke-json"])
+
+        self.assertEqual(result, 0)
+        build_runtime.assert_not_called()
+        check.assert_called_once_with(current_tag="v0.0.0", current_commit="0" * 40)
+        payload = json.loads(print_value.call_args.args[0])
+        self.assertEqual(payload["current_version"], "0.0.0")
+        self.assertEqual(payload["latest_version"], "0.8.8")
+
 
 if __name__ == "__main__":
     unittest.main()

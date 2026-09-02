@@ -223,7 +223,7 @@ def validate_packaged_update_transport(release_tag: str, home: Path) -> tuple[st
             "--profile",
             "macos-bundle-smoke",
             "--no-auto-import",
-            "--download-update-smoke-json",
+            "--download-published-update-smoke-json",
         ],
         cwd=ROOT,
         stdin=subprocess.DEVNULL,
@@ -245,10 +245,14 @@ def validate_packaged_update_transport(release_tag: str, home: Path) -> tuple[st
         if code == "update_rate_limited" and allow_rate_limit_with_sibling_proof:
             return "", "rate-limited-requires-sibling-proof"
         raise RuntimeError(f"packaged macOS update transport failed: {code or 'unknown'}")
-    expected_version = release_tag.removeprefix("v")
-    if payload.get("current_version") != expected_version:
-        raise RuntimeError("packaged macOS update transport used the wrong release identity")
-    if payload.get("name") != f"VRAMRadar-{expected_version}-macos.zip":
+    if payload.get("current_version") != "0.0.0":
+        raise RuntimeError("packaged macOS update transport did not use the published baseline")
+    published_version = payload.get("latest_version")
+    if (
+        not isinstance(published_version, str)
+        or not published_version
+        or payload.get("name") != f"VRAMRadar-{published_version}-macos.zip"
+    ):
         raise RuntimeError("packaged macOS updater downloaded the wrong release asset")
     digest = payload.get("sha256")
     size = payload.get("size")
@@ -261,7 +265,7 @@ def validate_packaged_update_transport(release_tag: str, home: Path) -> tuple[st
         or size <= 0
     ):
         raise RuntimeError("packaged macOS updater did not verify the downloaded release asset")
-    return str(payload.get("latest_version") or ""), "passed"
+    return published_version, "passed"
 
 
 def main() -> int:
