@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -3600,6 +3601,114 @@ class ShellApiTests(unittest.TestCase):
 
         restore.assert_not_called()
         requested.clear.assert_called_once_with()
+
+    def test_activation_waits_for_dom_readiness_before_native_restore(self):
+        requested = threading.Event()
+        requested.set()
+        stopped = threading.Event()
+        shown = threading.Event()
+        shown.set()
+        loaded = threading.Event()
+        restored = threading.Event()
+        window = Mock()
+        window.events.shown = shown
+        window.events.loaded = loaded
+
+        worker = threading.Thread(
+            target=activation_worker,
+            args=(
+                window,
+                requested,
+                threading.Event(),
+                stopped,
+                Mock(),
+                restored.set,
+            ),
+        )
+        worker.start()
+        self.assertFalse(restored.wait(0.15))
+        loaded.set()
+        self.assertTrue(restored.wait(1))
+        stopped.set()
+        requested.set()
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+
+    def test_shutdown_interrupts_activation_waiting_for_dom_readiness(self):
+        requested = threading.Event()
+        requested.set()
+        stopped = threading.Event()
+        shown = threading.Event()
+        shown.set()
+        window = Mock()
+        window.events.shown = shown
+        window.events.loaded = threading.Event()
+        restore = Mock()
+        worker = threading.Thread(
+            target=activation_worker,
+            args=(window, requested, threading.Event(), stopped, Mock(), restore),
+        )
+        worker.start()
+        time.sleep(0.05)
+        stopped.set()
+        requested.set()
+        worker.join(1)
+
+        self.assertFalse(worker.is_alive())
+        restore.assert_not_called()
+
+    def test_exit_request_waits_for_dom_readiness_before_native_destroy(self):
+        requested = threading.Event()
+        stopped = threading.Event()
+        exit_requested = threading.Event()
+        exit_requested.set()
+        shown = threading.Event()
+        shown.set()
+        loaded = threading.Event()
+        exited = threading.Event()
+        window = Mock()
+        window.events.shown = shown
+        window.events.loaded = loaded
+        worker = threading.Thread(
+            target=activation_worker,
+            args=(window, requested, exit_requested, stopped, exited.set),
+        )
+        worker.start()
+        self.assertFalse(exited.wait(0.15))
+        loaded.set()
+        self.assertTrue(exited.wait(1))
+        worker.join(1)
+        self.assertFalse(worker.is_alive())
+
+    def test_frontend_probe_is_serialized_with_native_destroy(self):
+        requested = threading.Event()
+        stopped = threading.Event()
+        entered_probe = threading.Event()
+        release_probe = threading.Event()
+        order = []
+        window = Mock()
+        window.destroy.side_effect = lambda: order.append("destroy")
+        shutdown = WindowShutdownCoordinator(window, requested, stopped)
+
+        def delayed_probe(_window):
+            order.append("probe-start")
+            entered_probe.set()
+            release_probe.wait(1)
+            order.append("probe-end")
+            return True
+
+        with patch("vram_radar.shell.window_frontend_is_ready", side_effect=delayed_probe):
+            probe_thread = threading.Thread(target=shutdown.frontend_is_ready)
+            probe_thread.start()
+            self.assertTrue(entered_probe.wait(1))
+            shutdown.request()
+            window.destroy.assert_not_called()
+            release_probe.set()
+            probe_thread.join(1)
+            self.assertTrue(shutdown.wait(1))
+
+        self.assertEqual(order, ["probe-start", "probe-end", "destroy"])
+        self.assertFalse(shutdown.frontend_is_ready())
 
     def test_shutdown_rejects_activation_after_its_final_check_before_destroy(self):
         final_check_passed = threading.Event()

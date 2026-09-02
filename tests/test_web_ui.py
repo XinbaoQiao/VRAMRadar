@@ -1485,8 +1485,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("void checkForUpdates()", self.javascript)
         initialize = self.javascript[self.javascript.index("async function initialize()") :]
         self.assertLess(
-            initialize.index("void checkForUpdates()"),
             initialize.index("await loadApplication()"),
+            initialize.index("void checkForUpdates()"),
         )
         self.assertIn("UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000", self.javascript)
         self.assertIn("UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000", self.javascript)

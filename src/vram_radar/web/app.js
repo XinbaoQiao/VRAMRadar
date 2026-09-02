@@ -3565,9 +3565,12 @@ async function setNotificationCenterOpen(open) {
 
 async function initialize() {
   api = window.pywebview.api;
-  void checkForUpdates();
   try {
     await loadApplication();
+    // Do not compete with first paint and the initial SSH snapshot for DNS,
+    // TLS and bridge workers. Update transport is independent and may start
+    // only after the dashboard has completed its local initialization path.
+    void checkForUpdates();
   } catch (error) {
     ui.notice.hidden = false;
     ui.notice.textContent = `应用初始化失败：${error.message || String(error)}`;

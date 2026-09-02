@@ -230,9 +230,28 @@ def run() -> None:
             "--no-auto-import",
         ]
         process = subprocess.Popen(arguments)
+        startup_activations: list[subprocess.Popen] = []
         try:
             endpoint = home / "runtime" / "tray-validation.activation.json"
             wait_until(endpoint.is_file, 20, "packaged activation endpoint did not start")
+
+            # Reproduce the field failure at its actual boundary: repeated
+            # shortcut launches while WinForms exists but CoreWebView2 may not
+            # have completed DOM/bridge initialization. Every contender must
+            # coalesce into the original process without crashing it or
+            # leaving another instance behind.
+            for _ in range(8):
+                startup_activations.append(subprocess.Popen(arguments))
+            for activation in startup_activations:
+                activation.wait(timeout=15)
+                if activation.returncode != 0:
+                    raise RuntimeError(
+                        f"startup activation exited with {activation.returncode}"
+                    )
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"startup activation storm crashed the primary process with {process.returncode}"
+                )
             window: int | None = None
 
             def window_started() -> bool:
@@ -318,6 +337,10 @@ def run() -> None:
             if "failed to start the Windows notification icon" in log_text:
                 raise RuntimeError("the packaged notification icon failed to start")
         finally:
+            for activation in startup_activations:
+                if activation.poll() is None:
+                    activation.terminate()
+                    activation.wait(timeout=10)
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=10)

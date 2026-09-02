@@ -681,9 +681,32 @@ def activation_worker(
     exit_application: Callable[[], None],
     restore_application: Callable[[], object] | None = None,
 ) -> None:
+    def window_is_ready(timeout_seconds: float = 15.0) -> bool:
+        """Wait for native visibility and DOM readiness inside one deadline.
+
+        ``shown`` alone is too early on WinForms/WebView2: a second process can
+        request activation after the Form exists but while CoreWebView2 is
+        still being created. Calling restore/show in that interval enters the
+        native message loop from a competing lifecycle operation. That is the
+        same lifecycle boundary implicated by the field CoreMessaging crash.
+        Polling also lets shutdown wake the worker immediately instead of
+        waiting the whole startup timeout.
+        """
+
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        for ready_event in (window.events.shown, window.events.loaded):
+            while not ready_event.is_set():
+                if stopped.is_set():
+                    return False
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                ready_event.wait(min(0.1, remaining))
+        return not stopped.is_set()
+
     while not stopped.is_set():
         if exit_requested.is_set():
-            if window.events.shown.wait(15):
+            if window_is_ready():
                 try:
                     exit_application()
                 except Exception:
@@ -697,8 +720,12 @@ def activation_worker(
         if stopped.is_set():
             return
         requested.clear()
-        if not window.events.shown.wait(15):
+        if not window_is_ready():
             continue
+        # Coalesce every shortcut launch received during native/WebView startup
+        # into this one restore. A later request that races after this clear is
+        # still preserved by Event semantics for the next loop.
+        requested.clear()
         # WebView teardown may start after the wake-up check but before the
         # native form is restored. Recheck at the final mutation boundary.
         if stopped.is_set():
@@ -790,6 +817,14 @@ class WindowShutdownCoordinator:
 
     def hide(self) -> bool:
         return self.run_window_operation(self.window.hide)
+
+    def frontend_is_ready(self) -> bool:
+        """Serialize WebView readiness probes with restore/hide/destroy."""
+
+        with self._window_operation_lock:
+            if self.activation_stopped.is_set():
+                return False
+            return window_frontend_is_ready(self.window)
 
     def _finish(self) -> None:
         try:
@@ -4293,11 +4328,19 @@ def main(argv: list[str] | None = None) -> int:
             exit_requested = threading.Event()
             activation_stopped = threading.Event()
             window: Any = None
+            shutdown: WindowShutdownCoordinator | None = None
             with ActivationServer(
                 activation_path,
                 activation_requested.set,
                 exit_requested.set,
-                on_probe=lambda: window_frontend_is_ready(window),
+                # The endpoint is published before the native window finishes
+                # starting so a second launch can be coalesced. Until the
+                # lifecycle coordinator exists the only safe probe result is
+                # NOT_READY; afterwards every JS probe shares its operation
+                # lock with restore, hide and destroy.
+                on_probe=lambda: (
+                    shutdown.frontend_is_ready() if shutdown is not None else False
+                ),
             ):
                 state_store = WindowStateStore(paths)
                 window_state = WindowStateController(
