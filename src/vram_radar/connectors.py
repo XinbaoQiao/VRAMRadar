@@ -2413,19 +2413,41 @@ $(which -a "$slurm_tool" 2>/dev/null || true)"
         done
         export PATH
     fi
-    if (! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1) && command -v timeout >/dev/null 2>&1; then
+    run_bounded() {{
+        bounded_seconds=$1
+        shift
+        if command -v timeout >/dev/null 2>&1; then
+            timeout "$bounded_seconds" "$@"
+        elif command -v gtimeout >/dev/null 2>&1; then
+            gtimeout "$bounded_seconds" "$@"
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 - "$bounded_seconds" "$@" <<'VRAM_RADAR_BOUNDED_PY'
+import subprocess
+import sys
+
+try:
+    completed = subprocess.run(sys.argv[2:], timeout=float(sys.argv[1]), check=False)
+except subprocess.TimeoutExpired:
+    raise SystemExit(124)
+raise SystemExit(completed.returncode)
+VRAM_RADAR_BOUNDED_PY
+        else
+            return 124
+        fi
+    }}
+    if ! command -v sinfo >/dev/null 2>&1 || ! command -v squeue >/dev/null 2>&1; then
         if command -v spack >/dev/null 2>&1; then
-            spack_prefix=$(timeout 3 spack location -i slurm 2>/dev/null | sed -n '1p') || true
+            spack_prefix=$(run_bounded 3 spack location -i slurm 2>/dev/null | sed -n '1p') || true
             case "$spack_prefix" in /*) append_path_directory "$spack_prefix/bin" ;; esac
         fi
         package_candidates=''
         if command -v rpm >/dev/null 2>&1; then
-            package_candidates=$(timeout 3 rpm -ql slurm slurm-client 2>/dev/null) || true
+            package_candidates=$(run_bounded 3 rpm -ql slurm slurm-client 2>/dev/null) || true
         elif command -v dpkg-query >/dev/null 2>&1; then
-            package_candidates=$(timeout 3 dpkg-query -L slurm-client slurm-wlm-basic-plugins 2>/dev/null) || true
+            package_candidates=$(run_bounded 3 dpkg-query -L slurm-client slurm-wlm-basic-plugins 2>/dev/null) || true
         fi
         append_candidate_lines "$package_candidates"
-        scan_candidates=$(timeout 4 find /opt/slurm /usr/local/slurm /apps/slurm /software/slurm /shared/slurm /cm/shared/apps/slurm /cm/local/apps/slurm -maxdepth 6 -type f \\( -name sinfo -o -name squeue -o -name scontrol -o -name sacct \\) -perm -u+x -print 2>/dev/null | sed -n '1,64p') || true
+        scan_candidates=$(run_bounded 4 find /opt/slurm /usr/local/slurm /apps/slurm /software/slurm /shared/slurm /cm/shared/apps/slurm /cm/local/apps/slurm -maxdepth 6 -type f \\( -name sinfo -o -name squeue -o -name scontrol -o -name sacct \\) -perm -u+x -print 2>/dev/null | sed -n '1,64p') || true
         append_candidate_lines "$scan_candidates"
         export PATH
     fi
