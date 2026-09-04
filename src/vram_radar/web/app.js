@@ -909,6 +909,127 @@ function renderDirectoryEntries(serverId, state) {
   return `<div class="directory-tree" role="tree" aria-label="代码工作目录结构">${renderLevel(state.root)}</div>`;
 }
 
+
+function directoryChildrenBody(serverId, state, absolutePath) {
+  const entries = state.entries || [];
+  const byParent = new Map();
+  entries.forEach(entry => {
+    const parent = String(entry.parent_absolute_path || state.root || '');
+    if (!byParent.has(parent)) byParent.set(parent, []);
+    byParent.get(parent).push(entry);
+  });
+  const sortEntries = items => [...items].sort((left, right) => {
+    const leftDirectory = left.kind === 'directory' ? 0 : 1;
+    const rightDirectory = right.kind === 'directory' ? 0 : 1;
+    return leftDirectory - rightDirectory || String(left.name).localeCompare(String(right.name), 'zh-CN');
+  });
+  const entry = entries.find(item => String(item.absolute_path || '') === absolutePath);
+  const childCount = (byParent.get(absolutePath) || []).length;
+  const fixed = configuredDefaultDirectory(serverId) === absolutePath;
+  const canLoadMore = Boolean(entry?.has_more) && !state.loadedRoots?.has(absolutePath);
+  const loading = state.loadingPath === absolutePath;
+  const error = state.pathError?.path === absolutePath
+    ? `<div class="directory-inline-error">${escapeHtml(state.pathError.message)}</div>`
+    : '';
+  const actions = `<div class="directory-node-actions"><button class="button compact-button pin-directory" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${escapeHtml(absolutePath)}"${fixed ? ' disabled' : ''}>${fixed ? '当前默认' : '固定为默认目录'}</button>${canLoadMore || loading ? `<button class="button compact-button load-directory-more" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${escapeHtml(absolutePath)}"${loading ? ' disabled' : ''}>${loading ? '正在读取' : '展开更多'}</button>` : ''}</div>`;
+  const renderLevel = parent => sortEntries(byParent.get(parent) || []).map(child => {
+    const childPath = String(child.absolute_path || `${state.root}/${child.path}`.replace(/\/+/g, '/'));
+    const safePath = escapeHtml(childPath);
+    const modified = child.modified_at ? formatTaskTimestamp(child.modified_at) : '—';
+    if (child.kind === 'directory') {
+      const expanded = openDirectoryNodes.has(`${serverId}:${childPath}`);
+      const nested = expanded ? renderLevel(childPath) : '';
+      const nestedCount = (byParent.get(childPath) || []).length;
+      const nestedFixed = configuredDefaultDirectory(serverId) === childPath;
+      const nestedCanLoadMore = Boolean(child.has_more) && !state.loadedRoots?.has(childPath);
+      const nestedLoading = state.loadingPath === childPath;
+      const nestedError = state.pathError?.path === childPath
+        ? `<div class="directory-inline-error">${escapeHtml(state.pathError.message)}</div>`
+        : '';
+      const nestedActions = `<div class="directory-node-actions"><button class="button compact-button pin-directory" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${safePath}"${nestedFixed ? ' disabled' : ''}>${nestedFixed ? '当前默认' : '固定为默认目录'}</button>${nestedCanLoadMore || nestedLoading ? `<button class="button compact-button load-directory-more" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${safePath}"${nestedLoading ? ' disabled' : ''}>${nestedLoading ? '正在读取' : '展开更多'}</button>` : ''}</div>`;
+      return `<details class="directory-node" role="treeitem" data-directory-path="${safePath}" data-server-id="${escapeHtml(serverId)}"${directoryNodeOpen(serverId, childPath)}><summary title="修改时间：${escapeHtml(modified)}"><span class="directory-name">${icon('folder')}<strong>${escapeHtml(child.name)}</strong>${contextCopyButton(childPath, '文件夹路径')}</span><span class="directory-meta">${number(nestedCount)} 项 ${icon('chevron', 'directory-chevron')}</span></summary><div class="directory-children" role="group">${nestedActions}${nestedError}${nested || (nestedCanLoadMore ? '<div class="directory-empty">继续展开以读取下一级</div>' : '<div class="directory-empty">当前文件夹为空</div>')}</div></details>`;
+    }
+    const iconName = child.kind === 'symlink' ? 'link' : 'file';
+    const kindLabel = child.kind === 'symlink' ? '链接 · ' : child.kind === 'other' ? '其他 · ' : '';
+    return `<div class="directory-file" role="treeitem"><span class="directory-name">${icon(iconName)}<strong>${escapeHtml(child.name)}</strong>${contextCopyButton(childPath, '文件路径')}</span><span class="directory-meta">${escapeHtml(kindLabel + formatFileSize(child.size_bytes))} · ${escapeHtml(modified)}</span></div>`;
+  }).join('');
+  const children = openDirectoryNodes.has(`${serverId}:${absolutePath}`) ? renderLevel(absolutePath) : '';
+  return `${actions}${error}${children || (canLoadMore ? '<div class="directory-empty">继续展开以读取下一级</div>' : '<div class="directory-empty">当前文件夹为空</div>')}`;
+}
+
+function patchDirectoryNodeChildren(directoryNode) {
+  const serverId = directoryNode.dataset.serverId;
+  const absolutePath = directoryNode.dataset.directoryPath;
+  const state = directoryTrees.get(serverId);
+  const host = directoryNode.querySelector(':scope > .directory-children');
+  if (!serverId || !absolutePath || !state || state.status !== 'loaded' || !host) {
+    if (serverId) repaintDirectory(serverId);
+    return false;
+  }
+  host.innerHTML = directoryChildrenBody(serverId, state, absolutePath);
+  return true;
+}
+
+function releaseDirectoryNodeChildren(directoryNode) {
+  const host = directoryNode.querySelector(':scope > .directory-children');
+  if (!host) return false;
+  const actions = host.querySelector(':scope > .directory-node-actions');
+  const error = host.querySelector(':scope > .directory-inline-error');
+  const actionsHtml = actions ? actions.outerHTML : '';
+  const errorHtml = error ? error.outerHTML : '';
+  host.innerHTML = `${actionsHtml}${errorHtml}<div class="directory-empty">当前文件夹为空</div>`;
+  return true;
+}
+
+function stickyStackOffsetPx(card = null) {
+  const rootStyle = getComputedStyle(document.documentElement);
+  const titlebar = Number.parseFloat(rootStyle.getPropertyValue('--titlebar-height')) || 62;
+  const headSource = card || document.querySelector('.server-card');
+  const headVar = headSource ? getComputedStyle(headSource).getPropertyValue('--server-head-height') : '';
+  const head = Number.parseFloat(headVar) || 64;
+  return titlebar + head;
+}
+
+function shouldScrollClusterIntoView(cluster) {
+  const rect = cluster.getBoundingClientRect();
+  const card = cluster.closest('.server-card');
+  const stack = stickyStackOffsetPx(card);
+  if (rect.top < stack - 8) return true;
+  if (rect.top > window.innerHeight * 0.62) return true;
+  return false;
+}
+
+function updateStuckChrome() {
+  const titlebar = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height')) || 62;
+  document.querySelectorAll('.server-card').forEach(card => {
+    const sentinel = card.querySelector('.server-head-sentinel');
+    const head = card.querySelector('.server-head');
+    if (!head) return;
+    const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebar + 1 : false;
+    head.classList.toggle('is-stuck', isStuck);
+    // Compact/expanded head height must drive module sticky offset in the same frame.
+    card.style.setProperty('--server-head-height', `${Math.ceil(head.getBoundingClientRect().height)}px`);
+  });
+
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  document.querySelectorAll('details.cluster-module[open]').forEach(module => {
+    module.classList.remove('sticky-active');
+    const card = module.closest('.server-card');
+    const stickLine = stickyStackOffsetPx(card);
+    const rect = module.getBoundingClientRect();
+    if (rect.top <= stickLine + 2 && rect.bottom > stickLine + 40) {
+      const score = Math.abs(rect.top - stickLine);
+      if (score < bestScore) {
+        best = module;
+        bestScore = score;
+      }
+    }
+  });
+  if (best) best.classList.add('sticky-active');
+}
+
+
 function renderDirectoryRootBar(serverId, state) {
   const pinned = configuredDefaultDirectory(serverId);
   const isPinnedRoot = Boolean(pinned) && pinned === state.root;
@@ -1902,7 +2023,7 @@ function renderServer(server, index = 0) {
       ? `${renderConfiguring(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`
       : `${renderError(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`;
   const position = String(index + 1).padStart(2, '0');
-  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div></header>${body}${renderDirectoryModule(server)}</div></article>`;
+  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><div class="server-head-sentinel" aria-hidden="true"></div><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div></header>${body}${renderDirectoryModule(server)}</div></article>`;
 }
 
 function serverCardRenderSignature(server, index) {
@@ -2082,6 +2203,9 @@ function render(snapshot) {
   }
   applyDashboardDisclosureMode();
   scheduleDirectoryFreshnessValidation();
+  syncStickyLayoutOffsets();
+  observeStickyLayoutTargets();
+  updateStuckChrome();
 }
 
 function showToast(message) {
@@ -3669,7 +3793,7 @@ document.addEventListener('focusin', event => {
   if (serverCard) setActiveServer(serverCard.dataset.serverId);
 });
 document.addEventListener('click', event => {
-  const summary = event.target.closest?.('details.directory-module > summary');
+  const summary = event.target.closest?.('details.cluster-module > summary');
   if (!summary || event.defaultPrevented) return;
   if (event.target.closest('button, a, input, label')) return;
   const details = summary.parentElement;
@@ -3694,11 +3818,16 @@ document.addEventListener('toggle', event => {
       openClusters.delete(key);
       openClusters.add(`${key}:closed`);
     }
-    if (cluster.open && cluster.dataset.module === 'account-directory') {
+    if (cluster.open) {
       requestAnimationFrame(() => {
         if (!cluster.isConnected || !cluster.open) return;
-        cluster.scrollIntoView({behavior: 'auto', block: 'start'});
+        if (shouldScrollClusterIntoView(cluster)) {
+          cluster.scrollIntoView({behavior: 'auto', block: 'start'});
+        }
+        updateStuckChrome();
       });
+    }
+    if (cluster.open && cluster.dataset.module === 'account-directory') {
       void loadDirectoryTree(cluster.dataset.serverId);
     }
     if (cluster.open && cluster.dataset.module === 'cluster-nodes') {
@@ -3729,9 +3858,15 @@ document.addEventListener('toggle', event => {
           false,
           directoryNode.dataset.directoryPath,
         );
+      } else if (!patchDirectoryNodeChildren(directoryNode)) {
+        repaintDirectory(directoryNode.dataset.serverId);
       }
-    } else openDirectoryNodes.delete(key);
-    repaintDirectory(directoryNode.dataset.serverId);
+    } else {
+      openDirectoryNodes.delete(key);
+      if (!releaseDirectoryNodeChildren(directoryNode)) {
+        repaintDirectory(directoryNode.dataset.serverId);
+      }
+    }
   }
   const contextNote = event.target.matches?.('[data-context-note]') ? event.target : null;
   if (contextNote && event.target === contextNote) {
@@ -3864,20 +3999,39 @@ ui.form.addEventListener('invalid', event => {
   if (collapsedSection) collapsedSection.open = true;
 }, true);
 ui.form.addEventListener('submit', saveSettings);
-function syncDirectoryStickyOffset() {
+function syncStickyLayoutOffsets() {
   const titlebar = document.querySelector('.titlebar');
-  if (titlebar) document.documentElement.style.setProperty('--titlebar-height', `${Math.ceil(titlebar.getBoundingClientRect().height)}px`);
+  if (titlebar) {
+    document.documentElement.style.setProperty('--titlebar-height', `${Math.ceil(titlebar.getBoundingClientRect().height)}px`);
+  }
+  document.querySelectorAll('.server-card').forEach(card => {
+    const head = card.querySelector('.server-head');
+    if (!head) return;
+    card.style.setProperty('--server-head-height', `${Math.ceil(head.getBoundingClientRect().height)}px`);
+  });
 }
 
-syncDirectoryStickyOffset();
-if (window.ResizeObserver) {
+let stickyLayoutObserver = null;
+function observeStickyLayoutTargets() {
+  if (!window.ResizeObserver) return;
+  if (!stickyLayoutObserver) {
+    stickyLayoutObserver = new ResizeObserver(() => syncStickyLayoutOffsets());
+  }
   const titlebar = document.querySelector('.titlebar');
-  if (titlebar) new ResizeObserver(syncDirectoryStickyOffset).observe(titlebar);
+  if (titlebar) stickyLayoutObserver.observe(titlebar);
+  document.querySelectorAll('.server-head').forEach(head => stickyLayoutObserver.observe(head));
 }
-window.addEventListener('scroll', scheduleServerNavigationSync, {passive: true});
-window.addEventListener('resize', () => {
-  syncDirectoryStickyOffset();
+
+syncStickyLayoutOffsets();
+observeStickyLayoutTargets();
+window.addEventListener('scroll', () => {
   scheduleServerNavigationSync();
+  updateStuckChrome();
+}, {passive: true});
+window.addEventListener('resize', () => {
+  syncStickyLayoutOffsets();
+  scheduleServerNavigationSync();
+  updateStuckChrome();
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
@@ -3894,3 +4048,5 @@ window.addEventListener('focus', () => {
   }
 });
 window.addEventListener('pywebviewready', initialize, {once: true});
+
+document.addEventListener('toggle', () => requestAnimationFrame(updateStuckChrome), true);

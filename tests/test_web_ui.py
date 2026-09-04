@@ -298,17 +298,23 @@ class WebUiContractTests(unittest.TestCase):
             ".directory-node",
             ".directory-file",
             ".directory-rootbar",
-            ".directory-module[open] > summary",
+            ".cluster-module[open].sticky-active > summary",
         ):
             self.assertIn(selector, self.styles)
         self.assertIn("position: sticky; top: var(--titlebar-height, 62px)", self.styles)
-        self.assertIn("function syncDirectoryStickyOffset", self.javascript)
-        self.assertIn("details.directory-module > summary", self.javascript)
+        self.assertIn(".server-head.is-stuck", self.styles)
+        self.assertIn("function updateStuckChrome", self.javascript)
+        self.assertIn("function patchDirectoryNodeChildren", self.javascript)
+        self.assertIn("server-head-sentinel", self.javascript)
+        self.assertIn("shouldScrollClusterIntoView", self.javascript)
+        self.assertIn("top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) - 1px)", self.styles)
+        self.assertIn("function syncStickyLayoutOffsets", self.javascript)
+        self.assertIn("details.cluster-module > summary", self.javascript)
         self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible;", self.styles)
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
-            ".server-head { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(340px, auto)",
+            ".server-head { position: sticky; top: var(--titlebar-height, 62px); z-index: 14; display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(340px, auto)",
             ".account-overview { grid-column: 2; min-width: 0; display: flex",
             ".server-head-controls { grid-column: 3; min-width: 0; display: flex",
             ".server-status { display: inline-flex",
@@ -367,7 +373,7 @@ class WebUiContractTests(unittest.TestCase):
             "main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1320px",
             ".capacity-metric { min-height: 174px",
             ".server-card { display: grid; grid-template-columns: 46px",
-            ".server-head { display: grid; grid-template-columns:",
+            ".server-head { position: sticky; top: var(--titlebar-height, 62px); z-index: 14; display: grid; grid-template-columns:",
             "dialog { width: min(1020px",
             ".dialog-content { min-width: 0; padding: 16px",
             ".server-editor-list { display: grid; gap: 8px; }",
