@@ -229,10 +229,10 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1320px; margin: 0 au
 .disclosure-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .compact-button { min-height: 34px; padding: 5px 9px; color: var(--muted); font-size: var(--font-small); }
 .server-list { display: grid; gap: 10px; }
-.server-card { display: grid; grid-template-columns: 46px minmax(0, 1fr); scroll-margin-top: 78px; contain: layout paint style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.server-card { display: grid; grid-template-columns: 46px minmax(0, 1fr); scroll-margin-top: 78px; contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible; }
 .server-card.stale { border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); }
 .server-card.offline, .server-card.auth_required, .server-card.security_blocked, .server-card.misconfigured { border-color: color-mix(in srgb, var(--red) 42%, var(--border)); }
-.server-rail { display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 12px 7px; color: var(--muted); background: var(--surface-2); border-right: 1px solid var(--border); }
+.server-rail { display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 12px 7px; color: var(--muted); background: var(--surface-2); border-right: 1px solid var(--border); border-radius: var(--radius-md) 0 0 var(--radius-md); overflow: hidden; }
 .server-card.online .server-rail { color: var(--cyan-text); }
 .server-card.stale .server-rail { color: var(--amber-text); }
 .server-card.offline .server-rail, .server-card.auth_required .server-rail, .server-card.security_blocked .server-rail, .server-card.misconfigured .server-rail { color: var(--red-text); }
@@ -416,8 +416,9 @@ tr:last-child td { border-bottom: 0; }
 .cluster-node-pager .button, .server-list-pager .button { min-height: 34px; padding: 5px 9px; font-size: var(--font-small); }
 .server-list-pager { margin-top: 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .process-module > summary { background: var(--surface-2); }
-.directory-module { border-left-color: var(--green); }
+.directory-module { border-left-color: var(--green); overflow: visible; scroll-margin-top: calc(var(--titlebar-height, 62px) + 8px); }
 .directory-module > summary { background: var(--surface-2); }
+.directory-module[open] > summary { position: sticky; top: var(--titlebar-height, 62px); z-index: 12; background: var(--surface-2); box-shadow: 0 1px 0 var(--border), 0 4px 12px color-mix(in srgb, #00100b 12%, transparent); }
 .directory-summary { margin-left: auto; color: var(--muted); font-size: var(--font-small); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .directory-content { padding: 10px 16px 16px; }
 .directory-rootbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 9px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
@@ -810,7 +811,7 @@ details[open] > summary > .summary-action .when-open { display: inline; }
   .capacity-visual { min-height: 174px; border-top: 1px solid var(--instrument-grid); border-left: 0; }
   .metric-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: none; }
   .server-card { grid-template-columns: 1fr; }
-  .server-rail { min-height: 40px; flex-direction: row; padding: 6px 12px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .server-rail { min-height: 40px; flex-direction: row; padding: 6px 12px; border-right: 0; border-bottom: 1px solid var(--border); border-radius: var(--radius-md) var(--radius-md) 0 0; }
   .server-rail svg { width: 22px; height: 22px; }
   .server-head { grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px 14px; }
   .server-identity { grid-column: 1; grid-row: 1; }

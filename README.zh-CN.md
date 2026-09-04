@@ -80,19 +80,19 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 
 ## 下载与首次启动边界
 
-当前公开稳定版为 **v0.9.0**。
+当前公开稳定版为 **v0.9.1**。
 
 | 平台 | 下载文件 | 当前边界 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.0.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-0.9.0-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-0.9.1.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
+| macOS | `VRAMRadar-0.9.1-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
 
 Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
 更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
 macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
 **打开**，不要关闭 Gatekeeper。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.0 发布说明](docs/release-notes-v0.9.0.md)。
+Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.1 发布说明](docs/release-notes-v0.9.1.md)。
 
 ## 本地优先，不接管你的基础设施
 

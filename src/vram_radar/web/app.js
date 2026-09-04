@@ -3668,6 +3668,16 @@ document.addEventListener('focusin', event => {
   const serverCard = event.target.closest?.('.server-card');
   if (serverCard) setActiveServer(serverCard.dataset.serverId);
 });
+document.addEventListener('click', event => {
+  const summary = event.target.closest?.('details.directory-module > summary');
+  if (!summary || event.defaultPrevented) return;
+  if (event.target.closest('button, a, input, label')) return;
+  const details = summary.parentElement;
+  if (!(details instanceof HTMLDetailsElement)) return;
+  // Sticky <summary> hit-testing is unreliable in Chromium/WebView2; toggle once ourselves.
+  event.preventDefault();
+  details.open = !details.open;
+}, true);
 document.addEventListener('toggle', event => {
   if (event.target.dataset?.bulkDisclosure === 'true') {
     delete event.target.dataset.bulkDisclosure;
@@ -3685,6 +3695,10 @@ document.addEventListener('toggle', event => {
       openClusters.add(`${key}:closed`);
     }
     if (cluster.open && cluster.dataset.module === 'account-directory') {
+      requestAnimationFrame(() => {
+        if (!cluster.isConnected || !cluster.open) return;
+        cluster.scrollIntoView({behavior: 'auto', block: 'start'});
+      });
       void loadDirectoryTree(cluster.dataset.serverId);
     }
     if (cluster.open && cluster.dataset.module === 'cluster-nodes') {
@@ -3850,8 +3864,21 @@ ui.form.addEventListener('invalid', event => {
   if (collapsedSection) collapsedSection.open = true;
 }, true);
 ui.form.addEventListener('submit', saveSettings);
+function syncDirectoryStickyOffset() {
+  const titlebar = document.querySelector('.titlebar');
+  if (titlebar) document.documentElement.style.setProperty('--titlebar-height', `${Math.ceil(titlebar.getBoundingClientRect().height)}px`);
+}
+
+syncDirectoryStickyOffset();
+if (window.ResizeObserver) {
+  const titlebar = document.querySelector('.titlebar');
+  if (titlebar) new ResizeObserver(syncDirectoryStickyOffset).observe(titlebar);
+}
 window.addEventListener('scroll', scheduleServerNavigationSync, {passive: true});
-window.addEventListener('resize', scheduleServerNavigationSync, {passive: true});
+window.addEventListener('resize', () => {
+  syncDirectoryStickyOffset();
+  scheduleServerNavigationSync();
+}, {passive: true});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     scheduleDirectoryFreshnessValidation();

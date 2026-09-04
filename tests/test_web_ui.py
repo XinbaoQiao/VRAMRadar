@@ -298,8 +298,13 @@ class WebUiContractTests(unittest.TestCase):
             ".directory-node",
             ".directory-file",
             ".directory-rootbar",
+            ".directory-module[open] > summary",
         ):
             self.assertIn(selector, self.styles)
+        self.assertIn("position: sticky; top: var(--titlebar-height, 62px)", self.styles)
+        self.assertIn("function syncDirectoryStickyOffset", self.javascript)
+        self.assertIn("details.directory-module > summary", self.javascript)
+        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible;", self.styles)
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
