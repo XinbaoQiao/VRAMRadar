@@ -152,7 +152,64 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(matches[0]["memory_units"], 2)
         self.assertEqual(matches[0]["available_memory_gib"], 24)
 
+    def test_favorite_resource_matches_specific_gpu_favorites(self):
+        snapshot = {
+            "servers": [
+                {
+                    "server_id": "lab",
+                    "display_name": "Lab",
+                    "backend": "direct_ssh",
+                    "view_kind": "live-memory",
+                    "connection": {"state": "online"},
+                    "processes": {"supported": True, "active": []},
+                    "gpus": [
+                        {
+                            "gpu_index": 0,
+                            "memory_total_gib": 24,
+                            "memory_free_gib": 24,
+                            "utilization_percent": 0,
+                        },
+                        {
+                            "gpu_index": 1,
+                            "memory_total_gib": 24,
+                            "memory_free_gib": 24,
+                            "utilization_percent": 0,
+                        },
+                    ],
+                }
+            ]
+        }
+        matches = favorite_resource_matches(
+            snapshot,
+            favorite_server_ids=[],
+            favorite_gpus=[{"server_id": "lab", "gpu_index": 1}],
+        )
+        self.assertEqual([item["server_id"] for item in matches], ["lab"])
+        self.assertEqual(matches[0]["idle_units"], 1)
+
+        scheduler = {
+            "servers": [
+                {
+                    "server_id": "cluster",
+                    "display_name": "Cluster",
+                    "backend": "slurm",
+                    "view_kind": "scheduler",
+                    "connection": {"state": "online"},
+                    "nodes": [{"partition": "gpu", "gpu_type": "A100", "state": "idle", "free_gpus": 2, "gpus_per_node": 8, "memory_per_gpu_gib": 40}],
+                }
+            ]
+        }
+        self.assertEqual(
+            favorite_resource_matches(
+                scheduler,
+                favorite_server_ids=[],
+                favorite_gpus=[{"server_id": "cluster", "gpu_index": 0}],
+            ),
+            [],
+        )
+
     def test_favorite_resource_requires_stable_process_sample_for_direct_idle(self):
+
         snapshot = {
             "servers": [{
                 "server_id": "favorite",

@@ -1508,7 +1508,25 @@ class ShellApiTests(unittest.TestCase):
             self.assertTrue(result["profile"]["servers"][0]["has_password"])
             service.replace_profile.assert_called_once()
 
+    def test_set_favorite_gpu_round_trips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            service = Mock()
+            api = AppApi(Profile.empty("local"), store, paths, service)
+
+            added = api.set_favorite_gpu("lab", 1, True)
+            self.assertTrue(added["ok"])
+            self.assertEqual(
+                added["profile"]["favorite_gpus"],
+                [{"server_id": "lab", "gpu_index": 1}],
+            )
+            removed = api.set_favorite_gpu("lab", "1", False)
+            self.assertTrue(removed["ok"])
+            self.assertEqual(store.load("local").favorite_gpus, ())
+
     def test_favorite_server_can_outlive_a_temporarily_missing_server(self):
+
         with tempfile.TemporaryDirectory() as temporary:
             paths = storage_paths(Path(temporary))
             store = ProfileStore(paths)

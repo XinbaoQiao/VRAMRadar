@@ -237,6 +237,7 @@ class ModelStorageTests(unittest.TestCase):
             PROFILE,
             close_behavior="exit",
             favorite_server_ids=["gpu-1", "temporarily-missing"],
+            favorite_gpus=[{"server_id": "gpu-1", "gpu_index": 2}, "lab:0"],
             favorite_alert_enabled=True,
             favorite_alert_min_memory_gib=18.5,
             saved_views=[
@@ -259,6 +260,14 @@ class ModelStorageTests(unittest.TestCase):
 
         self.assertEqual(profile.close_behavior, "exit")
         self.assertEqual(profile.favorite_server_ids, ("gpu-1", "temporarily-missing"))
+        self.assertEqual(
+            profile.favorite_gpus,
+            ({"server_id": "gpu-1", "gpu_index": 2}, {"server_id": "lab", "gpu_index": 0}),
+        )
+        self.assertEqual(
+            serialized["favorite_gpus"],
+            [{"server_id": "gpu-1", "gpu_index": 2}, {"server_id": "lab", "gpu_index": 0}],
+        )
         self.assertTrue(profile.favorite_alert_enabled)
         self.assertEqual(profile.favorite_alert_min_memory_gib, 18.5)
         self.assertEqual(profile.saved_views[0]["gpu_count"], 8)

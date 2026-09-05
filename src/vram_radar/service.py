@@ -320,6 +320,7 @@ def favorite_resource_matches(
     snapshot: dict[str, Any],
     favorite_server_ids: tuple[str, ...] | list[str] | set[str],
     min_memory_gib: float = 0,
+    favorite_gpus: tuple[dict[str, Any], ...] | list[dict[str, Any]] | list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Find live favorites with an idle GPU or enough free VRAM.
 
@@ -328,16 +329,39 @@ def favorite_resource_matches(
     most 5%. Slurm uses the scheduler's free-GPU count. A positive memory
     threshold is an additional OR condition. Stale or cached payloads never
     qualify because only ``online`` runtime state is accepted.
+
+    Whole-server favorites keep matching any qualifying GPU on that server.
+    Per-GPU favorites additionally match only the specifically favorited indices
+    under live-memory views (scheduler rows have no stable GPU index mapping).
     """
 
     required_memory = _memory_requirement(min_memory_gib)
     favorites = {str(server_id) for server_id in favorite_server_ids}
-    if not favorites:
+    gpu_favorites: dict[str, set[str]] = {}
+    for entry in favorite_gpus or ():
+        if isinstance(entry, str):
+            server_id_text, separator, index_text = entry.partition(":")
+            if not separator:
+                continue
+            server_id = str(server_id_text)
+            raw_index = index_text
+        elif isinstance(entry, dict):
+            server_id = str(entry.get("server_id") or "")
+            raw_index = entry.get("gpu_index")
+        else:
+            continue
+        if not server_id or raw_index is None:
+            continue
+        gpu_favorites.setdefault(server_id, set()).add(str(raw_index))
+    if not favorites and not gpu_favorites:
         return []
     matches: list[dict[str, Any]] = []
     for server in snapshot.get("servers", []):
+        server_key = str(server.get("server_id") or "")
+        server_is_favorite = server_key in favorites
+        favorited_indices = gpu_favorites.get(server_key) or set()
         if (
-            str(server.get("server_id") or "") not in favorites
+            (not server_is_favorite and not favorited_indices)
             or server.get("connection", {}).get("state") != "online"
         ):
             continue
@@ -358,6 +382,10 @@ def favorite_resource_matches(
             for gpu in server.get("gpus", []):
                 if not isinstance(gpu, dict):
                     continue
+                raw_gpu_index = gpu.get("gpu_index")
+                gpu_index = "" if raw_gpu_index is None else str(raw_gpu_index)
+                if not server_is_favorite and gpu_index not in favorited_indices:
+                    continue
                 try:
                     free_memory = max(0.0, float(gpu.get("memory_free_gib") or 0))
                     total_memory = max(0.0, float(gpu.get("memory_total_gib") or 0))
@@ -365,8 +393,6 @@ def favorite_resource_matches(
                     utilization_ok = utilization is None or float(utilization) <= 5
                 except (TypeError, ValueError):
                     continue
-                raw_gpu_index = gpu.get("gpu_index")
-                gpu_index = "" if raw_gpu_index is None else str(raw_gpu_index)
                 idle = bool(
                     process_sample_supported
                     and gpu_index not in occupied_indices
@@ -380,6 +406,8 @@ def favorite_resource_matches(
                 if idle or memory_match:
                     best_free_memory = max(best_free_memory, free_memory)
         elif view_kind == "scheduler":
+            if not server_is_favorite:
+                continue
             rows = server.get("nodes") or server.get("node_groups") or []
             for row in rows:
                 if not isinstance(row, dict) or _node_has_issue(row):

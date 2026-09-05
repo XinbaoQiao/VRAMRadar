@@ -13,6 +13,7 @@ SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
 SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
 SUPPORTED_SAVED_VIEW_FILTERS = frozenset({"all", "available", "tasks", "issues"})
 MAX_FAVORITE_SERVER_IDS = 512
+MAX_FAVORITE_GPUS = 512
 MAX_IGNORED_SSH_ALIASES = 4096
 MAX_SAVED_VIEWS = 32
 MAX_SAVED_VIEW_QUERY_BYTES = 256
@@ -428,6 +429,37 @@ class ServerProfile:
         return result
 
 
+
+def normalize_favorite_gpu(raw: Any) -> dict[str, Any]:
+    """Validate one favorited GPU under a server."""
+    if isinstance(raw, str):
+        server_id_text, separator, index_text = raw.partition(":")
+        if not separator or not index_text:
+            raise ConfigError("favorite GPU must be server_id:gpu_index or a table")
+        raw = {"server_id": server_id_text, "gpu_index": index_text}
+    if not isinstance(raw, dict):
+        raise ConfigError("each favorite GPU must be a table")
+    allowed_keys = {"server_id", "gpu_index"}
+    unknown_keys = set(raw) - allowed_keys
+    if unknown_keys:
+        raise ConfigError(
+            "favorite GPU contains unsupported fields: " + ", ".join(sorted(unknown_keys))
+        )
+    server_id = require_id(raw.get("server_id"), "favorite GPU server id")
+    gpu_index = raw.get("gpu_index")
+    if isinstance(gpu_index, bool) or not isinstance(gpu_index, (int, str)):
+        raise ConfigError("favorite GPU index must be a non-negative integer")
+    if isinstance(gpu_index, str):
+        text = gpu_index.strip()
+        if not text.isdigit():
+            raise ConfigError("favorite GPU index must be a non-negative integer")
+        gpu_index = int(text)
+    if not isinstance(gpu_index, int) or isinstance(gpu_index, bool) or gpu_index < 0:
+        raise ConfigError("favorite GPU index must be a non-negative integer")
+    if gpu_index > 4095:
+        raise ConfigError("favorite GPU index must be between 0 and 4095")
+    return {"server_id": server_id, "gpu_index": int(gpu_index)}
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -441,6 +473,7 @@ class Profile:
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
     favorite_server_ids: tuple[str, ...] = ()
+    favorite_gpus: tuple[dict[str, Any], ...] = ()
     favorite_alert_enabled: bool = True
     favorite_alert_min_memory_gib: float = 0.0
     task_completion_alert_enabled: bool = True
@@ -517,6 +550,21 @@ class Profile:
         )
         if len(favorites) != len(set(favorites)):
             raise ConfigError("profile favorite_server_ids must be unique")
+        favorite_gpus_raw = raw.get("favorite_gpus", [])
+        if not isinstance(favorite_gpus_raw, (list, tuple)):
+            raise ConfigError("profile favorite_gpus must be an array")
+        if len(favorite_gpus_raw) > MAX_FAVORITE_GPUS:
+            raise ConfigError(
+                f"profile favorite_gpus cannot contain more than {MAX_FAVORITE_GPUS} entries"
+            )
+        favorite_gpu_entries = tuple(
+            normalize_favorite_gpu(entry) for entry in favorite_gpus_raw
+        )
+        favorite_gpu_keys = {
+            (entry["server_id"], entry["gpu_index"]) for entry in favorite_gpu_entries
+        }
+        if len(favorite_gpu_keys) != len(favorite_gpu_entries):
+            raise ConfigError("profile favorite_gpus must be unique")
         favorite_alert_enabled = raw.get("favorite_alert_enabled", True)
         if not isinstance(favorite_alert_enabled, bool):
             raise ConfigError("profile favorite_alert_enabled must be true or false")
@@ -583,6 +631,7 @@ class Profile:
             close_behavior=close_behavior.strip().lower(),
             ui_language=ui_language.strip(),
             favorite_server_ids=favorites,
+            favorite_gpus=favorite_gpu_entries,
             favorite_alert_enabled=favorite_alert_enabled,
             favorite_alert_min_memory_gib=float(favorite_alert_min_memory),
             task_completion_alert_enabled=task_completion_alert_enabled,
@@ -603,6 +652,7 @@ class Profile:
             "close_behavior": self.close_behavior,
             "ui_language": self.ui_language,
             "favorite_server_ids": list(self.favorite_server_ids),
+            "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],
             "favorite_alert_enabled": self.favorite_alert_enabled,
             "favorite_alert_min_memory_gib": self.favorite_alert_min_memory_gib,
             "task_completion_alert_enabled": self.task_completion_alert_enabled,

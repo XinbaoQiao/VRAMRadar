@@ -28,6 +28,40 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("document.documentElement.lang = language", self.localization)
         self.assertIn("english_interface_has_no_untranslated_chinese", (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"))
 
+    def test_per_gpu_favorites_are_wired_in_live_table_and_navigator_filter(self):
+        self.assertIn("function renderFavoriteGpuButton", self.javascript)
+        self.assertIn("api.set_favorite_gpu", self.javascript)
+        self.assertIn("favorite_gpus", self.javascript)
+        self.assertIn("serverMatchesFavoriteFilter", self.javascript)
+        self.assertIn('class="favorite-gpu', self.javascript)
+        self.assertIn(".favorite-gpu.active", self.styles)
+        self.assertIn(
+            "if (serverNavigatorFilter === 'favorites') return serverMatchesFavoriteFilter(server.server_id);",
+            self.javascript,
+        )
+        self.assertIn("整机收藏", self.javascript)
+        self.assertIn("含收藏 GPU", self.javascript)
+        self.assertIn("server-navigator-favorite-kind", self.javascript)
+        self.assertIn("收藏这张 GPU", self.javascript)
+        self.assertIn("当前列表来自 GPU 收藏（尚未收藏整台服务器）", self.javascript)
+        self.assertIn(".server-navigator-favorite-kind", self.styles)
+
+    def test_server_leave_position_is_remembered_and_restored(self):
+        self.assertIn("const serverLeaveMemory = new Map()", self.javascript)
+        self.assertIn("function captureServerLeavePosition", self.javascript)
+        self.assertIn("function restoreServerLeavePosition", self.javascript)
+        self.assertIn("captureServerLeavePosition(activeServerId)", self.javascript)
+        self.assertIn("restoreServerLeavePosition(serverId)", self.javascript)
+        self.assertIn("MAX_SERVER_LEAVE_MEMORY", self.javascript)
+        self.assertNotIn("card.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
+
+    def test_server_module_collapse_control_uses_collapse_anchor(self):
+        self.assertIn("function collapseServerModules", self.javascript)
+        self.assertIn("collapse-server-modules", self.javascript)
+        self.assertIn("收起模块", self.javascript)
+        self.assertIn("preserveClusterCollapseAnchor(anchorSummary, anchorTop)", self.javascript)
+        self.assertIn("['收起模块', 'Collapse modules']", self.localization)
+
     def test_favorite_gpu_alert_settings_are_persistent_localized_and_progressive(self):
         self.assertIn('id="favorite-alert-enabled"', self.markup)
         self.assertIn('id="favorite-alert-min-memory"', self.markup)
@@ -307,6 +341,23 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("function patchDirectoryNodeChildren", self.javascript)
         self.assertIn("server-head-sentinel", self.javascript)
         self.assertIn("shouldScrollClusterIntoView", self.javascript)
+        self.assertIn("function scrollClusterSummaryUnderSticky", self.javascript)
+        self.assertIn("function preserveClusterCollapseAnchor", self.javascript)
+        self.assertIn("function updateLocationStrip", self.javascript)
+        self.assertIn("server-location-strip", self.javascript)
+        self.assertIn("server-location-home", self.javascript)
+        self.assertIn("回到本机", self.javascript)
+        self.assertIn("当前：", self.javascript)
+        self.assertIn("lastOpenedModuleByServer", self.javascript)
+        self.assertIn("preserveClusterCollapseAnchor(summary, anchorTop)", self.javascript)
+        self.assertIn("scrollClusterSummaryUnderSticky(cluster)", self.javascript)
+        self.assertNotIn("cluster.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
+        self.assertIn(".server-location-strip", self.styles)
+        self.assertIn(".server-head.is-stuck .server-location-strip", self.styles)
+        self.assertIn(".server-location-strip.is-visible", self.styles)
+        self.assertIn("function updateNavigatorModuleCue", self.javascript)
+        self.assertIn("server-navigator-module-cue", self.javascript)
+        self.assertNotIn("backdrop-filter", self.styles[self.styles.index(".server-location-strip"):self.styles.index(".server-location-home") + 120])
         self.assertIn("top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) - 1px)", self.styles)
         self.assertIn("function syncStickyLayoutOffsets", self.javascript)
         self.assertIn("details.cluster-module > summary", self.javascript)
@@ -1325,16 +1376,25 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("render(currentSnapshot)", cluster_load)
         favorite = self.javascript[
             self.javascript.index("async function setFavoriteServer"):
-            self.javascript.index("async function setServerEnabled")
+            self.javascript.index("async function setFavoriteGpu")
         ]
         self.assertIn("repaintFavoriteServer(serverId)", favorite)
         self.assertNotIn("render(currentSnapshot)", favorite)
+        favorite_gpu = self.javascript[
+            self.javascript.index("async function setFavoriteGpu"):
+            self.javascript.index("async function setServerEnabled")
+        ]
+        self.assertIn("api.set_favorite_gpu", favorite_gpu)
+        self.assertIn("repaintFavoriteGpu(serverId, gpuIndex)", favorite_gpu)
+        self.assertNotIn("render(currentSnapshot)", favorite_gpu)
 
     def test_convenience_controls_are_wired_where_they_are_used(self):
         for contract in (
             "ui.monitoringToggle.addEventListener('click'",
             "ui.saveView.addEventListener('click'",
             "ui.resourceWatchEnabled.addEventListener('change'",
+            "const favoriteGpu = event.target.closest('.favorite-gpu')",
+            "const collapseModules = event.target.closest('.collapse-server-modules')",
             "const favorite = event.target.closest('.favorite-server')",
             "const toggleServer = event.target.closest('.toggle-server-monitoring')",
             "const openTerminal = event.target.closest('.open-terminal')",

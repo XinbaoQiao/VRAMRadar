@@ -73,6 +73,14 @@
     ['上一台服务器', 'Previous server'],
     ['上一台', 'Previous'],
     ['当前筛选位置', 'Current filtered position'],
+    ['回到本机', 'Back to this host'],
+    ['收起模块', 'Collapse modules'],
+    ['整机收藏', 'Whole server'],
+    ['含收藏 GPU', 'Has favorite GPU'],
+    ['当前列表来自 GPU 收藏（尚未收藏整台服务器）', 'Showing servers from GPU favorites (no whole-server favorites yet)'],
+    ['没有收藏的服务器或 GPU', 'No favorite servers or GPUs'],
+    ['已收起该服务器的模块', 'Collapsed modules on this server'],
+    ['当前服务器没有展开的模块', 'No open modules on this server'],
     ['下一台服务器', 'Next server'],
     ['下一台', 'Next'],
     ['设置', 'Settings'],
@@ -527,6 +535,8 @@
   ]);
 
   const PATTERNS = [
+    [/^当前：(.+) · (.+)$/, 'Current: $1 · $2'],
+    [/^当前：(.+)$/, 'Current: $1'],
     [/^状态更新于 (.+) · 每 ([\d,.]+) 秒$/, 'Updated $1 · every $2 seconds'],
     [/^发现 VRAM Radar (.+) 的修复构建$/, 'VRAM Radar $1 repair build available'],
     [/^发现 VRAM Radar (.+)$/, 'VRAM Radar $1 available'],
@@ -552,6 +562,8 @@
     [/^查看完整任务名称：(.+)$/, 'View full job name: $1'],
     [/^(.+)，监控就绪，([\d,.]+) GPU · ([\d,.]+) GiB 可用$/, '$1, monitoring ready, $2 GPU · $3 GiB free'],
     [/^收藏 (.+)$/, 'Favorite $1'],
+    [/^收藏这张 GPU (.+)$/, 'Favorite GPU $1'],
+    [/^取消收藏这张 GPU (.+)$/, 'Unfavorite GPU $1'],
     [/^当前为筛选结果第 ([\d,.]+) 台，共 ([\d,.]+) 台$/, 'Filtered server $1 of $2'],
     [/^拖动第 ([\d,.]+) 台服务器排序；按上下方向键微调$/, 'Drag server $1 to reorder; use the arrow keys for precise movement'],
     [/^(.+) 已移动到第 ([\d,.]+) 位$/, '$1 moved to position $2'],

@@ -37,6 +37,8 @@ from .connectors import (
 from .models import (
     ConfigError,
     MAX_FAVORITE_SERVER_IDS,
+    MAX_FAVORITE_GPUS,
+    normalize_favorite_gpu,
     MAX_IGNORED_SSH_ALIASES,
     MAX_TASK_COMPLETION_WATCHES,
     Profile,
@@ -1903,11 +1905,12 @@ class AppApi:
         return result
 
     @staticmethod
-    def _favorite_alert_policy(profile: Profile) -> tuple[bool, float, tuple[str, ...]]:
+    def _favorite_alert_policy(profile: Profile) -> tuple[bool, float, tuple[str, ...], tuple[tuple[str, int], ...]]:
         return (
             profile.favorite_alert_enabled,
             profile.favorite_alert_min_memory_gib,
             profile.favorite_server_ids,
+            tuple((entry["server_id"], int(entry["gpu_index"])) for entry in profile.favorite_gpus),
         )
 
     def _reset_favorite_alerts_if_changed(
@@ -1976,6 +1979,7 @@ class AppApi:
             snapshot,
             profile.favorite_server_ids,
             profile.favorite_alert_min_memory_gib,
+            profile.favorite_gpus,
         )
         current_ids = {str(match["server_id"]) for match in matches}
         with self._favorite_alert_state_lock:
@@ -2330,6 +2334,47 @@ class AppApi:
             favorites = [candidate for candidate in favorites if candidate != normalized_id]
         return self._persist_local_preferences(
             replace(base_profile, favorite_server_ids=tuple(favorites)),
+            expected_profile=base_profile,
+        )
+
+    def set_favorite_gpu(self, server_id: str, gpu_index: Any, favorite: bool) -> dict[str, Any]:
+        try:
+            entry = normalize_favorite_gpu(
+                {
+                    "server_id": server_id.strip() if isinstance(server_id, str) else server_id,
+                    "gpu_index": gpu_index,
+                }
+            )
+        except ConfigError as exc:
+            message = str(exc)
+            code = "invalid_gpu_index" if "index" in message else "invalid_server_id"
+            return {"ok": False, "error": message, "code": code}
+        if not isinstance(favorite, bool):
+            return {
+                "ok": False,
+                "error": "收藏状态必须是布尔值",
+                "code": "invalid_favorite_state",
+            }
+        base_profile = self.profile
+        favorites = [dict(item) for item in base_profile.favorite_gpus]
+        key = (entry["server_id"], entry["gpu_index"])
+        existing_keys = {(item["server_id"], item["gpu_index"]) for item in favorites}
+        if favorite and key not in existing_keys:
+            if len(favorites) >= MAX_FAVORITE_GPUS:
+                return {
+                    "ok": False,
+                    "error": "收藏 GPU 数量已达到上限",
+                    "code": "favorite_limit_reached",
+                }
+            favorites.append(entry)
+        elif not favorite:
+            favorites = [
+                item
+                for item in favorites
+                if (item["server_id"], item["gpu_index"]) != key
+            ]
+        return self._persist_local_preferences(
+            replace(base_profile, favorite_gpus=tuple(favorites)),
             expected_profile=base_profile,
         )
 
@@ -3232,6 +3277,7 @@ class AppApi:
                 "close_behavior",
                 "ui_language",
                 "favorite_server_ids",
+                "favorite_gpus",
                 "favorite_alert_enabled",
                 "favorite_alert_min_memory_gib",
                 "task_completion_alert_enabled",
@@ -3311,6 +3357,20 @@ class AppApi:
                     )
                     for favorite_id in candidate.get("favorite_server_ids", [])
                 ]
+                remapped_gpus = []
+                for entry in candidate.get("favorite_gpus", []) or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    old_id = entry.get("server_id")
+                    new_id = next(
+                        (candidate_id for candidate_id, previous in renames.items() if previous == old_id),
+                        old_id,
+                    )
+                    remapped = dict(entry)
+                    remapped["server_id"] = new_id
+                    remapped_gpus.append(remapped)
+                if remapped_gpus or "favorite_gpus" in candidate:
+                    candidate["favorite_gpus"] = remapped_gpus
                 candidate["task_completion_watches"] = [
                     {
                         **watch,

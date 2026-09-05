@@ -1,6 +1,6 @@
 #define MyAppName "VRAM Radar"
 #ifndef MyAppVersion
-#define MyAppVersion "0.9.2"
+#define MyAppVersion "0.9.3"
 #endif
 #define MyAppPublisher "VRAM Radar"
 #define MyAppExeName "VRAMRadar.exe"
