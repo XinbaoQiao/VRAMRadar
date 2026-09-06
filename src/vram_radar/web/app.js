@@ -101,6 +101,7 @@ let updateCheckTimer = null;
 let updateCheckInFlight = false;
 let updateAvailableShown = false;
 let latestUpdateAction = 'browser';
+let latestUpdateActionReason = '';
 let latestUpdateProgress = {state: 'idle', phase: 'idle'};
 let updateProgressPollTimer = null;
 let lastUpdateCheckAt = 0;
@@ -123,6 +124,12 @@ const UPDATE_CHECK_ON_FOCUS_AFTER_MS = 60 * 60 * 1000;
 let recommendationRequested = false;
 let activeServerId = '';
 let serverNavigationFrame = null;
+let stuckChromeFrame = null;
+let cachedTitlebarHeightPx = 62;
+let lastStuckServerId = '';
+let lastStickyActiveModule = null;
+let lastLocationStripKey = '';
+const lastServerHeadHeightByCard = new WeakMap();
 let serverNavigationCards = [];
 let serverNavigationCardsById = new Map();
 let serverNavigatorQuery = '';
@@ -137,6 +144,7 @@ let suppressServerNavigatorDragClick = false;
 let favoriteServerIds = new Set();
 let favoriteGpuKeys = new Set();
 let favoriteGpuServerIds = new Set();
+const favoriteGpuOnlyViewByServer = new Map();
 let taskWatchesExpanded = false;
 let monitoringPaused = false;
 let profileServerListReference = null;
@@ -385,7 +393,16 @@ function renderFavoriteGpuButton(serverId, gpuIndex) {
 
 function renderLiveTable(server) {
   const serverId = server.server_id;
-  const memoryTable = `<div class="table-wrap" role="region" aria-label="GPU 实时显存，可横向滚动"><table><caption class="sr-only">GPU 实时显存</caption><thead><tr><th scope="col">GPU</th><th scope="col">卡型</th><th scope="col">已用显存</th><th scope="col">空闲显存</th><th scope="col">利用率</th><th scope="col">温度</th></tr></thead><tbody>${(server.gpus || []).map(gpu => `<tr><td class="gpu-index-cell">${renderFavoriteGpuButton(serverId, gpu.gpu_index)}<span>GPU ${escapeHtml(gpu.gpu_index)}</span></td><td>${escapeHtml(gpu.gpu_type)}</td><td class="memory-cell"><div class="memory-values"><strong>${number(gpu.memory_used_gib)} GiB</strong><span>总量 ${number(gpu.memory_total_gib)} GiB</span></div>${memoryTrack(gpu.memory_used_gib, gpu.memory_total_gib)}</td><td>${number(gpu.memory_free_gib)} GiB</td><td>${gpu.utilization_percent == null ? '未知' : `${number(gpu.utilization_percent)}%`}</td><td>${gpu.temperature_c == null ? '未知' : `${number(gpu.temperature_c)} °C`}</td></tr>`).join('')}</tbody></table></div>`;
+  const hasFavoriteGpus = [...favoriteGpuKeys].some(key => key.startsWith(`${serverId}:`));
+  const onlyFavorites = Boolean(favoriteGpuOnlyViewByServer.get(serverId));
+  const visibleGpus = (server.gpus || []).filter(gpu => !onlyFavorites || isFavoriteGpu(serverId, gpu.gpu_index));
+  const toolbar = hasFavoriteGpus
+    ? `<div class="live-gpu-toolbar"><button class="button compact-button toggle-favorite-gpu-only${onlyFavorites ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${onlyFavorites}" title="${escapeHtml(localizedText(onlyFavorites ? '显示全部 GPU' : '只看收藏 GPU'))}">${escapeHtml(localizedText('只看收藏 GPU'))}</button></div>`
+    : '';
+  const emptyRow = onlyFavorites && !visibleGpus.length
+    ? `<tr class="gpu-filter-empty"><td colspan="6">${escapeHtml(localizedText('当前没有收藏的 GPU'))}</td></tr>`
+    : '';
+  const memoryTable = `${toolbar}<div class="table-wrap" role="region" aria-label="GPU 实时显存，可横向滚动"><table><caption class="sr-only">GPU 实时显存</caption><thead><tr><th scope="col">GPU</th><th scope="col">卡型</th><th scope="col">已用显存</th><th scope="col">空闲显存</th><th scope="col">利用率</th><th scope="col">温度</th></tr></thead><tbody>${visibleGpus.map(gpu => `<tr class="gpu-row" data-server-id="${escapeHtml(serverId)}" data-gpu-index="${escapeHtml(gpu.gpu_index)}"><td class="gpu-index-cell">${renderFavoriteGpuButton(serverId, gpu.gpu_index)}<span>GPU ${escapeHtml(gpu.gpu_index)}</span></td><td>${escapeHtml(gpu.gpu_type)}</td><td class="memory-cell"><div class="memory-values"><strong>${number(gpu.memory_used_gib)} GiB</strong><span>总量 ${number(gpu.memory_total_gib)} GiB</span></div>${memoryTrack(gpu.memory_used_gib, gpu.memory_total_gib)}</td><td>${number(gpu.memory_free_gib)} GiB</td><td>${gpu.utilization_percent == null ? '未知' : `${number(gpu.utilization_percent)}%`}</td><td>${gpu.temperature_c == null ? '未知' : `${number(gpu.temperature_c)} °C`}</td></tr>`).join('')}${emptyRow}</tbody></table></div>`;
   return memoryTable + renderCpuOverview(server) + renderDirectProcessModule(server);
 }
 
@@ -1008,14 +1025,40 @@ function releaseDirectoryNodeChildren(directoryNode) {
   return true;
 }
 
+function refreshCachedTitlebarHeight() {
+  const cssVal = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'));
+  if (Number.isFinite(cssVal) && cssVal > 0) {
+    cachedTitlebarHeightPx = cssVal;
+    return cachedTitlebarHeightPx;
+  }
+  const titlebar = document.querySelector('.titlebar');
+  if (titlebar) {
+    const measured = Math.ceil(titlebar.getBoundingClientRect().height);
+    if (measured > 0) cachedTitlebarHeightPx = measured;
+  }
+  return cachedTitlebarHeightPx;
+}
+
+function scheduleStuckChromeUpdate() {
+  if (stuckChromeFrame != null) return;
+  stuckChromeFrame = window.requestAnimationFrame(() => {
+    stuckChromeFrame = null;
+    updateStuckChrome();
+  });
+}
+
 function stickyStackOffsetPx(card = null) {
-  const rootStyle = getComputedStyle(document.documentElement);
-  const titlebar = Number.parseFloat(rootStyle.getPropertyValue('--titlebar-height')) || 62;
+  const titlebar = cachedTitlebarHeightPx || 62;
   const headSource = card || document.querySelector('.server-card');
-  const headVar = headSource ? getComputedStyle(headSource).getPropertyValue('--server-head-height') : '';
-  const head = Number.parseFloat(headVar) || 64;
+  let head = 64;
+  if (headSource) {
+    const inline = headSource.style.getPropertyValue('--server-head-height');
+    const raw = inline || getComputedStyle(headSource).getPropertyValue('--server-head-height');
+    head = Number.parseFloat(raw) || 64;
+  }
   return titlebar + head;
 }
+
 
 function clusterModuleSummary(cluster) {
   return cluster?.querySelector?.(':scope > summary') || cluster;
@@ -1049,24 +1092,61 @@ function preserveClusterCollapseAnchor(summary, anchorTop) {
   if (Math.abs(delta) > 1) window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
 }
 
-function updateStuckChrome() {
-  const titlebar = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height')) || 62;
-  document.querySelectorAll('.server-card').forEach(card => {
-    const sentinel = card.querySelector('.server-head-sentinel');
-    const head = card.querySelector('.server-head');
-    if (!head) return;
-    const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebar + 1 : false;
-    head.classList.toggle('is-stuck', isStuck);
-    // Compact/expanded head height must drive module sticky offset in the same frame.
-    card.style.setProperty('--server-head-height', `${Math.ceil(head.getBoundingClientRect().height)}px`);
-  });
+function cardIntersectsViewportBand(rect, margin = 48) {
+  return rect.bottom > -margin && rect.top < window.innerHeight + margin;
+}
 
+function setServerHeadHeight(card, head) {
+  const height = Math.ceil(head.getBoundingClientRect().height);
+  if (lastServerHeadHeightByCard.get(card) === height) return height;
+  lastServerHeadHeightByCard.set(card, height);
+  card.style.setProperty('--server-head-height', `${height}px`);
+  return height;
+}
+
+function clearStuckServerHead(serverId) {
+  if (!serverId) return;
+  const card = serverNavigationCardsById.get(serverId)
+    || document.querySelector(`.server-card[data-server-id="${CSS.escape(serverId)}"]`);
+  card?.querySelector('.server-head')?.classList.remove('is-stuck');
+}
+
+function updateStuckChrome() {
+  const titlebar = cachedTitlebarHeightPx || 62;
+  const cards = serverNavigationCards.length
+    ? serverNavigationCards
+    : [...document.querySelectorAll('.server-card')];
+
+  let stuckServerId = '';
   let best = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  document.querySelectorAll('details.cluster-module[open]').forEach(module => {
-    module.classList.remove('sticky-active');
-    const card = module.closest('.server-card');
-    const stickLine = stickyStackOffsetPx(card);
+  const moduleCandidates = [];
+
+  for (const card of cards) {
+    const cardRect = card.getBoundingClientRect();
+    if (!cardIntersectsViewportBand(cardRect)) continue;
+
+    const sentinel = card.querySelector('.server-head-sentinel');
+    const head = card.querySelector('.server-head');
+    if (!head) continue;
+
+    const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebar + 1 : false;
+    head.classList.toggle('is-stuck', isStuck);
+    const headHeight = setServerHeadHeight(card, head);
+    if (isStuck) stuckServerId = card.dataset.serverId || stuckServerId;
+
+    const stickLine = titlebar + headHeight;
+    card.querySelectorAll('details.cluster-module[open]').forEach(module => {
+      moduleCandidates.push({ module, stickLine });
+    });
+  }
+
+  if (lastStuckServerId && lastStuckServerId !== stuckServerId) {
+    clearStuckServerHead(lastStuckServerId);
+  }
+  lastStuckServerId = stuckServerId;
+
+  for (const { module, stickLine } of moduleCandidates) {
     const rect = module.getBoundingClientRect();
     if (rect.top <= stickLine + 2 && rect.bottom > stickLine + 40) {
       const score = Math.abs(rect.top - stickLine);
@@ -1075,9 +1155,40 @@ function updateStuckChrome() {
         bestScore = score;
       }
     }
-  });
-  if (best) best.classList.add('sticky-active');
-  updateLocationStrip();
+  }
+
+  if (lastStickyActiveModule && lastStickyActiveModule !== best && lastStickyActiveModule.isConnected) {
+    lastStickyActiveModule.classList.remove('sticky-active');
+  }
+  if (best) {
+    if (best !== lastStickyActiveModule) best.classList.add('sticky-active');
+  } else if (lastStickyActiveModule?.isConnected) {
+    lastStickyActiveModule.classList.remove('sticky-active');
+  }
+  lastStickyActiveModule = best && best.isConnected ? best : null;
+
+  const stickyTitle = best ? moduleTitleFromCluster(best) : '';
+  const activeId = activeServerId || '';
+  let stripVisibleHint = false;
+  if (activeId) {
+    const activeCard = serverNavigationCardsById.get(activeId)
+      || document.querySelector(`.server-card[data-server-id="${CSS.escape(activeId)}"]`);
+    if (activeCard) {
+      const head = activeCard.querySelector('.server-head');
+      if (head?.classList.contains('is-stuck')) {
+        stripVisibleHint = true;
+      } else {
+        const upperBand = titlebar + Math.min(window.innerHeight * 0.28, 220);
+        const rect = activeCard.getBoundingClientRect();
+        stripVisibleHint = rect.top < upperBand && rect.bottom > titlebar;
+      }
+    }
+  }
+  const locationKey = `${activeId}\0${stuckServerId}\0${stickyTitle}\0${stripVisibleHint ? 1 : 0}`;
+  if (locationKey !== lastLocationStripKey) {
+    lastLocationStripKey = locationKey;
+    updateLocationStrip();
+  }
 }
 
 function moduleTitleFromCluster(cluster) {
@@ -1132,7 +1243,7 @@ function updateNavigatorModuleCue() {
 
 function updateLocationStrip() {
   const activeId = activeServerId;
-  const titlebar = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height')) || 62;
+  const titlebar = cachedTitlebarHeightPx || 62;
   const upperBand = titlebar + Math.min(window.innerHeight * 0.28, 220);
   document.querySelectorAll('.server-card').forEach(card => {
     const strip = card.querySelector('.server-location-strip');
@@ -1583,6 +1694,109 @@ function applyServerNavigatorSide(side) {
   ui.serverNavigatorDrag.title = `拖动到${targetLabel}`;
 }
 
+function countFavoriteGpuCards() {
+  return favoriteGpuKeys.size;
+}
+
+function countFavoriteIdleUnits(snapshot) {
+  if (!snapshot?.servers) return 0;
+  let idle = 0;
+  snapshot.servers.forEach(server => {
+    if (!serverMatchesFavoriteFilter(server.server_id)) return;
+    if (server.connection?.state !== 'online') return;
+    if (server.view_kind === 'live-memory') {
+      (server.gpus || []).forEach(gpu => {
+        const whole = favoriteServerIds.has(server.server_id);
+        if (!whole && !isFavoriteGpu(server.server_id, gpu.gpu_index)) return;
+        const free = Number(gpu.memory_free_gib);
+        const total = Number(gpu.memory_total_gib);
+        const util = gpu.utilization_percent;
+        const utilOk = util == null || Number(util) <= 5;
+        if (total > 0 && free >= total * 0.95 && utilOk) idle += 1;
+      });
+    } else if (server.view_kind === 'scheduler' && favoriteServerIds.has(server.server_id)) {
+      const rows = server.nodes || server.node_groups || [];
+      rows.forEach(row => {
+        const freeGpus = Number(row?.free_gpus || 0);
+        if (Number.isFinite(freeGpus) && freeGpus > 0) idle += freeGpus;
+      });
+    }
+  });
+  return idle;
+}
+
+function renderFavoritesSummaryStrip(snapshot) {
+  const strip = document.getElementById('favorites-summary-strip');
+  if (!strip) return;
+  const serverCount = favoriteServerIds.size;
+  const gpuCount = countFavoriteGpuCards();
+  if (serverCount <= 0 && gpuCount <= 0) {
+    strip.hidden = true;
+    strip.textContent = '';
+    return;
+  }
+  const idle = countFavoriteIdleUnits(snapshot);
+  const english = window.VRAMRadarI18n?.language === 'en';
+  strip.hidden = false;
+  strip.textContent = english
+    ? `Favorites ${serverCount} servers · ${gpuCount} GPUs · idle ${idle}`
+    : `收藏 ${number(serverCount)} 台 · ${number(gpuCount)} 张卡 · 空闲 ${number(idle)}`;
+  strip.title = english ? 'Show favorites in navigator' : '在导航中只看收藏';
+  strip.setAttribute('aria-pressed', String(serverNavigatorFilter === 'favorites'));
+}
+
+function resolveNotificationServerId(eventOrItem) {
+  const direct = String(eventOrItem?.server_id || eventOrItem?.dataset?.serverId || '').trim();
+  if (direct) return direct;
+  const displayName = String(eventOrItem?.display_name || eventOrItem?.dataset?.displayName || '').trim();
+  const message = String(eventOrItem?.message || eventOrItem?.querySelector?.('p')?.textContent || '').trim();
+  const haystack = `${displayName} ${message}`;
+  const servers = currentSnapshot?.servers || [];
+  for (const server of servers) {
+    const name = String(server.display_name || '').trim();
+    if (name && haystack.includes(name)) return server.server_id;
+  }
+  const idMatch = haystack.match(/\b([A-Za-z0-9._-]{2,64})\b/);
+  if (idMatch) {
+    const hit = servers.find(server => server.server_id === idMatch[1]);
+    if (hit) return hit.server_id;
+  }
+  return '';
+}
+
+function highlightServerGpus(serverId, indices) {
+  const card = document.getElementById(serverCardAnchor(serverId));
+  if (!card) return;
+  const wanted = new Set((indices || []).map(value => String(value)));
+  const rows = [...card.querySelectorAll('tr.gpu-row')];
+  rows.forEach(row => row.classList.remove('gpu-row-highlight'));
+  let target = null;
+  if (wanted.size) {
+    target = rows.find(row => wanted.has(String(row.dataset.gpuIndex)));
+  }
+  if (!target) target = rows[0] || card.querySelector('.table-wrap') || card;
+  if (target?.classList) target.classList.add('gpu-row-highlight');
+  target?.scrollIntoView?.({behavior: 'smooth', block: 'center'});
+  window.setTimeout(() => {
+    rows.forEach(row => row.classList.remove('gpu-row-highlight'));
+  }, 2600);
+}
+
+function focusNotificationTarget(item) {
+  if (!item) return;
+  const serverId = resolveNotificationServerId(item);
+  if (!serverId) return;
+  navigateToServer(serverId);
+  const indices = String(item.dataset?.matchedGpuIndices || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  const scope = String(item.dataset?.matchScope || '');
+  if (indices.length || scope === 'gpu') {
+    highlightServerGpus(serverId, indices);
+  }
+}
+
 function syncProfileConvenienceState(profile) {
   const favoriteIds = profile?.favorite_server_ids || profile?.favorites || [];
   favoriteServerIds = new Set(Array.isArray(favoriteIds)
@@ -1628,7 +1842,7 @@ function renderNavigatorTaskWatches() {
 
 function notificationKindLabel(kind) {
   if (kind === 'task_completed') return localizedText('任务完成');
-  if (kind === 'favorite_gpu_available') return localizedText('收藏 GPU 可用');
+  if (kind === 'favorite_gpu_available') return localizedText('收藏空闲');
   if (kind === 'resource_available') return localizedText('GPU 条件满足');
   if (kind === 'update_available') return localizedText('版本更新');
   return localizedText('应用通知');
@@ -1645,7 +1859,7 @@ function notificationTime(value) {
 
 function notificationEventTitle(event) {
   if (event.kind === 'task_completed') return localizedText('任务已完成');
-  if (event.kind === 'favorite_gpu_available') return localizedText('收藏 GPU 已可用');
+  if (event.kind === 'favorite_gpu_available') return localizedText('收藏的资源已空闲');
   if (event.kind === 'resource_available') return localizedText('显存雷达：资源可用');
   if (event.kind === 'update_available') return localizedText('发现新版本');
   return localizedText(String(event.title || notificationKindLabel(event.kind)));
@@ -1658,7 +1872,7 @@ function notificationEventMessage(event) {
       : `${event.label} 已结束。`;
   }
   if (event.kind === 'favorite_gpu_available' && event.language && event.language !== window.VRAMRadarI18n?.language) {
-    return localizedText('收藏服务器已有 GPU 可用。');
+    return localizedText('收藏的资源已空闲。');
   }
   if (event.kind === 'resource_available') return localizedText('你设置的 GPU 条件已有匹配结果。');
   if (event.kind === 'update_available' && event.latest_version) {
@@ -1681,7 +1895,7 @@ function updateProgressLabel(status) {
 }
 
 function updateActionMarkup() {
-  const defaultLabel = localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '查看更新');
+  const defaultLabel = localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页');
   const active = latestUpdateProgress?.state && latestUpdateProgress.state !== 'idle';
   const busy = latestUpdateProgress?.state === 'running';
   const terminal = latestUpdateProgress?.state === 'completed';
@@ -1707,7 +1921,17 @@ function renderNotificationCenter(snapshot) {
       const updateAction = event.kind === 'update_available'
         ? updateActionMarkup()
         : '';
-      return `<article class="notification-item${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p>${updateAction}</article>`;
+      const jumpServerId = String(event.server_id || '').trim();
+      const jumpIndices = Array.isArray(event.matched_gpu_indices)
+        ? event.matched_gpu_indices.map(value => String(value)).filter(Boolean)
+        : [];
+      const jumpAttrs = jumpServerId
+        ? ` data-server-id="${escapeHtml(jumpServerId)}" data-match-scope="${escapeHtml(event.match_scope || '')}" data-matched-gpu-indices="${escapeHtml(jumpIndices.join(','))}" data-display-name="${escapeHtml(event.display_name || '')}"`
+        : '';
+      const jumpClass = jumpServerId || event.kind === 'favorite_gpu_available' || event.kind === 'resource_available'
+        ? ' notification-jump'
+        : '';
+      return `<article class="notification-item${jumpClass}${Number(event.sequence || 0) > readSequence ? ' unread' : ''}"${jumpAttrs}><div class="notification-item-meta"><span>${escapeHtml(notificationKindLabel(event.kind))}</span><time>${escapeHtml(notificationTime(event.created_at))}</time></div><strong>${escapeHtml(notificationEventTitle(event))}</strong><p>${escapeHtml(notificationEventMessage(event))}</p>${updateAction}</article>`;
     }).join('')
     : `<div class="notification-empty">${escapeHtml(localizedText('暂无通知'))}</div>`;
   ui.markNotificationsRead.disabled = Number(state.unread_count || 0) <= 0;
@@ -1736,8 +1960,8 @@ function repaintFavoriteServer(serverId) {
     if (button.dataset.serverId !== serverId) return;
     button.classList.toggle('active', favorite);
     button.setAttribute('aria-pressed', String(favorite));
-    button.setAttribute('aria-label', favorite ? '取消收藏服务器' : '收藏服务器');
-    button.title = favorite ? '取消收藏' : '收藏服务器';
+    button.setAttribute('aria-label', favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'));
+    button.title = favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器');
     const text = button.querySelector('span');
     if (text && button.closest('.server-quick-actions')) text.textContent = favorite ? '已收藏' : '收藏';
   });
@@ -1757,6 +1981,7 @@ async function setFavoriteServer(serverId) {
     } else if (next) favoriteServerIds.add(serverId);
     else favoriteServerIds.delete(serverId);
     repaintFavoriteServer(serverId);
+    if (currentSnapshot) renderFavoritesSummaryStrip(currentSnapshot);
     showToast(next ? '已收藏服务器' : '已取消收藏');
   } catch (error) {
     showToast(error.message || String(error));
@@ -1804,6 +2029,7 @@ async function setFavoriteGpu(serverId, gpuIndex) {
       const server = (currentSnapshot.servers || []).find(item => item.server_id === serverId);
       if (server) renderedServerCardSignatures.delete(serverId);
     }
+    if (currentSnapshot) renderFavoritesSummaryStrip(currentSnapshot);
     showToast(next ? '已收藏 GPU' : '已取消收藏 GPU');
   } catch (error) {
     showToast(error.message || String(error));
@@ -2097,7 +2323,7 @@ function renderServerNavigatorItem(server, index) {
     .join('，');
   const favorite = favoriteServerIds.has(server.server_id);
   const gpuFavoriteOnly = !favorite && favoriteGpuServerIds.has(server.server_id);
-  const favoriteKind = favorite ? '整机收藏' : (gpuFavoriteOnly ? '含收藏 GPU' : '');
+  const favoriteKind = favorite ? localizedText('整台') : (gpuFavoriteOnly ? localizedText('仅 GPU') : '');
   const favoriteKindMarkup = favoriteKind
     ? `<span class="server-navigator-favorite-kind${gpuFavoriteOnly ? ' gpu-only' : ''}">${escapeHtml(favoriteKind)}</span>`
     : '';
@@ -2107,7 +2333,7 @@ function renderServerNavigatorItem(server, index) {
   const moduleCueMarkup = activeModuleTitle
     ? `<span class="server-navigator-module-cue"> · ${escapeHtml(activeModuleTitle)}</span>`
     : '';
-  return `<div class="server-navigator-entry" data-server-id="${escapeHtml(server.server_id)}"><button class="server-navigator-item ${escapeHtml(state)}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-controls="${escapeHtml(anchor)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="server-navigator-marker"><span>${position}</span><i class="status-dot ${escapeHtml(state)}"></i></span><span class="server-navigator-copy"><strong>${escapeHtml(server.display_name)}</strong>${moduleCueMarkup}${favoriteKindMarkup}<span>${escapeHtml(serverNavigatorResourceSummary(server))}</span><small>${escapeHtml(taskSummary)}</small></span></button><button class="server-navigator-favorite favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏' : '收藏'} ${escapeHtml(server.display_name)}" title="${favorite ? '取消收藏服务器' : '收藏整台服务器'}">${icon('star')}</button></div>`;
+  return `<div class="server-navigator-entry" data-server-id="${escapeHtml(server.server_id)}"><button class="server-navigator-item ${escapeHtml(state)}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-controls="${escapeHtml(anchor)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="server-navigator-marker"><span>${position}</span><i class="status-dot ${escapeHtml(state)}"></i></span><span class="server-navigator-copy"><strong>${escapeHtml(server.display_name)}</strong>${moduleCueMarkup}${favoriteKindMarkup}<span>${escapeHtml(serverNavigatorResourceSummary(server))}</span><small>${escapeHtml(taskSummary)}</small></span></button><button class="server-navigator-favorite favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="${favorite}" aria-label="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}" title="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}">${icon('star')}</button></div>`;
 }
 
 function setActiveServer(serverId) {
@@ -2266,19 +2492,14 @@ function renderServerNavigator(servers) {
   serverNavigatorItems = new Map([...ui.serverNavigatorList.querySelectorAll('.server-navigator-item')].map(item => [item.dataset.serverId, item]));
   serverNavigatorPositions = new Map(serverNavigatorVisibleIds.map((serverId, index) => [serverId, index + 1]));
   ui.serverNavigatorEmpty.hidden = allMatches.length > 0;
-  if (serverNavigatorFilter === 'favorites') {
-    const gpuOnlyFavorites = favoriteServerIds.size === 0 && favoriteGpuServerIds.size > 0;
-    if (allMatches.length === 0) {
-      ui.serverNavigatorEmpty.hidden = false;
-      ui.serverNavigatorEmpty.textContent = '没有收藏的服务器或 GPU';
-    } else if (gpuOnlyFavorites) {
-      ui.serverNavigatorEmpty.hidden = false;
-      ui.serverNavigatorEmpty.textContent = '当前列表来自 GPU 收藏（尚未收藏整台服务器）';
-    } else {
-      ui.serverNavigatorEmpty.textContent = '没有匹配的服务器';
-    }
-  } else {
-    ui.serverNavigatorEmpty.textContent = '没有匹配的服务器';
+  if (serverNavigatorFilter === 'favorites' && allMatches.length === 0) {
+    ui.serverNavigatorEmpty.hidden = false;
+    const hasAnyFavorite = favoriteServerIds.size > 0 || favoriteGpuServerIds.size > 0;
+    ui.serverNavigatorEmpty.textContent = hasAnyFavorite
+      ? localizedText('没有匹配的服务器')
+      : localizedText('还没有收藏');
+  } else if (allMatches.length === 0) {
+    ui.serverNavigatorEmpty.textContent = localizedText('没有匹配的服务器');
   }
   ui.serverNavigator.querySelectorAll('[data-server-navigator-filter]').forEach(button => {
     button.setAttribute('aria-pressed', String(button.dataset.serverNavigatorFilter === serverNavigatorFilter));
@@ -2365,6 +2586,7 @@ function serverCardRenderSignature(server, index) {
     server.slurm_capabilities?.inventory_mode,
     favoriteServerIds.has(server.server_id),
     [...favoriteGpuKeys].filter(key => key.startsWith(`${server.server_id}:`)).sort().join('|'),
+    Boolean(favoriteGpuOnlyViewByServer.get(server.server_id)),
     serverIsEnabled(server.server_id),
     taskCompletionWatchRenderSignature(server.server_id),
   ]);
@@ -2473,6 +2695,7 @@ function render(snapshot) {
     ui.summary.innerHTML = renderSummary(summary);
     lastSummaryRenderSignature = summarySignature;
   }
+  renderFavoritesSummaryStrip(snapshot);
   ui.serverListMeta.textContent = summary.total_servers
     ? `${summary.online_servers}/${summary.total_servers} 台监控就绪 · ${number(summary.total_gpus)} 块 GPU`
     : '等待配置';
@@ -3817,6 +4040,7 @@ async function checkForUpdates({interactive = false} = {}) {
     const result = await api.check_for_updates();
     if (result?.ok && result.update_available) {
       latestUpdateAction = result.update_action || 'browser';
+      latestUpdateActionReason = String(result.update_action_reason || '');
     }
     if (result?.notifications && currentSnapshot) {
       currentSnapshot.notifications = result.notifications;
@@ -3859,7 +4083,14 @@ async function checkForUpdates({interactive = false} = {}) {
 
 async function installLatestUpdate(button) {
   if (latestUpdateAction === 'browser') {
-    await api.open_latest_release();
+    const portableHint = localizedText('当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页');
+    const reason = String(latestUpdateActionReason || '').trim();
+    const explanation = reason
+      ? `${portableHint}\n${localizedText(reason)}`
+      : portableHint;
+    if (!window.confirm(explanation)) return;
+    if (api?.open_latest_release) await api.open_latest_release();
+    showToast(portableHint);
     return;
   }
   const explanation = latestUpdateAction === 'one_click'
@@ -4030,10 +4261,37 @@ function scheduleRefresh() {
 }
 
 document.addEventListener('click', event => {
+  const favoritesSummaryStrip = event.target.closest('#favorites-summary-strip');
+  if (favoritesSummaryStrip) {
+    serverNavigatorFilter = 'favorites';
+    if (currentSnapshot) {
+      renderServerNavigator(currentSnapshot.servers);
+      renderFavoritesSummaryStrip(currentSnapshot);
+    }
+    return;
+  }
+  const favoriteGpuOnlyToggle = event.target.closest('.toggle-favorite-gpu-only');
+  if (favoriteGpuOnlyToggle) {
+    const serverId = favoriteGpuOnlyToggle.dataset.serverId;
+    if (serverId) {
+      favoriteGpuOnlyViewByServer.set(serverId, !favoriteGpuOnlyViewByServer.get(serverId));
+      renderedServerCardSignatures.delete(serverId);
+      if (currentSnapshot) render(currentSnapshot);
+    }
+    return;
+  }
+  const notificationJump = event.target.closest('.notification-item.notification-jump');
+  if (notificationJump && !event.target.closest('.install-latest-update, .notification-actions, button')) {
+    focusNotificationTarget(notificationJump);
+    return;
+  }
   const serverNavigatorFilterButton = event.target.closest('[data-server-navigator-filter]');
   if (serverNavigatorFilterButton) {
     serverNavigatorFilter = serverNavigatorFilterButton.dataset.serverNavigatorFilter;
-    if (currentSnapshot) renderServerNavigator(currentSnapshot.servers);
+    if (currentSnapshot) {
+      renderServerNavigator(currentSnapshot.servers);
+      renderFavoritesSummaryStrip(currentSnapshot);
+    }
   }
   const serverNavigatorItem = event.target.closest('.server-navigator-item');
   if (serverNavigatorItem) navigateToServer(serverNavigatorItem.dataset.serverId);
@@ -4344,12 +4602,16 @@ ui.form.addEventListener('submit', saveSettings);
 function syncStickyLayoutOffsets() {
   const titlebar = document.querySelector('.titlebar');
   if (titlebar) {
-    document.documentElement.style.setProperty('--titlebar-height', `${Math.ceil(titlebar.getBoundingClientRect().height)}px`);
+    const height = Math.ceil(titlebar.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--titlebar-height', `${height}px`);
+    if (height > 0) cachedTitlebarHeightPx = height;
+  } else {
+    refreshCachedTitlebarHeight();
   }
   document.querySelectorAll('.server-card').forEach(card => {
     const head = card.querySelector('.server-head');
     if (!head) return;
-    card.style.setProperty('--server-head-height', `${Math.ceil(head.getBoundingClientRect().height)}px`);
+    setServerHeadHeight(card, head);
   });
 }
 
@@ -4368,12 +4630,12 @@ syncStickyLayoutOffsets();
 observeStickyLayoutTargets();
 window.addEventListener('scroll', () => {
   scheduleServerNavigationSync();
-  updateStuckChrome();
+  scheduleStuckChromeUpdate();
 }, {passive: true});
 window.addEventListener('resize', () => {
   syncStickyLayoutOffsets();
   scheduleServerNavigationSync();
-  updateStuckChrome();
+  scheduleStuckChromeUpdate();
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
@@ -4391,4 +4653,4 @@ window.addEventListener('focus', () => {
 });
 window.addEventListener('pywebviewready', initialize, {once: true});
 
-document.addEventListener('toggle', () => requestAnimationFrame(updateStuckChrome), true);
+document.addEventListener('toggle', () => scheduleStuckChromeUpdate(), true);

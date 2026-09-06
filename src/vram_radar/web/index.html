@@ -51,6 +51,7 @@
           <div class="indexed-heading">
             <div><h2 id="dashboard-title">GPU 资源总览</h2><p>可用显存、卡型与任务状态</p></div>
           </div>
+          <button id="favorites-summary-strip" class="favorites-summary-strip" type="button" hidden aria-pressed="false"></button>
         </section>
         <section id="summary" class="summary" aria-label="GPU 概览"></section>
         <details class="match-panel">
@@ -175,7 +176,7 @@
             <label><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
           </div>
           <div class="favorite-alert-setting">
-            <label class="check-label"><input id="favorite-alert-enabled" type="checkbox"><span><strong>收藏 GPU 可用时提醒</strong><small>整卡空闲或达到设定显存时发送系统通知</small></span></label>
+            <label class="check-label"><input id="favorite-alert-enabled" type="checkbox"><span><strong>收藏的服务器或指定 GPU 空闲时提醒我</strong><small>整卡空闲或达到设定显存时发送系统通知</small></span></label>
             <label><span>单卡最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：只提醒整卡空闲"></label>
           </div>
           <div class="task-completion-setting">

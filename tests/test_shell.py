@@ -1292,13 +1292,19 @@ class ShellApiTests(unittest.TestCase):
         api.get_snapshot()
         notification_snapshot = api.get_snapshot()
         self.assertEqual(notify.call_count, 1)
-        self.assertEqual(notify.call_args.args[0], "Favorite GPUs are available")
+        self.assertEqual(notify.call_args.args[0], "A favorited server has free GPUs")
         self.assertIn("A100 Lab", notify.call_args.args[1])
+        self.assertIn("1 GPU free", notify.call_args.args[1])
         self.assertEqual(notification_snapshot["notifications"]["unread_count"], 1)
         self.assertEqual(
             notification_snapshot["notifications"]["events"][0]["kind"],
             "favorite_gpu_available",
         )
+        event = notification_snapshot["notifications"]["events"][0]
+        self.assertEqual(event.get("server_id"), "gpu")
+        self.assertIn(event.get("match_scope"), {"server", "gpu"})
+        self.assertIn("matched_gpu_indices", event)
+        self.assertTrue(event.get("display_name"))
 
         service.snapshot.return_value = self.favorite_alert_snapshot(available=False)
         api.get_snapshot()
@@ -1339,6 +1345,8 @@ class ShellApiTests(unittest.TestCase):
             durable = NotificationStateStore(paths, profile.id).load()
             self.assertEqual(durable["favorite_active_ids"], ["gpu"])
             self.assertEqual(durable["events"][0]["kind"], "favorite_gpu_available")
+            self.assertEqual(durable["events"][0].get("server_id"), "gpu")
+            self.assertIn("matched_gpu_indices", durable["events"][0])
 
     def test_hidden_refresh_notifies_after_background_collection_finishes(self):
         service = Mock()

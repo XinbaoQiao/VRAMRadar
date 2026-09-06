@@ -39,12 +39,25 @@ class WebUiContractTests(unittest.TestCase):
             "if (serverNavigatorFilter === 'favorites') return serverMatchesFavoriteFilter(server.server_id);",
             self.javascript,
         )
-        self.assertIn("整机收藏", self.javascript)
-        self.assertIn("含收藏 GPU", self.javascript)
+        self.assertIn("整台", self.javascript)
+        self.assertIn("仅 GPU", self.javascript)
+        self.assertNotIn("整机收藏", self.javascript)
         self.assertIn("server-navigator-favorite-kind", self.javascript)
         self.assertIn("收藏这张 GPU", self.javascript)
-        self.assertIn("当前列表来自 GPU 收藏（尚未收藏整台服务器）", self.javascript)
+        self.assertIn("还没有收藏", self.javascript)
+        self.assertNotIn("当前列表来自 GPU 收藏（尚未收藏整台服务器）", self.javascript)
+        self.assertIn("收藏这台服务器", self.javascript)
+        self.assertIn("取消收藏这台服务器", self.javascript)
         self.assertIn(".server-navigator-favorite-kind", self.styles)
+        self.assertIn("favorites-summary-strip", self.javascript)
+        self.assertIn('id="favorites-summary-strip"', self.markup)
+        self.assertIn("toggle-favorite-gpu-only", self.javascript)
+        self.assertIn("只看收藏 GPU", self.javascript)
+        self.assertIn("focusNotificationTarget", self.javascript)
+        self.assertIn("notification-jump", self.javascript)
+        self.assertIn("data-matched-gpu-indices", self.javascript)
+        self.assertIn("当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页", self.javascript)
+        self.assertIn("latestUpdateActionReason", self.javascript)
 
     def test_server_leave_position_is_remembered_and_restored(self):
         self.assertIn("const serverLeaveMemory = new Map()", self.javascript)
@@ -157,7 +170,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn('<option value="auto">自动识别（推荐）</option>', self.markup)
         self.assertIn("auto_detect_backend: selectedBackend === 'auto'", self.javascript)
         self.assertIn("api.test_connection(server.id)", self.javascript)
-        self.assertIn("Notify me when favorite GPUs are available", self.localization)
+        self.assertIn("Remind me when a favorited server or GPU is free", self.localization)
         self.assertIn("Leave empty: notify only for idle GPUs", self.localization)
 
     def test_copy_ssh_prefers_an_openssh_config_block_and_localized_feedback(self):
@@ -1577,6 +1590,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("function pollUpdateProgress", self.javascript)
         self.assertIn("api.install_latest_update()", self.javascript)
         self.assertIn("window.confirm(explanation)", self.javascript)
+        self.assertIn("latestUpdateAction === 'browser'", self.javascript)
+        self.assertIn("open_latest_release", self.javascript)
         self.assertIn(".update-notice", self.styles)
         self.assertIn("发现新版本后会进入通知中心", self.markup)
         self.assertIn("下载并校验安装包", self.javascript)

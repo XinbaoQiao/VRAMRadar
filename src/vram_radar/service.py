@@ -369,6 +369,7 @@ def favorite_resource_matches(
         idle_units = 0
         memory_units = 0
         best_free_memory = 0.0
+        matched_gpu_indices: list[Any] = []
         if view_kind == "live-memory":
             processes = server.get("processes") or {}
             occupied_indices = {
@@ -405,6 +406,8 @@ def favorite_resource_matches(
                 memory_units += int(memory_match)
                 if idle or memory_match:
                     best_free_memory = max(best_free_memory, free_memory)
+                    if raw_gpu_index is not None:
+                        matched_gpu_indices.append(raw_gpu_index)
         elif view_kind == "scheduler":
             if not server_is_favorite:
                 continue
@@ -425,16 +428,17 @@ def favorite_resource_matches(
                 best_free_memory = max(best_free_memory, per_gpu_memory)
         if idle_units < 1 and memory_units < 1:
             continue
-        matches.append(
-            {
-                "server_id": str(server.get("server_id") or ""),
-                "display_name": str(server.get("display_name") or server.get("server_id") or ""),
-                "backend": str(server.get("backend") or ""),
-                "idle_units": idle_units,
-                "memory_units": memory_units,
-                "available_memory_gib": round(best_free_memory, 2),
-            }
-        )
+        match_entry: dict[str, Any] = {
+            "server_id": str(server.get("server_id") or ""),
+            "display_name": str(server.get("display_name") or server.get("server_id") or ""),
+            "backend": str(server.get("backend") or ""),
+            "idle_units": idle_units,
+            "memory_units": memory_units,
+            "available_memory_gib": round(best_free_memory, 2),
+            "match_scope": "server" if server_is_favorite else "gpu",
+            "matched_gpu_indices": matched_gpu_indices if view_kind == "live-memory" else [],
+        }
+        matches.append(match_entry)
     matches.sort(key=lambda item: (-item["available_memory_gib"], item["server_id"]))
     return matches
 

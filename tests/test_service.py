@@ -151,6 +151,8 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(matches[0]["idle_units"], 1)
         self.assertEqual(matches[0]["memory_units"], 2)
         self.assertEqual(matches[0]["available_memory_gib"], 24)
+        self.assertEqual(matches[0]["match_scope"], "server")
+        self.assertEqual(matches[0]["matched_gpu_indices"], [0, 1])
 
     def test_favorite_resource_matches_specific_gpu_favorites(self):
         snapshot = {
@@ -186,6 +188,8 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual([item["server_id"] for item in matches], ["lab"])
         self.assertEqual(matches[0]["idle_units"], 1)
+        self.assertEqual(matches[0]["match_scope"], "gpu")
+        self.assertEqual(matches[0]["matched_gpu_indices"], [1])
 
         scheduler = {
             "servers": [

@@ -977,11 +977,24 @@ class AppApi:
                 "server_id", "task_key", "task_kind", "task_id", "label", "owner",
                 "owner_scope", "terminal_state", "completed_at", "language",
                 "native_delivery", "event_key", "latest_version", "latest_build",
-                "release_url",
+                "release_url", "match_scope", "display_name",
             ):
                 value = raw_event.get(key)
                 if isinstance(value, str) and len(value.encode("utf-8")) <= 512:
                     event[key] = value
+            indices = raw_event.get("matched_gpu_indices")
+            if isinstance(indices, list):
+                cleaned_indices: list[int | str] = []
+                for item in indices[:64]:
+                    if isinstance(item, bool):
+                        continue
+                    if isinstance(item, int):
+                        cleaned_indices.append(item)
+                    elif isinstance(item, float) and item.is_integer():
+                        cleaned_indices.append(int(item))
+                    elif isinstance(item, str) and 0 < len(item.encode("utf-8")) <= 32:
+                        cleaned_indices.append(item)
+                event["matched_gpu_indices"] = cleaned_indices
             if isinstance(raw_event.get("watched"), bool):
                 event["watched"] = raw_event["watched"]
             events.append(event)
@@ -1932,34 +1945,59 @@ class AppApi:
         minimum_memory_gib: float,
     ) -> tuple[str, str]:
         english = language == "en"
+        scopes = {str(match.get("match_scope") or "server") for match in matches}
+        if scopes == {"server"}:
+            title = "A favorited server has free GPUs" if english else "收藏的服务器有空闲 GPU"
+        elif scopes == {"gpu"}:
+            title = "A favorited GPU is free" if english else "收藏的 GPU 已空闲"
+        else:
+            title = "Favorited resources are free" if english else "收藏的资源已空闲"
+
         rows: list[str] = []
         for match in matches[:3]:
             name = str(match.get("display_name") or match.get("server_id") or "GPU")
             idle_units = max(0, int(match.get("idle_units") or 0))
             available = max(0.0, float(match.get("available_memory_gib") or 0))
             available_text = f"{available:.2f}".rstrip("0").rstrip(".")
-            if idle_units:
-                rows.append(
-                    f"{name}: {idle_units} idle GPU(s), up to {available_text} GiB free"
-                    if english
-                    else f"{name}：{idle_units} 张 GPU 空闲，单卡最多可用 {available_text} GiB"
-                )
+            scope = str(match.get("match_scope") or "server")
+            indices = [str(index) for index in (match.get("matched_gpu_indices") or [])]
+            if scope == "gpu":
+                index_text = (", ".join(indices) if english else "、".join(indices)) or "?"
+                if english:
+                    verb = "is" if len(indices) == 1 else "are"
+                    rows.append(
+                        f"{name}: favorited GPU {index_text} {verb} free, "
+                        f"up to {available_text} GiB available"
+                    )
+                else:
+                    rows.append(
+                        f"{name}：收藏的 GPU {index_text} 已空闲，最多可用 {available_text} GiB"
+                    )
+            elif idle_units:
+                if english:
+                    unit = "GPU" if idle_units == 1 else "GPUs"
+                    rows.append(
+                        f"{name}: {idle_units} {unit} free, up to {available_text} GiB available"
+                    )
+                else:
+                    rows.append(
+                        f"{name}：有 {idle_units} 张卡空闲，最多还能用 {available_text} GiB"
+                    )
             else:
                 threshold_text = f"{minimum_memory_gib:.2f}".rstrip("0").rstrip(".")
-                rows.append(
-                    f"{name}: a GPU reached {threshold_text} GiB free"
-                    if english
-                    else f"{name}：有 GPU 空闲显存达到 {threshold_text} GiB"
-                )
+                if english:
+                    rows.append(f"{name}: free VRAM reached {threshold_text} GiB")
+                else:
+                    rows.append(f"{name}：有卡空闲显存到了 {threshold_text} GiB")
         remaining = len(matches) - len(rows)
         if remaining > 0:
             rows.append(
-                f"{remaining} more favorite server(s) also match"
+                f"Plus {remaining} more that also qualify"
                 if english
-                else f"另有 {remaining} 台收藏服务器也符合条件"
+                else f"另外还有 {remaining} 处也符合条件"
             )
         return (
-            ("Favorite GPUs are available" if english else "收藏 GPU 已可用"),
+            title,
             ("; ".join(rows) if english else "；".join(rows)),
         )
 
@@ -1999,12 +2037,17 @@ class AppApi:
             language=profile.ui_language,
             minimum_memory_gib=profile.favorite_alert_min_memory_gib,
         )
+        primary = newly_available[0]
         created = self._record_notifications([{
             "kind": "favorite_gpu_available",
             "title": title,
             "message": message,
             "language": profile.ui_language,
             "native_delivery": "pending",
+            "server_id": str(primary.get("server_id") or ""),
+            "display_name": str(primary.get("display_name") or ""),
+            "match_scope": str(primary.get("match_scope") or "server"),
+            "matched_gpu_indices": list(primary.get("matched_gpu_indices") or []),
         }])
         self._deliver_notifications(created, title=title, message=message)
 
