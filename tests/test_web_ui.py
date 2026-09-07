@@ -391,7 +391,7 @@ class WebUiContractTests(unittest.TestCase):
             ".cluster-heading h4 { margin: 0; font-family: var(--display-font); font-size: 16px",
             ".task-owner-heading h5 { margin: 0; font-family: var(--display-font); font-size: 14.5px",
             ".task-period-head h6 { margin: 0; font-family: var(--display-font); font-size: 13px",
-            ".cluster-module { margin: 8px 12px 0",
+            ".cluster-module { margin: 10px 14px 0",
             ".task-owner-stack { display: grid; gap: 8px; margin-left: 5px",
         ):
             self.assertIn(style, self.styles)
@@ -483,18 +483,21 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("Expand-top: land at the start of what opened", self.javascript)
         self.assertIn("function expandedSectionFirstLine", self.javascript)
         self.assertIn("function forceScrollExpandedClusterToTop", self.javascript)
-        self.assertIn("forceScrollExpandedClusterToTop(group)", self.javascript)
+        self.assertIn("forceScrollExpandedClusterToTop(group, generation)", self.javascript)
         self.assertIn("scrollServerKeepingGpuVisible(serverId)", self.javascript)
         self.assertIn("Sidebar/server jumps stay GPU-first via scrollServerIntoVisualCenter", self.javascript)
         self.assertIn("Expand-top: land at the start of what opened", self.javascript)
-        self.assertIn("window.setTimeout(callback, 48)", self.javascript)
+        self.assertIn("function afterExpandLayout", self.javascript)
+        self.assertIn("}, 48);", self.javascript)
+        self.assertIn("window.setTimeout(pass, 80)", self.javascript)
+        self.assertIn("window.setTimeout(pass, 180)", self.javascript)
         self.assertIn("Job/task-group expand under a server", self.javascript)
         self.assertIn("tipBits.map(escapeHtml).join('<br>')", self.javascript)
         self.assertIn("cpu-overview-help-body", self.javascript)
         self.assertNotIn("cluster.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
         self.assertIn("scroll-margin-top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) + 12px)", self.styles)
         self.assertIn(".server-surface > .table-wrap", self.styles)
-        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: visible;", self.styles)
+        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible;", self.styles)
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
@@ -552,7 +555,7 @@ class WebUiContractTests(unittest.TestCase):
     def test_global_layout_density_keeps_one_clear_visual_hierarchy(self):
         for contract in (
             "--font-body: 15px",
-            ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 62px",
+            ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 60px",
             ".button { min-height: 36px",
             "main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1320px",
             ".capacity-metric { min-height: 174px",
@@ -1233,13 +1236,19 @@ class WebUiContractTests(unittest.TestCase):
             ".server-card.online .server-rail",
         ):
             self.assertIn(token, self.styles)
-        for forbidden in ("gradient", "backdrop-filter", "border-radius: 999"):
+        for forbidden in ("backdrop-filter", "border-radius: 999"):
             self.assertNotIn(forbidden, self.styles)
+        # Functional same-hue status fills may use linear-gradient; decorative blur/pill chrome stays banned.
+        self.assertIn("same-hue", self.javascript)
+        self.assertIn("--memory-fill", self.styles)
+        self.assertIn("linear-gradient(90deg,", self.styles)
 
     def test_memory_meter_has_accessible_semantics(self):
         self.assertIn('role="progressbar"', self.javascript)
         self.assertIn('aria-valuenow="${percent}"', self.javascript)
-        self.assertIn(".memory-track.critical", self.styles)
+        self.assertIn(".memory-track {", self.styles)
+        self.assertIn('class="memory-track ${tone}"', self.javascript)
+        self.assertIn("percent >= 85 ? 'critical' : percent >= 70 ? 'warning' : 'normal'", self.javascript)
         self.assertIn("function schedulerMemoryMeter", self.javascript)
         self.assertIn("调度显存占用", self.javascript)
         self.assertIn("GPU 调度占用率", self.javascript)
@@ -1249,8 +1258,11 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn('role="img" aria-label="${escapeHtml(accessible)}"', self.javascript)
         self.assertIn("可用比例", self.javascript)
         self.assertIn("总量待补充", self.javascript)
-        self.assertIn("tape-cell${index < activeCount ? ' available' : ''}", self.javascript)
-        self.assertIn("percent <= 20 ? 'critical' : percent <= 50 ? 'warning' : 'healthy'", self.javascript)
+        self.assertIn('class="tape-cell available"', self.javascript)
+        self.assertIn('class="tape-cell"', self.javascript)
+        self.assertIn("index >= activeCount", self.javascript)
+        self.assertIn("percent <= 15 ? 'critical' : percent <= 30 ? 'warning' : 'healthy'", self.javascript)
+        self.assertIn("same-hue", self.javascript)
         self.assertIn(".capacity-visual.warning .capacity-visual-head strong", self.styles)
         self.assertIn(".capacity-visual.critical .capacity-visual-head strong", self.styles)
         self.assertIn(".capacity-visual.healthy .capacity-visual-head strong", self.styles)
