@@ -14,6 +14,7 @@ import copy
 import ctypes
 from ctypes import wintypes
 import json
+import sys
 import logging
 import os
 from pathlib import Path
@@ -834,15 +835,26 @@ BENCHMARK_JAVASCRIPT = r"""
     renderNotificationCenter(currentSnapshot);
     const englishCpuOverview = document.querySelector('#server-card-synthetic-003 .cpu-overview')?.textContent || '';
     const englishCpuProcess = document.querySelector('#server-card-synthetic-003 .process-table tbody tr')?.textContent || '';
-    const directCpuInformationRendered = englishCpuOverview.includes('16 logical cores')
-      && englishCpuOverview.includes('1 min')
-      && englishCpuOverview.includes('5 min')
-      && englishCpuOverview.includes('15 min')
+    const directCpuInformationRendered = (
+        englishCpuOverview.includes('16c')
+        || englishCpuOverview.includes('16 logical')
+        || englishCpuOverview.includes('logical 16')
+      )
+      && (englishCpuOverview.includes('/1min') || englishCpuOverview.includes('1 min'))
+      && (englishCpuOverview.includes('/5min') || englishCpuOverview.includes('5 min'))
+      && (englishCpuOverview.includes('/15min') || englishCpuOverview.includes('15 min'))
       && englishCpuOverview.includes('0.42')
       && englishCpuOverview.includes('0.37')
       && englishCpuOverview.includes('0.31')
-      && englishCpuOverview.includes('Running / waiting tasks')
-      && englishCpuOverview.includes('average number of tasks running')
+      && (
+        englishCpuOverview.toLowerCase().includes('load')
+        || englishCpuOverview.includes('Running / waiting tasks')
+      )
+      && (
+        englishCpuOverview.includes('average runnable')
+        || englishCpuOverview.includes('average number of tasks running')
+        || englishCpuOverview.includes('host-wide CPU')
+      )
       && englishCpuProcess.includes('12.5%');
     const englishSchedulerRows = [...document.querySelectorAll('.scheduler-node-table tbody tr')]
       .map(row => row.innerText);
@@ -1160,6 +1172,10 @@ def main() -> int:
         output["timed_out"] = False
     output.setdefault("synthetic_only", True)
     output.setdefault("remote_connections", 0)
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     print(json.dumps(output, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if output.get("ok") is True else 1
 

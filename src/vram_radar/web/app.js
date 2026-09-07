@@ -2139,7 +2139,7 @@ function renderServerQuickActions(server) {
   const openTerminal = api?.open_terminal
     ? `<button class="button compact-button open-terminal" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="打开服务器终端" title="打开终端">${icon('terminal')}<span>打开终端</span></button>`
     : '';
-  return `<div class="server-quick-actions"><button class="button compact-button pin-server${pinned ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${pinned}" aria-label="${pinned ? '取消置顶这台服务器' : '置顶这台服务器'}" title="${pinned ? '取消置顶' : '置顶'}">${icon('pin')}<span>${pinned ? '已置顶' : '置顶'}</span></button><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
+  return `<div class="server-quick-actions"><button class="button compact-button pin-server${pinned ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${pinned}" aria-label="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668') : localizedText('\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668')}" title="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}">${icon('pin')}<span>${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}</span></button><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
 }
 
 function applyServerNavigatorSide(side) {
@@ -2443,7 +2443,7 @@ function repaintPinnedServer(serverId) {
     button.setAttribute('aria-label', pinned ? localizedText('取消置顶这台服务器') : localizedText('置顶这台服务器'));
     button.title = pinned ? localizedText('取消置顶') : localizedText('置顶');
     const text = button.querySelector('span');
-    if (text && button.closest('.server-quick-actions')) text.textContent = pinned ? '已置顶' : '置顶';
+    if (text && button.closest('.server-quick-actions')) text.textContent = pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876');
   });
 }
 
@@ -2451,7 +2451,7 @@ async function setPinnedServer(serverId) {
   const next = !pinnedServerIds.has(serverId);
   if (api?.set_pinned_server) {
     const result = await api.set_pinned_server(serverId, next);
-    if (!result?.ok) return showToast(result?.error || '无法更新置顶');
+    if (!result?.ok) return showToast(result?.error || localizedText('\u65e0\u6cd5\u66f4\u65b0\u7f6e\u9876'));
     if (result.profile) acceptProfile(result.profile);
     else if (next) pinnedServerIds.add(serverId);
     else pinnedServerIds.delete(serverId);
@@ -4995,6 +4995,9 @@ document.addEventListener('click', event => {
     }
   }
 }, true);
+document.addEventListener('vram-radar-language-changed', () => {
+  if (currentSnapshot) render(currentSnapshot);
+});
 document.addEventListener('toggle', event => {
   if (event.target.dataset?.bulkDisclosure === 'true') {
     delete event.target.dataset.bulkDisclosure;

@@ -379,6 +379,16 @@
     ['个逻辑核心', 'logical cores'],
     ['逻辑核心未知', 'Logical cores unavailable'],
     ['主机内存', 'Host memory'],
+    ['置顶', 'Pin'],
+    ['取消置顶', 'Unpin'],
+    ['置顶这台服务器', 'Pin this server'],
+    ['取消置顶这台服务器', 'Unpin this server'],
+    ['无法更新置顶', 'Unable to update pin'],
+    ['负载', 'load'],
+    ['使用率：主机近期整体 CPU 忙碌占比（不是单进程）。', 'Usage %: recent host-wide CPU busy share (not per-process).'],
+    ['负载 1/5/15：可运行或不可中断等待任务平均数——与逻辑核对比（持续高于逻辑核≈偏满）。', 'Load 1/5/15: average runnable or uninterruptible tasks — compare to logical cores (sustained load above cores ≈ saturation).'],
+    ['内存：主机内存；内核提供时优先使用 MemAvailable。', 'Memory: host RAM; prefers MemAvailable when the kernel exposes it.'],
+
     ['运行 / 等待任务数', 'Running / waiting tasks'],
     ['1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。', 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O.'],
     ['使用率是主机近期整体 CPU 忙碌占比。1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。主机内存优先使用内核提供的 MemAvailable。', 'Usage is the recent host-wide CPU busy share. The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O. Host memory uses MemAvailable when the kernel exposes it.'],
@@ -608,6 +618,12 @@
     [/^([\d,.]+) 小时$/, '$1 hours'],
     [/^([\d,.]+) 分钟$/, '$1 minutes'],
     [/^([\d,.]+) 秒$/, '$1 seconds'],
+    [/^([\d,.]+)核$/, '$1c'],
+    [/^([\d,.]+)物理\/([\d,.]+)逻辑$/, '$1p/$2c'],
+    [/^核心：逻辑 ([\d,.]+)（逻辑含超线程）。$/, 'Cores: logical $1 (SMT/HT included when present).'],
+    [/^核心：逻辑 ([\d,.]+)（物理 ([\d,.]+)；逻辑含超线程）。$/, 'Cores: logical $1 (physical $2; SMT/HT included in logical).'],
+    [/^时钟：当前约 ([\d,.]+) MHz。$/, 'Clock ~$1 MHz.'],
+    [/^([\d,.]+)--([\d,.]+) \/ ([\d,.]+) 台$/, '$1--$2 / $3 servers'],
   ];
   const ATTRIBUTES = ['aria-label', 'title', 'placeholder'];
   const textRecords = new WeakMap();
