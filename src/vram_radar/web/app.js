@@ -523,6 +523,17 @@ function renderCpuOverview(server) {
     : '\u5185\u5b58\uff1a\u4e3b\u673a\u5185\u5b58\uff1b\u5185\u6838\u63d0\u4f9b\u65f6\u4f18\u5148\u4f7f\u7528 MemAvailable\u3002');
   if (hasMhz) tipBits.push(english ? `Clock ~${number(Math.round(mhz))} MHz.` : `\u65f6\u949f\uff1a\u5f53\u524d\u7ea6 ${number(Math.round(mhz))} MHz\u3002`);
   const explanation = tipBits.join(' ');
+  // Keep title ASCII/English so language switch does not leave a concatenated Chinese title attribute.
+  const titleTips = [];
+  if (modelName) titleTips.push(`Model: ${modelName}`);
+  titleTips.push('Usage %: recent host-wide CPU busy share (not per-process).');
+  titleTips.push('Load 1/5/15: average runnable or uninterruptible tasks \u2014 compare to logical cores (sustained load above cores \u2248 saturation).');
+  if (hasCores) {
+    titleTips.push(`Cores: logical ${number(logicalCores)}${hasPhysical ? ` (physical ${number(physicalCores)}; SMT/HT included in logical)` : ' (SMT/HT included when present)'}.`);
+  }
+  titleTips.push('Memory: host RAM; prefers MemAvailable when the kernel exposes it.');
+  if (hasMhz) titleTips.push(`Clock ~${number(Math.round(mhz))} MHz.`);
+  const explanationTitle = titleTips.join(' ');
   const explanationHtml = tipBits.map(escapeHtml).join('<br>');
   const sep = '<span class="cpu-sep" aria-hidden="true">\u00b7</span>';
   const parts = [];
@@ -534,8 +545,8 @@ function renderCpuOverview(server) {
   if (memoryMarkup) { parts.push(sep); parts.push(memoryMarkup); }
   parts.push(sep);
   parts.push(loadMarkup);
-  parts.push(`<details class="cpu-overview-help"><summary title="${escapeHtml(explanation)}">${escapeHtml(localizedText('\u8bf4\u660e'))}</summary><p class="cpu-overview-help-body">${explanationHtml}</p></details>`);
-  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('\u4e3b\u673a CPU'))}" title="${escapeHtml(explanation)}"><div class="cpu-overview-line">${parts.join('')}</div></section>`;
+  parts.push(`<details class="cpu-overview-help"><summary title="${escapeHtml(explanationTitle)}">${escapeHtml(localizedText('\u8bf4\u660e'))}</summary><p class="cpu-overview-help-body">${explanationHtml}</p></details>`);
+  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('\u4e3b\u673a CPU'))}" title="${escapeHtml(explanationTitle)}"><div class="cpu-overview-line">${parts.join('')}</div></section>`;
 }
 
 function favoriteGpuKey(serverId, gpuIndex) {
@@ -4995,9 +5006,6 @@ document.addEventListener('click', event => {
     }
   }
 }, true);
-document.addEventListener('vram-radar-language-changed', () => {
-  if (currentSnapshot) render(currentSnapshot);
-});
 document.addEventListener('toggle', event => {
   if (event.target.dataset?.bulkDisclosure === 'true') {
     delete event.target.dataset.bulkDisclosure;

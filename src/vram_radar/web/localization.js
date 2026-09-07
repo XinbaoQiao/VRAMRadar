@@ -96,6 +96,7 @@
     ['下一台', 'Next'],
     ['设置', 'Settings'],
     ['暂停监控', 'Pause monitoring'],
+    ['恢复监控', 'Resume monitoring'],
     ['正在初始化', 'Initializing'],
     ['立即刷新', 'Refresh now'],
     ['设置与服务器', 'Settings and servers'],
@@ -570,7 +571,7 @@
     [/^第 ([\d,.]+) 台服务器：(.+)$/, 'Server $1: $2'],
     [/^已解析 ([\d,.]+) 台服务器候选(.+)$/, 'Parsed $1 server candidates$2'],
     [/^总量 ([\d,.]+) GiB$/, '$1 GiB total'],
-    [/^([\d,.]+)\/([\d,.]+) 台监控就绪 · ([\d,.]+) 块 GPU$/, '$1/$2 servers ready · $3 GPUs'],
+    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 块 GPU$/, '$1/$2 servers ready · $3 GPUs'],
     [/^GPU 实时显存 · 刚刚更新$/, 'Live GPU memory · updated just now'],
     [/^([\d,.]+) 个逻辑核心$/, '$1 logical cores'],
     [/^([\d,.]+) 个可见进程$/, '$1 visible processes'],
@@ -624,6 +625,9 @@
     [/^核心：逻辑 ([\d,.]+)（物理 ([\d,.]+)；逻辑含超线程）。$/, 'Cores: logical $1 (physical $2; SMT/HT included in logical).'],
     [/^时钟：当前约 ([\d,.]+) MHz。$/, 'Clock ~$1 MHz.'],
     [/^([\d,.]+)--([\d,.]+) \/ ([\d,.]+) 台$/, '$1--$2 / $3 servers'],
+    [/^([\d,.]+)[\u2013-]{1,2}([\d,.]+) \/ ([\d,.]+) 台$/, '$1--$2 / $3 servers'],
+    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 块 GPU$/, '$1/$2 servers ready · $3 GPUs'],
+    [/^状态更新于 (.+?) [·・] 每 ([\d,.]+) 秒$/, 'Status updated at $1 · every $2 s'],
   ];
   const ATTRIBUTES = ['aria-label', 'title', 'placeholder'];
   const textRecords = new WeakMap();
