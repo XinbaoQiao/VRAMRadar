@@ -28,6 +28,43 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("document.documentElement.lang = language", self.localization)
         self.assertIn("english_interface_has_no_untranslated_chinese", (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"))
 
+    def test_ui_zoom_pin_pause_and_command_collapse_contracts(self):
+        self.assertIn("function applyUiZoom", self.javascript)
+        self.assertIn("function nudgeUiZoom", self.javascript)
+        self.assertIn("vram-radar.ui-zoom", self.javascript)
+        self.assertIn("nudgeUiZoom(UI_ZOOM_STEP)", self.javascript)
+        self.assertIn("applyUiZoom(1, {announce: true})", self.javascript)
+        self.assertIn("event.ctrlKey || event.metaKey", self.javascript)
+        self.assertIn("const UI_ZOOM_MIN = 0.5;", self.javascript)
+        self.assertIn("const UI_ZOOM_MAX = 1.5;", self.javascript)
+        self.assertNotIn("const UI_ZOOM_MIN = 0.75;", self.javascript)
+        self.assertNotIn("const UI_ZOOM_MAX = 1.35;", self.javascript)
+        self.assertIn("layoutPxFromViewportRect", self.javascript)
+        self.assertIn(".server-status-label", self.styles)
+        self.assertNotIn(".server-status-label { display: none; }", self.styles)
+        self.assertIn("--ui-zoom", self.styles)
+        self.assertIn("html { zoom: var(--ui-zoom, 1); }", self.styles)
+        self.assertIn("function orderedServersForDisplay", self.javascript)
+        self.assertIn("function serverDisplayRank", self.javascript)
+        self.assertIn("function serverIsPaused", self.javascript)
+        self.assertIn("pinnedServerIds", self.javascript)
+        self.assertIn("pin-server", self.javascript)
+        self.assertIn("async function setPinnedServer", self.javascript)
+        self.assertIn("orderedServersForDisplay(snapshot.servers)", self.javascript)
+        self.assertIn(".pin-server.active", self.styles)
+        self.assertIn(".server-card.is-paused", self.styles)
+        # Pause already excludes VRAM via connection.state === 'disabled' (not online).
+        self.assertIn("toggle-server-monitoring", self.javascript)
+        self.assertIn("api.set_server_enabled", self.javascript)
+        enabled = self.javascript[
+            self.javascript.index("async function setServerEnabled"):
+            self.javascript.index("async function openServerTerminal")
+        ]
+        self.assertIn("scrollServerIntoVisualCenter(serverId)", enabled)
+        self.assertIn("if (enabled)", enabled)
+
+
+
     def test_per_gpu_favorites_are_wired_in_live_table_and_navigator_filter(self):
         self.assertIn("function renderFavoriteGpuButton", self.javascript)
         self.assertIn("api.set_favorite_gpu", self.javascript)
@@ -67,6 +104,55 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("restoreServerLeavePosition(serverId)", self.javascript)
         self.assertIn("MAX_SERVER_LEAVE_MEMORY", self.javascript)
         self.assertNotIn("card.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
+
+    def test_navigator_server_jump_survives_card_replace_race(self):
+        """Sidebar server clicks must still scroll when leave-restore rAF sees a replaced card."""
+        self.assertIn("function serverCardOutsideViewport", self.javascript)
+        self.assertIn("function restoreRememberedServerModule", self.javascript)
+        self.assertIn("function scrollServerIntoVisualCenter", self.javascript)
+        restore = self.javascript[
+            self.javascript.index("function restoreServerLeavePosition"):
+            self.javascript.index("function scrollServerCardUnderTitlebar")
+        ]
+        self.assertIn("restoreRememberedServerModule(serverId, moduleKey)", restore)
+        self.assertIn("requestAnimationFrame", restore)
+        # Must not silently abort when the remembered cluster node was replaced.
+        self.assertNotIn("if (!cluster.isConnected || !cluster.open) return;", restore)
+        # Leave-restore / race fallbacks must center, not tuck under titlebar.
+        self.assertIn("scrollServerIntoVisualCenter(serverId)", restore)
+        navigate = self.javascript[
+            self.javascript.index("function navigateToServer"):
+            self.javascript.index("function navigateRelativeServer")
+        ]
+        self.assertIn("serverNavigationCardsById.get(serverId)", navigate)
+        self.assertIn("serverCardOutsideViewport(serverId)", navigate)
+        self.assertIn("scrollServerIntoVisualCenter(serverId)", navigate)
+        self.assertIn("finishSidebarJump", navigate)
+        # Always center after leave-restore — not only when fully outside viewport.
+        self.assertIn("requestAnimationFrame(finishSidebarJump)", navigate)
+
+    def test_sidebar_navigate_centers_server_in_viewport(self):
+        """Sidebar jump must land near visual center under sticky titlebar, not nearest-edge."""
+        self.assertIn("function scrollServerIntoVisualCenter", self.javascript)
+        center = self.javascript[
+            self.javascript.index("function scrollServerIntoVisualCenter"):
+            self.javascript.index("function scrollServerKeepingGpuVisible")
+        ]
+        self.assertIn("availableHeight * 0.32", center)
+        self.assertIn("cardPrimaryGpuBand(card)", center)
+        self.assertIn("window.scrollBy", center)
+        # GPU-first path centers first, then nudges only if band is fully off-screen.
+        keeping = self.javascript[
+            self.javascript.index("function scrollServerKeepingGpuVisible"):
+            self.javascript.index("function preserveClusterCollapseAnchor")
+        ]
+        self.assertIn("scrollServerIntoVisualCenter(serverId)", keeping)
+        self.assertNotIn("scrollServerCardUnderTitlebar(serverId)", keeping)
+        # Home button still uses under-titlebar snap.
+        self.assertIn(
+            "scrollServerCardUnderTitlebar(locationHome.dataset.serverId || activeServerId)",
+            self.javascript,
+        )
 
     def test_server_module_collapse_control_uses_collapse_anchor(self):
         self.assertIn("function collapseServerModules", self.javascript)
@@ -239,13 +325,20 @@ class WebUiContractTests(unittest.TestCase):
         ):
             self.assertIn(text, direct_module)
         self.assertIn("process.command_preview", direct_module)
-        self.assertIn('<details class="process-command-details" open>', direct_module)
+        self.assertIn('<details class="process-command-details"', direct_module)
+        self.assertNotIn('<details class="process-command-details" open>', direct_module)
+        self.assertIn("openProcessCommands", direct_module)
+        self.assertIn("processCommandOpenAttr", direct_module)
         self.assertIn("其他用户命令摘要未启用", direct_module)
         self.assertIn("敏感参数已遮盖", direct_module)
         self.assertIn("其他用户摘要还需在服务器设置中开启", direct_module)
         self.assertIn("process.command_visibility", direct_module)
         self.assertIn("function renderCpuOverview", self.javascript)
         self.assertIn("cpu-load-values", self.javascript)
+        self.assertIn("cpu.usage_percent", self.javascript)
+        self.assertIn("cpu-overview-usage", self.javascript)
+        self.assertIn("cpu.memory_total_gib", self.javascript)
+        self.assertIn("cpu-overview-mem", self.javascript)
         self.assertNotIn("下方“进程 CPU”沿用 nvitop 的口径", self.javascript)
         self.assertNotIn("多线程进程可以超过 100%", self.javascript)
         self.assertIn("function formatCpuPercent", direct_module)
@@ -264,6 +357,8 @@ class WebUiContractTests(unittest.TestCase):
             ".process-command-details",
             ".process-gpu-list",
             ".cpu-overview",
+            ".cpu-overview-usage",
+            ".cpu-overview-mem",
             ".cpu-load-item",
             ".cpu-overview-help",
         ):
@@ -363,7 +458,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("当前：", self.javascript)
         self.assertIn("lastOpenedModuleByServer", self.javascript)
         self.assertIn("preserveClusterCollapseAnchor(summary, anchorTop)", self.javascript)
-        self.assertIn("scrollClusterSummaryUnderSticky(cluster)", self.javascript)
+        self.assertIn("scrollClusterSummaryUnderSticky(details)", self.javascript)
         self.assertNotIn("cluster.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
         self.assertIn(".server-location-strip", self.styles)
         self.assertIn(".server-head.is-stuck .server-location-strip", self.styles)
@@ -372,9 +467,34 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("server-navigator-module-cue", self.javascript)
         self.assertNotIn("backdrop-filter", self.styles[self.styles.index(".server-location-strip"):self.styles.index(".server-location-home") + 120])
         self.assertIn("top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) - 1px)", self.styles)
+        self.assertIn("lastStuckServerHeadHeightByCard", self.javascript)
+        self.assertIn("Measuring the expanded unstuck head inflates --server-head-height", self.javascript)
+        self.assertIn("Only stack a sticky module under a compact stuck server head", self.javascript)
+        self.assertIn(".server-card:not(:has(.server-head.is-stuck)) .cluster-module[open].sticky-active > summary", self.styles)
         self.assertIn("function syncStickyLayoutOffsets", self.javascript)
         self.assertIn("details.cluster-module > summary", self.javascript)
-        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible;", self.styles)
+        # GPU-first for sidebar/server jumps; expand-top lands opened module at usable top.
+        self.assertIn("function cardPrimaryGpuBand", self.javascript)
+        self.assertIn("function gpuBandOccupiesViewport", self.javascript)
+        self.assertIn("function stickyStackLeavesGpuRoom", self.javascript)
+        self.assertIn("function scrollServerKeepingGpuVisible", self.javascript)
+        self.assertIn("stickyStackLeavesGpuRoom(stickLine) && !gpuBandOccupiesViewport(card, stickLine)", self.javascript)
+        self.assertIn("function expandModuleAnchorTop", self.javascript)
+        self.assertIn("Expand-top: land at the start of what opened", self.javascript)
+        self.assertIn("function expandedSectionFirstLine", self.javascript)
+        self.assertIn("function forceScrollExpandedClusterToTop", self.javascript)
+        self.assertIn("forceScrollExpandedClusterToTop(group)", self.javascript)
+        self.assertIn("scrollServerKeepingGpuVisible(serverId)", self.javascript)
+        self.assertIn("Sidebar/server jumps stay GPU-first via scrollServerIntoVisualCenter", self.javascript)
+        self.assertIn("Expand-top: land at the start of what opened", self.javascript)
+        self.assertIn("window.setTimeout(callback, 48)", self.javascript)
+        self.assertIn("Job/task-group expand under a server", self.javascript)
+        self.assertIn("tipBits.map(escapeHtml).join('<br>')", self.javascript)
+        self.assertIn("cpu-overview-help-body", self.javascript)
+        self.assertNotIn("cluster.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
+        self.assertIn("scroll-margin-top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) + 12px)", self.styles)
+        self.assertIn(".server-surface > .table-wrap", self.styles)
+        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: visible;", self.styles)
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
@@ -1433,7 +1553,8 @@ class WebUiContractTests(unittest.TestCase):
             ".connection-test-result",
         ):
             self.assertIn(selector, self.styles)
-        self.assertIn(".server-status-label { display: none; }", self.styles)
+        self.assertIn(".server-status-label", self.styles)
+        self.assertNotIn(".server-status-label { display: none; }", self.styles)
         self.assertIn(".server-quick-actions .open-terminal { display: none; }", self.styles)
 
     def test_ssh_copy_uses_the_backend_canonical_copy_payload(self):

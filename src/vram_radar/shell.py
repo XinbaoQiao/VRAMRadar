@@ -37,6 +37,7 @@ from .connectors import (
 from .models import (
     ConfigError,
     MAX_FAVORITE_SERVER_IDS,
+    MAX_PINNED_SERVER_IDS,
     MAX_FAVORITE_GPUS,
     normalize_favorite_gpu,
     MAX_IGNORED_SSH_ALIASES,
@@ -2380,6 +2381,37 @@ class AppApi:
             expected_profile=base_profile,
         )
 
+    def set_pinned_server(self, server_id: str, pinned: bool) -> dict[str, Any]:
+        try:
+            normalized_id = require_id(
+                server_id.strip() if isinstance(server_id, str) else server_id,
+                "pinned server id",
+            )
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_server_id"}
+        if not isinstance(pinned, bool):
+            return {
+                "ok": False,
+                "error": "置顶状态必须是布尔值",
+                "code": "invalid_pinned_state",
+            }
+        base_profile = self.profile
+        pins = list(base_profile.pinned_server_ids)
+        if pinned and normalized_id not in pins:
+            if len(pins) >= MAX_PINNED_SERVER_IDS:
+                return {
+                    "ok": False,
+                    "error": "置顶服务器数量已达到上限",
+                    "code": "pinned_limit_reached",
+                }
+            pins.append(normalized_id)
+        elif not pinned:
+            pins = [candidate for candidate in pins if candidate != normalized_id]
+        return self._persist_local_preferences(
+            replace(base_profile, pinned_server_ids=tuple(pins)),
+            expected_profile=base_profile,
+        )
+
     def set_favorite_gpu(self, server_id: str, gpu_index: Any, favorite: bool) -> dict[str, Any]:
         try:
             entry = normalize_favorite_gpu(
@@ -3320,6 +3352,7 @@ class AppApi:
                 "close_behavior",
                 "ui_language",
                 "favorite_server_ids",
+                "pinned_server_ids",
                 "favorite_gpus",
                 "favorite_alert_enabled",
                 "favorite_alert_min_memory_gib",
@@ -3399,6 +3432,13 @@ class AppApi:
                         favorite_id,
                     )
                     for favorite_id in candidate.get("favorite_server_ids", [])
+                ]
+                candidate["pinned_server_ids"] = [
+                    next(
+                        (new_id for new_id, old_id in renames.items() if old_id == pinned_id),
+                        pinned_id,
+                    )
+                    for pinned_id in candidate.get("pinned_server_ids", [])
                 ]
                 remapped_gpus = []
                 for entry in candidate.get("favorite_gpus", []) or []:

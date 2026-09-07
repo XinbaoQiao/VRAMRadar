@@ -13,6 +13,7 @@ SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
 SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
 SUPPORTED_SAVED_VIEW_FILTERS = frozenset({"all", "available", "tasks", "issues"})
 MAX_FAVORITE_SERVER_IDS = 512
+MAX_PINNED_SERVER_IDS = 512
 MAX_FAVORITE_GPUS = 512
 MAX_IGNORED_SSH_ALIASES = 4096
 MAX_SAVED_VIEWS = 32
@@ -473,6 +474,7 @@ class Profile:
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
     favorite_server_ids: tuple[str, ...] = ()
+    pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
     favorite_alert_enabled: bool = True
     favorite_alert_min_memory_gib: float = 0.0
@@ -550,6 +552,18 @@ class Profile:
         )
         if len(favorites) != len(set(favorites)):
             raise ConfigError("profile favorite_server_ids must be unique")
+        pinned_server_ids = raw.get("pinned_server_ids", [])
+        if not isinstance(pinned_server_ids, (list, tuple)):
+            raise ConfigError("profile pinned_server_ids must be an array")
+        if len(pinned_server_ids) > MAX_PINNED_SERVER_IDS:
+            raise ConfigError(
+                f"profile pinned_server_ids cannot contain more than {MAX_PINNED_SERVER_IDS} entries"
+            )
+        pins = tuple(
+            require_id(server_id, "pinned server id") for server_id in pinned_server_ids
+        )
+        if len(pins) != len(set(pins)):
+            raise ConfigError("profile pinned_server_ids must be unique")
         favorite_gpus_raw = raw.get("favorite_gpus", [])
         if not isinstance(favorite_gpus_raw, (list, tuple)):
             raise ConfigError("profile favorite_gpus must be an array")
@@ -631,6 +645,7 @@ class Profile:
             close_behavior=close_behavior.strip().lower(),
             ui_language=ui_language.strip(),
             favorite_server_ids=favorites,
+            pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
             favorite_alert_enabled=favorite_alert_enabled,
             favorite_alert_min_memory_gib=float(favorite_alert_min_memory),
@@ -652,6 +667,7 @@ class Profile:
             "close_behavior": self.close_behavior,
             "ui_language": self.ui_language,
             "favorite_server_ids": list(self.favorite_server_ids),
+            "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],
             "favorite_alert_enabled": self.favorite_alert_enabled,
             "favorite_alert_min_memory_gib": self.favorite_alert_min_memory_gib,

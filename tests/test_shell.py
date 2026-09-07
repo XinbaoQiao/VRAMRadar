@@ -1533,6 +1533,20 @@ class ShellApiTests(unittest.TestCase):
             self.assertTrue(removed["ok"])
             self.assertEqual(store.load("local").favorite_gpus, ())
 
+    def test_pinned_server_round_trips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            service = Mock()
+            api = AppApi(Profile.empty("local"), store, paths, service)
+
+            added = api.set_pinned_server("lab-a", True)
+            self.assertTrue(added["ok"])
+            self.assertEqual(added["profile"]["pinned_server_ids"], ["lab-a"])
+            removed = api.set_pinned_server("lab-a", False)
+            self.assertTrue(removed["ok"])
+            self.assertEqual(store.load("local").pinned_server_ids, ())
+
     def test_favorite_server_can_outlive_a_temporarily_missing_server(self):
 
         with tempfile.TemporaryDirectory() as temporary:

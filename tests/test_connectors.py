@@ -110,6 +110,9 @@ class ConnectorTests(unittest.TestCase):
         home_directory: str = "/srv/vram-radar-account",
         cpu_count: int | None = None,
         cpu_load: str | None = None,
+        cpu_usage: str | None = None,
+        mem_total_kib: int | None = None,
+        mem_available_kib: int | None = None,
     ) -> str:
         encode = lambda value: value.encode("utf-8").hex()
         lines = [
@@ -120,6 +123,9 @@ class ConnectorTests(unittest.TestCase):
             f"HOME_HEX={encode(home_directory)}",
             *([f"CPU_COUNT={cpu_count}"] if cpu_count is not None else []),
             *([f"CPU_LOAD_HEX={encode(cpu_load)}"] if cpu_load is not None else []),
+            *([f"CPU_USAGE={cpu_usage}"] if cpu_usage is not None else []),
+            *([f"MEM_TOTAL_KIB={mem_total_kib}"] if mem_total_kib is not None else []),
+            *([f"MEM_AVAILABLE_KIB={mem_available_kib}"] if mem_available_kib is not None else []),
             f"GPU_HEX={encode(gpu_rows)}",
             f"PROCESS_A_SUPPORTED={int(process_supported)}",
             f"PROCESS_A_HEX={encode(process_a)}",
@@ -160,6 +166,9 @@ class ConnectorTests(unittest.TestCase):
             process_b=process_b,
             cpu_count=32,
             cpu_load="0.42 0.37 0.31",
+            cpu_usage="23.5",
+            mem_total_kib=263995392,
+            mem_available_kib=180355072,
             metadata={
                 "1234": (
                     "1234 1001 alice 3661 12.5 /opt/python train.py --run-name exp-a "
@@ -189,6 +198,10 @@ class ConnectorTests(unittest.TestCase):
         self.assertTrue(snapshot["cpu"]["supported"])
         self.assertEqual(snapshot["cpu"]["logical_cores"], 32)
         self.assertEqual(snapshot["cpu"]["load_average"], [0.42, 0.37, 0.31])
+        self.assertEqual(snapshot["cpu"]["usage_percent"], 23.5)
+        self.assertEqual(snapshot["cpu"]["memory_total_gib"], 251.77)
+        self.assertEqual(snapshot["cpu"]["memory_available_gib"], 172.0)
+        self.assertEqual(snapshot["cpu"]["memory_used_gib"], 79.77)
         self.assertEqual(snapshot["processes"]["dropped_transient_count"], 1)
         self.assertEqual(snapshot["processes"]["deferred_new_count"], 1)
         serialized = json.dumps(snapshot, ensure_ascii=False)
@@ -200,6 +213,11 @@ class ConnectorTests(unittest.TestCase):
         self.assertIn("ps -ww", script)
         self.assertIn("getconf _NPROCESSORS_ONLN", script)
         self.assertIn("/proc/loadavg", script)
+        self.assertIn("/proc/stat", script)
+        self.assertIn("CPU_USAGE=", script)
+        self.assertIn("/proc/meminfo", script)
+        self.assertIn("MEM_TOTAL_KIB=", script)
+        self.assertIn("MEM_AVAILABLE_KIB=", script)
         self.assertIn("-o pcpu=", script)
         self.assertIn('owner[pid] == current_uid ? 0', script)
         self.assertIn("sort -k1,1n -k2,2n", script)

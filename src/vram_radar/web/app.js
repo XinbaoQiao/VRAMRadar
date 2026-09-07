@@ -96,6 +96,8 @@ let refreshTimer = null;
 let refreshPollTimer = null;
 let refreshPollGeneration = 0;
 let refreshDeferredWhileHidden = false;
+let viewportScrollGeneration = 0;
+let suppressExpandFollowScroll = 0;
 let toastTimer = null;
 let updateCheckTimer = null;
 let updateCheckInFlight = false;
@@ -130,6 +132,7 @@ let lastStuckServerId = '';
 let lastStickyActiveModule = null;
 let lastLocationStripKey = '';
 const lastServerHeadHeightByCard = new WeakMap();
+const lastStuckServerHeadHeightByCard = new WeakMap();
 let serverNavigationCards = [];
 let serverNavigationCardsById = new Map();
 let serverNavigatorQuery = '';
@@ -142,8 +145,16 @@ let serverNavigatorSide = 'right';
 let serverNavigatorDragState = null;
 let suppressServerNavigatorDragClick = false;
 let favoriteServerIds = new Set();
+let pinnedServerIds = new Set();
 let favoriteGpuKeys = new Set();
 let favoriteGpuServerIds = new Set();
+const openProcessCommands = new Set();
+const UI_ZOOM_STORAGE_KEY = 'vram-radar.ui-zoom';
+const PINNED_STORAGE_KEY = 'vram-radar.pinned-server-ids';
+const UI_ZOOM_MIN = 0.5;
+const UI_ZOOM_MAX = 1.5;
+const UI_ZOOM_STEP = 0.05;
+let uiZoom = 1;
 const favoriteGpuOnlyViewByServer = new Map();
 let taskWatchesExpanded = false;
 let monitoringPaused = false;
@@ -218,6 +229,7 @@ const ICONS = Object.freeze({
   link: '<path d="M9.5 14.5 14.5 9.5"></path><path d="M7.5 16.5H6a3.5 3.5 0 0 1 0-7h3"></path><path d="M16.5 7.5H18a3.5 3.5 0 0 1 0 7h-3"></path>',
   memory: '<rect x="5" y="7" width="14" height="10" rx="2"></rect><path d="M9 3v4M15 3v4M9 17v4M15 17v4M3 10h2M3 14h2M19 10h2M19 14h2"></path>',
   pause: '<circle cx="12" cy="12" r="9"></circle><path d="M10 9v6M14 9v6"></path>',
+  pin: '<path d="M12 21v-7"></path><path d="M8.5 4.5h7l-1.2 5.2 2.2 2.3v1.5H7.5v-1.5l2.2-2.3z"></path>',
   play: '<circle cx="12" cy="12" r="9"></circle><path d="m10.5 9 4.5 3-4.5 3z"></path>',
   star: '<path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6-5.4-2.8-5.4 2.8 1-6-4.4-4.3 6.1-.9z"></path>',
   terminal: '<rect x="3.5" y="5" width="17" height="14" rx="2"></rect><path d="m7 9 3 3-3 3M12.5 15h4"></path>',
@@ -243,9 +255,56 @@ const taskStateIcon = state => ({
   COMPLETED: 'check', FAILED: 'alert', CANCELLED: 'cancelled', TIMEOUT: 'clock', OUT_OF_MEMORY: 'memory'
 })[state] || 'clock';
 
+function clampUiZoom(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return 1;
+  return Math.min(UI_ZOOM_MAX, Math.max(UI_ZOOM_MIN, Math.round(numberValue * 100) / 100));
+}
+
+function loadUiZoomPreference() {
+  try {
+    const stored = localStorage.getItem(UI_ZOOM_STORAGE_KEY);
+    if (stored == null || stored === '') return 1;
+    return clampUiZoom(stored);
+  } catch (_error) {
+    return 1;
+  }
+}
+
+function persistUiZoomPreference(value) {
+  try { localStorage.setItem(UI_ZOOM_STORAGE_KEY, String(value)); } catch (_error) {}
+}
+
+function applyUiZoom(value, {persist = true, announce = false} = {}) {
+  uiZoom = clampUiZoom(value);
+  document.documentElement.style.setProperty('--ui-zoom', String(uiZoom));
+  if (persist) persistUiZoomPreference(uiZoom);
+  if (announce) showToast(`界面缩放 ${Math.round(uiZoom * 100)}%`);
+  if (typeof syncStickyLayoutOffsets === 'function') syncStickyLayoutOffsets();
+  scheduleStuckChromeUpdate();
+  return uiZoom;
+}
+
+function nudgeUiZoom(delta) {
+  return applyUiZoom(uiZoom + delta, {announce: true});
+}
+
+function loadPinnedFromStorage() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PINNED_STORAGE_KEY) || '[]');
+    return new Set(Array.isArray(raw) ? raw.map(String).filter(Boolean) : []);
+  } catch (_error) {
+    return new Set();
+  }
+}
+
+function persistPinnedToStorage(ids) {
+  try { localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify([...ids])); } catch (_error) {}
+}
+
 function formatSlurmDuration(value) {
   const raw = String(value || '').trim();
-  if (!raw || raw === 'N/A' || raw === 'Unknown' || raw === 'NOT_SET') return '—';
+  if (!raw || raw === 'N/A' || raw === 'Unknown' || raw === 'NOT_SET') return '--';
   if (raw === 'UNLIMITED') return '不限时';
   if (raw === 'Partition_Limit') return '分区默认';
   const [dayPart, timePart] = raw.includes('-') ? raw.split('-', 2) : [null, raw];
@@ -264,7 +323,7 @@ function formatSlurmDuration(value) {
 }
 
 function formatTaskTimestamp(value) {
-  if (!value || value === 'Unknown' || value === 'N/A') return '—';
+  if (!value || value === 'Unknown' || value === 'N/A') return '--';
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return value;
   return new Intl.DateTimeFormat(activeLocale(), {
@@ -312,25 +371,78 @@ function formatRetry(value) {
   return seconds > 0 ? `约 ${seconds} 秒后自动重试` : '即将自动重试';
 }
 
+function shadeHex(hex, shade = 0) {
+  const raw = String(hex || '').replace('#', '');
+  if (raw.length !== 6) return hex;
+  let r = parseInt(raw.slice(0, 2), 16);
+  let g = parseInt(raw.slice(2, 4), 16);
+  let b = parseInt(raw.slice(4, 6), 16);
+  if (shade) {
+    const lift = shade > 0 ? shade : shade * 0.55;
+    r = Math.max(0, Math.min(255, Math.round(r + (shade > 0 ? (255 - r) : r) * lift)));
+    g = Math.max(0, Math.min(255, Math.round(g + (shade > 0 ? (255 - g) : g) * lift)));
+    b = Math.max(0, Math.min(255, Math.round(b + (shade > 0 ? (255 - b) : b) * lift)));
+  }
+  return `#${[r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function statusTonePalette(tone) {
+  // Same-hue micro-gradients per status (not a positional green->red spectrum).
+  const bases = {
+    healthy: '#48e0ae',
+    normal: '#2aad84',
+    warning: '#e8ad54',
+    critical: '#ef7f87',
+    unknown: '#2a3531',
+    idle: '#2a3531'
+  };
+  const base = bases[tone] || bases.unknown;
+  return {
+    mid: base,
+    top: shadeHex(base, 0.28),
+    bottom: shadeHex(base, -0.35),
+    stroke: shadeHex(base, -0.18),
+    deep: shadeHex(base, -0.12),
+    lite: shadeHex(base, 0.22)
+  };
+}
+
 function capacityTape(summary) {
   const free = Math.max(0, Number(summary.free_vram_gib) || 0);
   const total = Number(summary.total_vram_gib);
   const totalKnown = Number.isFinite(total) && total > 0;
   const percent = totalKnown ? Math.max(0, Math.min(100, Math.round(free / total * 100))) : null;
-  const tone = percent == null ? 'unknown' : percent <= 20 ? 'critical' : percent <= 50 ? 'warning' : 'healthy';
+  const tone = percent == null ? 'unknown' : percent <= 15 ? 'critical' : percent <= 30 ? 'warning' : 'healthy';
   const toneLabel = tone === 'critical' ? '紧张' : tone === 'warning' ? '偏低' : tone === 'healthy' ? '充足' : '未知';
   const cellCount = 18;
   const activeCount = percent == null ? 0 : Math.min(cellCount, Math.max(percent > 0 ? 1 : 0, Math.round(percent / 100 * cellCount)));
+  // Per-state coloring (healthy teal / warning amber / critical red / idle muted).
+  // Lit cells share one same-hue vertical micro-gradient; no positional green->red spectrum.
+  // Unique gradient ids per tape instance. All fills are inline attrs — CSS fill:url(#...) from
+  // an external stylesheet resolves against the CSS URL and breaks SVG paint servers.
+  const tapeUid = `tape-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const idleGradId = `${tapeUid}-idle`;
+  const liveGradId = `${tapeUid}-live`;
+  const palette = statusTonePalette(tone === 'unknown' ? 'healthy' : tone);
+  const cellGrads = [
+    `<linearGradient id="${idleGradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#354540"/><stop offset="100%" stop-color="#1c2622"/></linearGradient>`,
+    `<linearGradient id="${liveGradId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${palette.top}"/><stop offset="48%" stop-color="${palette.mid}"/><stop offset="100%" stop-color="${palette.bottom}"/></linearGradient>`
+  ];
   const cells = Array.from({length: cellCount}, (_, index) => {
     const x = 17 + index * 16;
-    return `<rect class="tape-cell${index < activeCount ? ' available' : ''}" x="${x}" y="22" width="10" height="30" rx="1"></rect>`;
+    if (index >= activeCount) {
+      // Inline style fill beats inherited CSS fill:none on .capacity-tape; solid fallback if paint server misses.
+      return `<rect class="tape-cell" x="${x}" y="22" width="10" height="30" rx="1" style="fill:url(#${idleGradId}) #2a3531;stroke:#44534e"></rect>`;
+    }
+    // Unique per-tape gradient + inline style fill with solid same-hue fallback (keeps cells visible in WebView2).
+    return `<rect class="tape-cell available" x="${x}" y="22" width="10" height="30" rx="1" style="fill:url(#${liveGradId}) ${palette.mid};stroke:${palette.stroke}"></rect>`;
   }).join('');
-  const percentLabel = percent == null ? '—' : `${percent}<small>%</small>`;
+  const percentLabel = percent == null ? '--' : `${percent}<small>%</small>`;
   const totalLabel = totalKnown ? `总量 ${number(total)} GiB` : '总量待补充';
   const accessible = totalKnown
     ? `在线显存池，可用 ${number(free)} GiB，共 ${number(total)} GiB，可用率 ${percent}%，状态${toneLabel}`
     : `在线显存池，可用 ${number(free)} GiB，总量暂不可用`;
-  return `<div class="capacity-visual ${tone}" role="img" aria-label="${escapeHtml(accessible)}"><div class="capacity-visual-head"><span>可用比例</span><strong>${percentLabel}</strong></div><svg class="capacity-tape" viewBox="0 0 320 72" aria-hidden="true" focusable="false"><rect class="tape-frame" x="8" y="14" width="304" height="46" rx="4"></rect>${cells}<path class="tape-baseline" d="M8 66h304"></path><path class="tape-ticks" d="M8 66v4M104 66v4M200 66v4M312 66v4"></path></svg><div class="capacity-scale"><span>0 GiB</span><span>${escapeHtml(totalLabel)}</span></div></div>`;
+  return `<div class="capacity-visual ${tone}" role="img" aria-label="${escapeHtml(accessible)}"><div class="capacity-visual-head"><span>可用比例</span><strong>${percentLabel}</strong></div><svg class="capacity-tape" viewBox="0 0 320 72" aria-hidden="true" focusable="false"><defs>${cellGrads.join('')}</defs><rect class="tape-frame" x="8" y="14" width="304" height="46" rx="4"></rect>${cells}<path class="tape-baseline" d="M8 66h304"></path><path class="tape-ticks" d="M8 66v4M104 66v4M200 66v4M312 66v4"></path></svg><div class="capacity-scale"><span>0 GiB</span><span>${escapeHtml(totalLabel)}</span></div></div>`;
 }
 
 function renderSummary(summary) {
@@ -343,32 +455,87 @@ function setRefreshClock(text, active = false) {
 
 function memoryTrack(used, total, label = '显存占用率', valueLabel = '已使用') {
   const percent = total ? Math.min(100, Math.max(0, Math.round(used / total * 100))) : 0;
-  const tone = percent >= 90 ? 'critical' : percent >= 75 ? 'warning' : 'normal';
-  return `<progress class="memory-track ${tone}" role="progressbar" max="100" value="${percent}" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${escapeHtml(valueLabel)} ${percent}%">${percent}%</progress>`;
+  const tone = percent >= 85 ? 'critical' : percent >= 70 ? 'warning' : 'normal';
+  // GPU bars: same-hue status micro-gradient (normal green / warning amber / critical red).
+  const palette = statusTonePalette(tone);
+  return `<progress class="memory-track ${tone}" style="--memory-fill:linear-gradient(90deg, ${palette.deep} 0%, ${palette.mid} 55%, ${palette.lite} 100%)" role="progressbar" max="100" value="${percent}" aria-label="${escapeHtml(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-valuetext="${escapeHtml(valueLabel)} ${percent}%">${percent}%</progress>`;
 }
 
 function renderCpuOverview(server) {
   const cpu = server.cpu;
   if (!cpu || typeof cpu !== 'object') return '';
+  const english = window.VRAMRadarI18n?.language === 'en';
   const logicalCores = Number(cpu.logical_cores);
   const hasCores = Number.isInteger(logicalCores) && logicalCores > 0;
-  const loadAverage = Array.isArray(cpu.load_average)
-    ? cpu.load_average.slice(0, 3).map(Number)
-    : [];
-  const hasLoadAverage = loadAverage.length === 3
-    && loadAverage.every(value => Number.isFinite(value) && value >= 0);
-  const coreLabel = hasCores
-    ? `${number(logicalCores)} ${localizedText('个逻辑核心')}`
-    : localizedText('逻辑核心未知');
-  const periods = ['1 分钟', '5 分钟', '15 分钟'];
+  const physicalCores = Number(cpu.physical_cores);
+  const hasPhysical = Number.isInteger(physicalCores) && physicalCores > 0;
+  const usagePercent = Number(cpu.usage_percent);
+  const hasUsage = Number.isFinite(usagePercent) && usagePercent >= 0 && usagePercent <= 100;
+  const mhz = Number(cpu.cpu_mhz);
+  const hasMhz = Number.isFinite(mhz) && mhz > 0;
+  const modelName = String(cpu.model_name || '').trim();
+  const loadAverage = Array.isArray(cpu.load_average) ? cpu.load_average.slice(0, 3).map(Number) : [];
+  const hasLoadAverage = loadAverage.length === 3 && loadAverage.every(value => Number.isFinite(value) && value >= 0);
+  const periods = ['/1min', '/5min', '/15min'];
+  let coreLabel;
+  if (hasCores && hasPhysical) {
+    coreLabel = english
+      ? `${number(physicalCores)}p/${number(logicalCores)}c`
+      : `${number(physicalCores)}\u7269\u7406/${number(logicalCores)}\u903b\u8f91`;
+  } else if (hasCores) {
+    coreLabel = english ? `${number(logicalCores)}c` : `${number(logicalCores)}\u6838`;
+  } else {
+    coreLabel = english ? 'cores?' : '\u6838?';
+  }
+  const mhzMarkup = hasMhz
+    ? `<span class="cpu-overview-mhz"><strong>${escapeHtml(mhz >= 1000 ? `${number(Math.round(mhz / 100) / 10)}GHz` : `${number(Math.round(mhz))}MHz`)}</strong></span>`
+    : '';
+  const loadKicker = english ? 'load' : '\u8d1f\u8f7d';
+  const loadSep = '<span class="cpu-sep" aria-hidden="true">\u00b7</span>';
   const loadMarkup = hasLoadAverage
-    ? loadAverage.map((value, index) => `<span class="cpu-load-item"><small>${escapeHtml(localizedText(periods[index]))}</small><strong>${escapeHtml(number(value))}</strong></span>`).join('')
-    : `<div class="cpu-load-unavailable">${escapeHtml(localizedText('不可用'))}</div>`;
-  const english = window.VRAMRadarI18n?.language === 'en';
-  const explanation = english
-    ? 'The 1, 5, and 15 minute values are the average number of tasks running, waiting for CPU, or waiting in uninterruptible I/O.'
-    : '1、5、15 分钟数值表示正在运行、等待 CPU 或处于不可中断 I/O 等待中的平均任务数。';
-  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('主机 CPU'))}"><div class="cpu-overview-heading"><span class="cpu-overview-kicker">CPU</span><strong>${escapeHtml(coreLabel)}</strong></div><div class="cpu-overview-load"><span class="cpu-overview-load-label">${escapeHtml(localizedText('运行 / 等待任务数'))}</span><div class="cpu-load-values">${loadMarkup}</div><details class="cpu-overview-help"><summary>${escapeHtml(localizedText('说明'))}</summary><p>${escapeHtml(explanation)}</p></details></div></section>`;
+    ? `<span class="cpu-load-values"><span class="cpu-load-kicker">${escapeHtml(loadKicker)}</span>${loadAverage.map((value, index) => `<span class="cpu-load-item"><strong>${escapeHtml(number(value))}</strong><small>${escapeHtml(periods[index])}</small></span>`).join(loadSep)}</span>`
+    : `<span class="cpu-load-values"><div class="cpu-load-unavailable">${escapeHtml(localizedText('\u4e0d\u53ef\u7528'))}</div></span>`;
+  const memoryTotal = Number(cpu.memory_total_gib);
+  const memoryUsed = Number(cpu.memory_used_gib);
+  const memoryAvailable = Number(cpu.memory_available_gib);
+  const hasMemory = Number.isFinite(memoryTotal) && memoryTotal > 0 && (Number.isFinite(memoryUsed) || Number.isFinite(memoryAvailable));
+  const usedGib = Number.isFinite(memoryUsed) ? memoryUsed : (Number.isFinite(memoryAvailable) ? Math.max(0, memoryTotal - memoryAvailable) : null);
+  const memoryPercent = hasMemory && usedGib != null ? Math.min(100, Math.max(0, Math.round(usedGib / memoryTotal * 100))) : null;
+  const memoryMarkup = hasMemory && usedGib != null
+    ? `<span class="cpu-overview-mem"><small>${escapeHtml(english ? 'mem' : '\u5185\u5b58')}</small><strong>${escapeHtml(`${number(usedGib)}/${number(memoryTotal)} GiB`)}</strong>${memoryPercent == null ? '' : `<small>${escapeHtml(`${memoryPercent}%`)}</small>`}</span>`
+    : '';
+  const usageMarkup = hasUsage ? `<strong class="cpu-overview-usage">${escapeHtml(formatCpuPercent(cpu.usage_percent))}</strong>` : '';
+  const tipBits = [];
+  if (modelName) tipBits.push(english ? `Model: ${modelName}` : `\u578b\u53f7\uff1a${modelName}`);
+  tipBits.push(english
+    ? 'Usage %: recent host-wide CPU busy share (not per-process).'
+    : '\u4f7f\u7528\u7387\uff1a\u4e3b\u673a\u8fd1\u671f\u6574\u4f53 CPU \u5fd9\u788c\u5360\u6bd4\uff08\u4e0d\u662f\u5355\u8fdb\u7a0b\uff09\u3002');
+  tipBits.push(english
+    ? 'Load 1/5/15: average runnable or uninterruptible tasks \u2014 compare to logical cores (sustained load above cores \u2248 saturation).'
+    : '\u8d1f\u8f7d 1/5/15\uff1a\u53ef\u8fd0\u884c\u6216\u4e0d\u53ef\u4e2d\u65ad\u7b49\u5f85\u4efb\u52a1\u5e73\u5747\u6570\u2014\u2014\u4e0e\u903b\u8f91\u6838\u5bf9\u6bd4\uff08\u6301\u7eed\u9ad8\u4e8e\u903b\u8f91\u6838\u2248\u504f\u6ee1\uff09\u3002');
+  if (hasCores) {
+    tipBits.push(english
+      ? `Cores: logical ${number(logicalCores)}${hasPhysical ? ` (physical ${number(physicalCores)}; SMT/HT included in logical)` : ' (SMT/HT included when present)'}.`
+      : `\u6838\u5fc3\uff1a\u903b\u8f91 ${number(logicalCores)}${hasPhysical ? `\uff08\u7269\u7406 ${number(physicalCores)}\uff1b\u903b\u8f91\u542b\u8d85\u7ebf\u7a0b\uff09` : '\uff08\u903b\u8f91\u542b\u8d85\u7ebf\u7a0b\uff09'}\u3002`);
+  }
+  tipBits.push(english
+    ? 'Memory: host RAM; prefers MemAvailable when the kernel exposes it.'
+    : '\u5185\u5b58\uff1a\u4e3b\u673a\u5185\u5b58\uff1b\u5185\u6838\u63d0\u4f9b\u65f6\u4f18\u5148\u4f7f\u7528 MemAvailable\u3002');
+  if (hasMhz) tipBits.push(english ? `Clock ~${number(Math.round(mhz))} MHz.` : `\u65f6\u949f\uff1a\u5f53\u524d\u7ea6 ${number(Math.round(mhz))} MHz\u3002`);
+  const explanation = tipBits.join(' ');
+  const explanationHtml = tipBits.map(escapeHtml).join('<br>');
+  const sep = '<span class="cpu-sep" aria-hidden="true">\u00b7</span>';
+  const parts = [];
+  parts.push('<span class="cpu-overview-kicker">CPU</span>');
+  if (usageMarkup) parts.push(usageMarkup);
+  if (usageMarkup || hasCores) parts.push(sep);
+  parts.push(`<strong class="cpu-overview-cores">${escapeHtml(coreLabel)}</strong>`);
+  if (mhzMarkup) { parts.push(sep); parts.push(mhzMarkup); }
+  if (memoryMarkup) { parts.push(sep); parts.push(memoryMarkup); }
+  parts.push(sep);
+  parts.push(loadMarkup);
+  parts.push(`<details class="cpu-overview-help"><summary title="${escapeHtml(explanation)}">${escapeHtml(localizedText('\u8bf4\u660e'))}</summary><p class="cpu-overview-help-body">${explanationHtml}</p></details>`);
+  return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('\u4e3b\u673a CPU'))}" title="${escapeHtml(explanation)}"><div class="cpu-overview-line">${parts.join('')}</div></section>`;
 }
 
 function favoriteGpuKey(serverId, gpuIndex) {
@@ -429,7 +596,7 @@ function contextCopyButton(value, label) {
 
 function copyableValue(value, label) {
   const text = String(value ?? '').trim();
-  const safeText = escapeHtml(text || '—');
+  const safeText = escapeHtml(text || '--');
   return `<span class="copyable-value"><span title="${safeText}">${safeText}</span>${contextCopyButton(text, label)}</span>`;
 }
 
@@ -551,10 +718,18 @@ function formatCpuPercent(value) {
     : localizedText('不可用');
 }
 
-function renderProcessName(process) {
+function processCommandKey(serverId, process) {
+  return `${serverId || ''}:${process?.pid ?? ''}:${process?.started_at || ''}`;
+}
+
+function processCommandOpenAttr(serverId, process) {
+  return openProcessCommands.has(processCommandKey(serverId, process)) ? ' open' : '';
+}
+
+function renderProcessName(process, serverId = '') {
   const preview = String(process.command_preview || '').trim();
   const command = preview
-    ? `<details class="process-command-details" open><summary>查看命令摘要</summary><code>${escapeHtml(preview)}</code><small>敏感参数已遮盖${process.command_truncated ? ' · 已安全截断' : ''}</small></details>`
+    ? `<details class="process-command-details" data-server-id="${escapeHtml(serverId)}" data-process-pid="${escapeHtml(process.pid)}" data-process-started="${escapeHtml(process.started_at || '')}"${processCommandOpenAttr(serverId, process)}><summary>查看命令摘要</summary><code>${escapeHtml(preview)}</code><small>敏感参数已遮盖${process.command_truncated ? ' · 已安全截断' : ''}</small></details>`
     : process.command_visibility === 'hidden_for_privacy'
     ? '<span class="process-command-missing">其他用户命令摘要未启用</span>'
     : '<span class="process-command-missing">命令详情受服务器权限限制</span>';
@@ -569,7 +744,7 @@ function renderProcessAllocations(process) {
 
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
@@ -723,7 +898,7 @@ function renderLargeClusterNodes(server) {
   else if (state.status === 'loaded') body = renderSchedulerNodeTable(state.nodes, '筛选后的 GPU 节点');
   const start = state.total ? state.offset + 1 : 0;
   const end = Math.min(state.total, state.offset + state.nodes.length);
-  const pager = state.status === 'loaded' ? `<div class="cluster-node-pager"><span>${number(start)}–${number(end)} / ${number(state.total)}</span><button class="button cluster-node-page" type="button" data-server-id="${escapeHtml(server.server_id)}" data-page-offset="${Math.max(0, state.offset - CLUSTER_NODE_PAGE_SIZE)}"${state.offset <= 0 ? ' disabled' : ''}>上一页</button><button class="button cluster-node-page" type="button" data-server-id="${escapeHtml(server.server_id)}" data-page-offset="${state.offset + CLUSTER_NODE_PAGE_SIZE}"${state.offset + state.nodes.length >= state.total ? ' disabled' : ''}>下一页</button></div>` : '';
+  const pager = state.status === 'loaded' ? `<div class="cluster-node-pager"><span>${number(start)}--${number(end)} / ${number(state.total)}</span><button class="button cluster-node-page" type="button" data-server-id="${escapeHtml(server.server_id)}" data-page-offset="${Math.max(0, state.offset - CLUSTER_NODE_PAGE_SIZE)}"${state.offset <= 0 ? ' disabled' : ''}>上一页</button><button class="button cluster-node-page" type="button" data-server-id="${escapeHtml(server.server_id)}" data-page-offset="${state.offset + CLUSTER_NODE_PAGE_SIZE}"${state.offset + state.nodes.length >= state.total ? ' disabled' : ''}>下一页</button></div>` : '';
   return `${controls}${body}${pager}`;
 }
 
@@ -837,7 +1012,7 @@ function renderAccountOverview(server) {
 }
 
 function formatFileSize(value) {
-  if (value == null) return '—';
+  if (value == null) return '--';
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   let size = Math.max(0, Number(value));
   let unit = 0;
@@ -932,7 +1107,7 @@ function renderDirectoryEntries(serverId, state) {
   const renderLevel = parent => sortEntries(byParent.get(parent) || []).map(entry => {
     const absolutePath = String(entry.absolute_path || `${state.root}/${entry.path}`.replace(/\/+/g, '/'));
     const safePath = escapeHtml(absolutePath);
-    const modified = entry.modified_at ? formatTaskTimestamp(entry.modified_at) : '—';
+    const modified = entry.modified_at ? formatTaskTimestamp(entry.modified_at) : '--';
     if (entry.kind === 'directory') {
       const expanded = openDirectoryNodes.has(`${serverId}:${absolutePath}`);
       const children = expanded ? renderLevel(absolutePath) : '';
@@ -979,7 +1154,7 @@ function directoryChildrenBody(serverId, state, absolutePath) {
   const renderLevel = parent => sortEntries(byParent.get(parent) || []).map(child => {
     const childPath = String(child.absolute_path || `${state.root}/${child.path}`.replace(/\/+/g, '/'));
     const safePath = escapeHtml(childPath);
-    const modified = child.modified_at ? formatTaskTimestamp(child.modified_at) : '—';
+    const modified = child.modified_at ? formatTaskTimestamp(child.modified_at) : '--';
     if (child.kind === 'directory') {
       const expanded = openDirectoryNodes.has(`${serverId}:${childPath}`);
       const nested = expanded ? renderLevel(childPath) : '';
@@ -1025,6 +1200,11 @@ function releaseDirectoryNodeChildren(directoryNode) {
   return true;
 }
 
+function layoutPxFromViewportRect(size) {
+  const zoom = Number(uiZoom) > 0 ? Number(uiZoom) : 1;
+  return size / zoom;
+}
+
 function refreshCachedTitlebarHeight() {
   const cssVal = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'));
   if (Number.isFinite(cssVal) && cssVal > 0) {
@@ -1033,7 +1213,7 @@ function refreshCachedTitlebarHeight() {
   }
   const titlebar = document.querySelector('.titlebar');
   if (titlebar) {
-    const measured = Math.ceil(titlebar.getBoundingClientRect().height);
+    const measured = Math.ceil(layoutPxFromViewportRect(titlebar.getBoundingClientRect().height));
     if (measured > 0) cachedTitlebarHeightPx = measured;
   }
   return cachedTitlebarHeightPx;
@@ -1064,25 +1244,216 @@ function clusterModuleSummary(cluster) {
   return cluster?.querySelector?.(':scope > summary') || cluster;
 }
 
-function shouldScrollClusterIntoView(cluster) {
-  const summary = clusterModuleSummary(cluster);
-  const rect = summary.getBoundingClientRect();
-  const card = cluster.closest('.server-card');
-  const stack = stickyStackOffsetPx(card);
-  // Only when the summary is obscured above the sticky stack...
-  if (rect.bottom <= stack + 2 || rect.top < stack - 4) return true;
-  // ...or fully below the viewport. Do not scroll when already reasonably in view.
-  if (rect.top >= window.innerHeight - 4) return true;
-  return false;
+function expandedSectionFirstLine(details) {
+  // Prefer the first CONTENT row inside the opened section (not the sticky summary).
+  // Scrolling the summary alone looks like "no move" once sticky chrome pins it.
+  if (!details) return null;
+  const content = details.querySelector(':scope > *:not(summary)');
+  if (content instanceof Element) {
+    const row = content.querySelector?.(
+      'tr, .task-group, details[data-task-group], .process-row, .gpu-row, li, .directory-node, article, section, .table-wrap, table'
+    );
+    if (row instanceof Element) return row;
+    return content;
+  }
+  return details.querySelector(':scope > summary') || details;
 }
 
-function scrollClusterSummaryUnderSticky(cluster) {
-  const summary = clusterModuleSummary(cluster);
-  const card = cluster.closest('.server-card');
-  const stack = stickyStackOffsetPx(card);
+function cardPrimaryGpuBand(card) {
+  if (!card) return null;
+  return card.querySelector('.table-wrap, .large-cluster-overview');
+}
+
+function gpuBandOccupiesViewport(card, stickLine) {
+  const band = cardPrimaryGpuBand(card);
+  if (!band) return false;
+  const rect = band.getBoundingClientRect();
+  // Any GPU/capacity band still in view below the stuck server head must stay uncovered.
+  return rect.bottom > stickLine + 8 && rect.top < window.innerHeight - 4;
+}
+
+function stickyStackLeavesGpuRoom(stickLine, moduleSummaryHeight = 44) {
+  const room = window.innerHeight - stickLine - moduleSummaryHeight;
+  return room >= 140;
+}
+
+function expandModuleAnchorTop(target) {
+  // Usable top under sticky titlebar + stuck server head + sticky module summary
+  // when expanding a nested task-group under an already-sticky cluster-module.
+  const titlebar = cachedTitlebarHeightPx || 62;
+  const card = target?.closest?.('.server-card');
+  const head = card?.querySelector?.('.server-head');
+  let top = titlebar;
+  if (head?.classList.contains('is-stuck')) {
+    const measured = Number.parseFloat(card.style.getPropertyValue('--server-head-height'))
+      || head.getBoundingClientRect().height
+      || 64;
+    top += Math.max(1, measured);
+  }
+  const stickyModule = card?.querySelector?.('details.cluster-module[open].sticky-active');
+  if (
+    stickyModule
+    && stickyModule !== target
+    && target
+    && stickyModule.contains(target)
+  ) {
+    const stickySummary = stickyModule.querySelector(':scope > summary');
+    if (stickySummary) top += Math.max(1, stickySummary.getBoundingClientRect().height);
+  }
+  return top;
+}
+
+function shouldScrollClusterIntoView(details) {
+  // Expand-top: land at the start of what opened — always scroll unless flush.
+  // Do not soft-skip for "near top"; mid-viewport expands must jump to first line.
+  const summary = expandedSectionFirstLine(details);
+  if (!(summary instanceof Element)) return false;
   const rect = summary.getBoundingClientRect();
-  const target = window.scrollY + rect.top - stack - 6;
-  window.scrollTo({ top: Math.max(0, target), left: 0, behavior: 'auto' });
+  const topLine = expandModuleAnchorTop(details);
+  const targetTop = topLine + 6;
+  return Math.abs(rect.top - targetTop) > 2;
+}
+
+function scrollClusterSummaryUnderSticky(details) {
+  // Expand-only: put the opened section's first line (summary) at usable viewport top
+  // under sticky chrome. Sidebar/server jumps stay GPU-first via scrollServerIntoVisualCenter.
+  const summary = expandedSectionFirstLine(details);
+  if (!(summary instanceof Element)) return;
+  const topLine = expandModuleAnchorTop(details);
+  const targetTop = topLine + 6;
+  const rect = summary.getBoundingClientRect();
+  const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
+  if (Math.abs(nextTop - window.scrollY) > 2) {
+    window.scrollTo({ top: nextTop, left: 0, behavior: 'auto' });
+  }
+}
+
+function bumpViewportScrollGeneration() {
+  viewportScrollGeneration += 1;
+  return viewportScrollGeneration;
+}
+
+function beginExpandFollowScroll() {
+  if (suppressExpandFollowScroll > 0) return 0;
+  return bumpViewportScrollGeneration();
+}
+
+function markProgrammaticOpenDetails(root) {
+  if (!root?.querySelectorAll) return;
+  root.querySelectorAll('details[open]').forEach(detail => {
+    detail.dataset.bulkDisclosure = 'true';
+  });
+}
+
+function afterExpandLayout(callback, generation = viewportScrollGeneration) {
+  // Layout settle: double rAF + delayed passes for sticky stack / WebView2.
+  // generation token drops stale passes after refresh / newer navigate / expand.
+  requestAnimationFrame(() => {
+    if (generation !== viewportScrollGeneration) return;
+    requestAnimationFrame(() => {
+      if (generation !== viewportScrollGeneration) return;
+      callback();
+      window.setTimeout(() => {
+        if (generation !== viewportScrollGeneration) return;
+        callback();
+      }, 48);
+      window.setTimeout(() => {
+        if (generation !== viewportScrollGeneration) return;
+        callback();
+      }, 160);
+    });
+  });
+}
+
+function forceScrollExpandedClusterToTop(details, generation = viewportScrollGeneration) {
+  if (!details?.isConnected || !details.open) return;
+  if (generation !== viewportScrollGeneration) return;
+  // Expand-follow: pin sticky chrome, then put the FIRST CONTENT ITEM of the
+  // opened module/job-group under that stack. Re-pass until layout settles —
+  // scrolling only the sticky <summary> looks like the view never moved.
+  const pass = () => {
+    if (generation !== viewportScrollGeneration) return;
+    if (!details.isConnected || !details.open) return;
+    updateStuckChrome();
+    const anchor = expandedSectionFirstLine(details);
+    if (!(anchor instanceof Element)) return;
+    const topLine = expandModuleAnchorTop(details);
+    let stickyPad = 0;
+    if (details.matches?.('details.cluster-module') && details.classList.contains('sticky-active')) {
+      const sum = details.querySelector(':scope > summary');
+      if (sum) stickyPad = Math.max(0, sum.getBoundingClientRect().height);
+    }
+    const targetTop = topLine + stickyPad + 8;
+    const rect = anchor.getBoundingClientRect();
+    const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
+    if (Math.abs(nextTop - window.scrollY) > 1) {
+      window.scrollTo({ top: nextTop, left: 0, behavior: 'auto' });
+    } else if (Math.abs(rect.top - targetTop) > 2) {
+      anchor.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+      const fix = window.scrollY + anchor.getBoundingClientRect().top - targetTop;
+      if (Math.abs(fix - window.scrollY) > 1) {
+        window.scrollTo({ top: Math.max(0, fix), left: 0, behavior: 'auto' });
+      }
+    }
+    updateStuckChrome();
+  };
+  pass();
+  requestAnimationFrame(() => {
+    if (generation !== viewportScrollGeneration) return;
+    pass();
+    requestAnimationFrame(() => {
+      if (generation !== viewportScrollGeneration) return;
+      pass();
+      window.setTimeout(pass, 80);
+      window.setTimeout(pass, 180);
+    });
+  });
+}
+
+function scrollServerIntoVisualCenter(serverId) {
+  // Sidebar / directory jumps: land the target near the visual center of the
+  // usable viewport below sticky titlebar — not just tucked under chrome.
+  const card = document.getElementById(serverCardAnchor(serverId))
+    || serverNavigationCardsById.get(serverId);
+  if (!card) return;
+  setActiveServer(serverId);
+  const titlebar = cachedTitlebarHeightPx
+    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
+    || 62;
+  const focus = cardPrimaryGpuBand(card)
+    || card.querySelector('.server-head')
+    || card;
+  const rect = focus.getBoundingClientRect();
+  const availableTop = titlebar;
+  const availableHeight = Math.max(160, window.innerHeight - availableTop);
+  // Upper-third of the usable band reads as visual center under sticky chrome.
+  const anchorY = availableTop + availableHeight * 0.32;
+  const focusSpan = Math.min(Math.max(rect.height, 48), availableHeight * 0.5);
+  const focusY = rect.top + focusSpan * 0.45;
+  const delta = focusY - anchorY;
+  if (Math.abs(delta) > 2) {
+    window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
+  }
+  updateLocationStrip();
+}
+
+function scrollServerKeepingGpuVisible(serverId) {
+  // Center first (sidebar expectation), then only nudge if the GPU band ended
+  // fully off-screen — never soft no-op when the user clicked another server.
+  scrollServerIntoVisualCenter(serverId);
+  const card = document.getElementById(serverCardAnchor(serverId))
+    || serverNavigationCardsById.get(serverId);
+  const band = cardPrimaryGpuBand(card);
+  if (!band) return;
+  const titlebar = cachedTitlebarHeightPx || 62;
+  const rect = band.getBoundingClientRect();
+  if (rect.bottom > titlebar + 8 && rect.top < window.innerHeight - 8) return;
+  const availableTop = titlebar;
+  const availableHeight = Math.max(160, window.innerHeight - availableTop);
+  const anchorY = availableTop + availableHeight * 0.32;
+  const focusY = rect.top + Math.min(Math.max(rect.height, 48), 120) * 0.45;
+  window.scrollBy({ top: focusY - anchorY, left: 0, behavior: 'auto' });
+  updateLocationStrip();
 }
 
 function preserveClusterCollapseAnchor(summary, anchorTop) {
@@ -1097,7 +1468,19 @@ function cardIntersectsViewportBand(rect, margin = 48) {
 }
 
 function setServerHeadHeight(card, head) {
-  const height = Math.ceil(head.getBoundingClientRect().height);
+  const measured = Math.ceil(head.getBoundingClientRect().height);
+  const isStuck = head.classList.contains('is-stuck');
+  // Sticky stack / module offset must track the compact stuck head only.
+  // Measuring the expanded unstuck head inflates --server-head-height, which
+  // makes open modules auto-scroll over the GPU table and lets the sticky
+  // summary mask paint over GPU rows.
+  let height;
+  if (isStuck) {
+    height = Math.max(measured, 1);
+    lastStuckServerHeadHeightByCard.set(card, height);
+  } else {
+    height = lastStuckServerHeadHeightByCard.get(card) || 64;
+  }
   if (lastServerHeadHeightByCard.get(card) === height) return height;
   lastServerHeadHeightByCard.set(card, height);
   card.style.setProperty('--server-head-height', `${height}px`);
@@ -1136,9 +1519,15 @@ function updateStuckChrome() {
     if (isStuck) stuckServerId = card.dataset.serverId || stuckServerId;
 
     const stickLine = titlebar + headHeight;
-    card.querySelectorAll('details.cluster-module[open]').forEach(module => {
-      moduleCandidates.push({ module, stickLine });
-    });
+    // Only stack a sticky module under a compact stuck server head. Otherwise
+    // expanded module titles steal the GPU viewport below an unstuck head.
+    // Also refuse module sticky while the GPU/capacity band is still in view,
+    // or when the sticky stack would leave no room for GPU rows.
+    if (isStuck && stickyStackLeavesGpuRoom(stickLine) && !gpuBandOccupiesViewport(card, stickLine)) {
+      card.querySelectorAll('details.cluster-module[open]').forEach(module => {
+        moduleCandidates.push({ module, stickLine });
+      });
+    }
   }
 
   if (lastStuckServerId && lastStuckServerId !== stuckServerId) {
@@ -1289,20 +1678,70 @@ function captureServerLeavePosition(serverId) {
   }
 }
 
+function serverCardOutsideViewport(serverId) {
+  const card = document.getElementById(serverCardAnchor(serverId))
+    || serverNavigationCardsById.get(serverId);
+  if (!card) return true;
+  const rect = card.getBoundingClientRect();
+  const titlebar = cachedTitlebarHeightPx
+    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
+    || 62;
+  // Fully above the titlebar, or fully below the viewport -- sidebar jumps must not no-op.
+  if (rect.bottom <= titlebar + 8) return true;
+  if (rect.top >= window.innerHeight - 8) return true;
+  return false;
+}
+
+function restoreRememberedServerModule(serverId, moduleKey) {
+  // Always re-resolve: live snapshot reconcile can replace the card between click and rAF.
+  const card = document.getElementById(serverCardAnchor(serverId))
+    || serverNavigationCardsById.get(serverId);
+  if (!card) {
+    scrollServerIntoVisualCenter(serverId);
+    return false;
+  }
+  const cluster = card.querySelector(`details.cluster-module[data-module="${CSS.escape(moduleKey)}"]`);
+  if (!cluster) {
+    scrollServerIntoVisualCenter(serverId);
+    return false;
+  }
+  if (!cluster.open) {
+    cluster.dataset.bulkDisclosure = 'true';
+    cluster.open = true;
+    const key = `${serverId}:${moduleKey}`;
+    openClusters.add(key);
+    openClusters.delete(`${key}:closed`);
+    rememberOpenedClusterModule(cluster);
+  }
+  if (!cluster.isConnected || !cluster.open) {
+    scrollServerIntoVisualCenter(serverId);
+    return false;
+  }
+  // Sidebar / leave-position restore must keep the GPU band visible. Scrolling
+  // the module summary under sticky chrome is what hid GPU rows on navigate-in.
+  scrollServerKeepingGpuVisible(serverId);
+  updateStuckChrome();
+  if (serverCardOutsideViewport(serverId)) {
+    scrollServerIntoVisualCenter(serverId);
+  }
+  return true;
+}
+
 function restoreServerLeavePosition(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId))
     || serverNavigationCardsById.get(serverId);
   if (!card) return false;
   const memory = serverLeaveMemory.get(serverId);
   if (!memory) {
-    scrollServerCardUnderTitlebar(serverId);
+    scrollServerIntoVisualCenter(serverId);
     return true;
   }
   const moduleKey = memory.moduleKey;
   if (moduleKey) {
     const cluster = card.querySelector(`details.cluster-module[data-module="${CSS.escape(moduleKey)}"]`);
     if (cluster) {
-      if (!cluster.open) {
+      const needsOpen = !cluster.open;
+      if (needsOpen) {
         cluster.dataset.bulkDisclosure = 'true';
         cluster.open = true;
         const key = `${serverId}:${moduleKey}`;
@@ -1310,26 +1749,43 @@ function restoreServerLeavePosition(serverId) {
         openClusters.delete(`${key}:closed`);
         rememberOpenedClusterModule(cluster);
       }
+      // When already open, scroll immediately so a same-frame card replace cannot drop the jump.
+      // When just opened, wait one frame for layout, then re-resolve (never silent-return on disconnect).
+      if (!needsOpen) restoreRememberedServerModule(serverId, moduleKey);
+      const generation = viewportScrollGeneration;
       requestAnimationFrame(() => {
-        if (!cluster.isConnected || !cluster.open) return;
-        scrollClusterSummaryUnderSticky(cluster);
-        updateStuckChrome();
+        if (generation !== viewportScrollGeneration) return;
+        restoreRememberedServerModule(serverId, moduleKey);
       });
       return true;
     }
   }
   const titlebar = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height')) || 62;
   if (Number.isFinite(memory.relativeOffset)) {
-    const cardDocTop = window.scrollY + card.getBoundingClientRect().top;
+    const latestCard = document.getElementById(serverCardAnchor(serverId))
+      || serverNavigationCardsById.get(serverId)
+      || card;
+    const cardDocTop = window.scrollY + latestCard.getBoundingClientRect().top;
     window.scrollTo({
       top: Math.max(0, cardDocTop - titlebar + memory.relativeOffset),
       left: 0,
       behavior: 'auto',
     });
     updateLocationStrip();
+    // If leave-offset parked us on sticky subheads only, snap back so GPUs show.
+    const band = cardPrimaryGpuBand(latestCard);
+    if (band) {
+      const bandRect = band.getBoundingClientRect();
+      if (bandRect.bottom <= titlebar + 8 || bandRect.top >= window.innerHeight - 8) {
+        scrollServerKeepingGpuVisible(serverId);
+      }
+    }
+    if (serverCardOutsideViewport(serverId)) {
+      scrollServerIntoVisualCenter(serverId);
+    }
     return true;
   }
-  scrollServerCardUnderTitlebar(serverId);
+  scrollServerIntoVisualCenter(serverId);
   return true;
 }
 
@@ -1677,12 +2133,13 @@ function collapseServerModules(serverId) {
 function renderServerQuickActions(server) {
   const serverId = server.server_id;
   const favorite = favoriteServerIds.has(serverId);
+  const pinned = pinnedServerIds.has(serverId);
   const enabled = serverIsEnabled(serverId);
   const copySsh = api?.get_ssh_command ? `<button class="button compact-button copy-server-ssh" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="复制 SSH 命令" title="复制 SSH 命令">${icon('copy')}<span>复制 SSH</span></button>` : '';
   const openTerminal = api?.open_terminal
     ? `<button class="button compact-button open-terminal" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="打开服务器终端" title="打开终端">${icon('terminal')}<span>打开终端</span></button>`
     : '';
-  return `<div class="server-quick-actions"><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
+  return `<div class="server-quick-actions"><button class="button compact-button pin-server${pinned ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${pinned}" aria-label="${pinned ? '取消置顶这台服务器' : '置顶这台服务器'}" title="${pinned ? '取消置顶' : '置顶'}">${icon('pin')}<span>${pinned ? '已置顶' : '置顶'}</span></button><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
 }
 
 function applyServerNavigatorSide(side) {
@@ -1813,6 +2270,13 @@ function syncProfileConvenienceState(profile) {
     favoriteGpuServerIds.add(String(entry.server_id));
   });
   monitoringPaused = Boolean(profile?.monitoring_paused ?? profile?.monitoring?.paused);
+  const profilePins = Array.isArray(profile?.pinned_server_ids) ? profile.pinned_server_ids.map(String) : null;
+  if (profilePins) {
+    pinnedServerIds = new Set(profilePins);
+    persistPinnedToStorage(pinnedServerIds);
+  } else if (!pinnedServerIds.size) {
+    pinnedServerIds = loadPinnedFromStorage();
+  }
 }
 
 function acceptProfile(candidate) {
@@ -1970,6 +2434,37 @@ function repaintFavoriteServer(serverId) {
   }
 }
 
+function repaintPinnedServer(serverId) {
+  const pinned = pinnedServerIds.has(serverId);
+  document.querySelectorAll('.pin-server').forEach(button => {
+    if (button.dataset.serverId !== serverId) return;
+    button.classList.toggle('active', pinned);
+    button.setAttribute('aria-pressed', String(pinned));
+    button.setAttribute('aria-label', pinned ? localizedText('取消置顶这台服务器') : localizedText('置顶这台服务器'));
+    button.title = pinned ? localizedText('取消置顶') : localizedText('置顶');
+    const text = button.querySelector('span');
+    if (text && button.closest('.server-quick-actions')) text.textContent = pinned ? '已置顶' : '置顶';
+  });
+}
+
+async function setPinnedServer(serverId) {
+  const next = !pinnedServerIds.has(serverId);
+  if (api?.set_pinned_server) {
+    const result = await api.set_pinned_server(serverId, next);
+    if (!result?.ok) return showToast(result?.error || '无法更新置顶');
+    if (result.profile) acceptProfile(result.profile);
+    else if (next) pinnedServerIds.add(serverId);
+    else pinnedServerIds.delete(serverId);
+  } else if (next) {
+    pinnedServerIds.add(serverId);
+  } else {
+    pinnedServerIds.delete(serverId);
+  }
+  persistPinnedToStorage(pinnedServerIds);
+  repaintPinnedServer(serverId);
+  if (currentSnapshot) render(currentSnapshot);
+}
+
 async function setFavoriteServer(serverId) {
   if (!api?.set_favorite_server) return showToast('当前版本暂不支持收藏服务器');
   const next = !favoriteServerIds.has(serverId);
@@ -2045,6 +2540,21 @@ async function setServerEnabled(serverId, enabled) {
     if (result.profile) acceptProfile(result.profile);
     showToast(enabled ? '已恢复监控' : '已暂停这台服务器');
     await refresh(true, serverId);
+    if (enabled) {
+      // Unpause moves the card out of the paused tail into normal/pinned order.
+      const generation = bumpViewportScrollGeneration();
+      const recenter = () => {
+        if (generation !== viewportScrollGeneration) return;
+        scrollServerIntoVisualCenter(serverId);
+        if (typeof serverCardOutsideViewport === 'function' && serverCardOutsideViewport(serverId)) {
+          scrollServerIntoVisualCenter(serverId);
+        }
+      };
+      requestAnimationFrame(() => {
+        recenter();
+        requestAnimationFrame(recenter);
+      });
+    }
   } catch (error) {
     showToast(error.message || String(error));
   }
@@ -2270,6 +2780,35 @@ function serverMatchesNavigator(server) {
   return true;
 }
 
+function serverIsPaused(server) {
+  if (!server) return false;
+  if (server.connection?.state === 'disabled') return true;
+  return !serverIsEnabled(server.server_id);
+}
+
+function serverDisplayRank(server) {
+  if (serverIsPaused(server)) return 2;
+  if (pinnedServerIds.has(server.server_id)) return 0;
+  return 1;
+}
+
+function orderedServersForDisplay(servers) {
+  const pinOrder = [...pinnedServerIds];
+  return servers
+    .map((server, index) => ({server, index}))
+    .sort((left, right) => {
+      const rankDiff = serverDisplayRank(left.server) - serverDisplayRank(right.server);
+      if (rankDiff !== 0) return rankDiff;
+      if (serverDisplayRank(left.server) === 0) {
+        const leftPin = pinOrder.indexOf(left.server.server_id);
+        const rightPin = pinOrder.indexOf(right.server.server_id);
+        if (leftPin !== rightPin) return leftPin - rightPin;
+      }
+      return left.index - right.index;
+    })
+    .map(item => item.server);
+}
+
 function filteredServerEntries(servers) {
   return servers.map((server, index) => ({server, index})).filter(item => serverMatchesNavigator(item.server));
 }
@@ -2299,7 +2838,7 @@ function updateServerFleetPager(servers) {
   if (!largeFleet) return;
   const start = servers.length ? serverFleetPageOffset + 1 : 0;
   const end = Math.min(servers.length, serverFleetPageOffset + SERVER_FLEET_PAGE_SIZE);
-  ui.serverListPageStatus.textContent = `${number(start)}–${number(end)} / ${number(servers.length)} 台`;
+  ui.serverListPageStatus.textContent = `${number(start)}--${number(end)} / ${number(servers.length)} 台`;
   ui.serverListPreviousPage.disabled = serverFleetPageOffset <= 0;
   ui.serverListNextPage.disabled = serverFleetPageOffset + SERVER_FLEET_PAGE_SIZE >= servers.length;
 }
@@ -2315,6 +2854,8 @@ function changeServerFleetPage(direction) {
 
 function renderServerNavigatorItem(server, index) {
   const state = server.connection?.state || 'offline';
+  const pinned = pinnedServerIds.has(server.server_id);
+  const paused = serverIsPaused(server);
   const anchor = serverCardAnchor(server.server_id);
   const position = String(index + 1).padStart(2, '0');
   const taskSummary = serverNavigatorOwnTaskSummary(server);
@@ -2333,7 +2874,7 @@ function renderServerNavigatorItem(server, index) {
   const moduleCueMarkup = activeModuleTitle
     ? `<span class="server-navigator-module-cue"> · ${escapeHtml(activeModuleTitle)}</span>`
     : '';
-  return `<div class="server-navigator-entry" data-server-id="${escapeHtml(server.server_id)}"><button class="server-navigator-item ${escapeHtml(state)}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-controls="${escapeHtml(anchor)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="server-navigator-marker"><span>${position}</span><i class="status-dot ${escapeHtml(state)}"></i></span><span class="server-navigator-copy"><strong>${escapeHtml(server.display_name)}</strong>${moduleCueMarkup}${favoriteKindMarkup}<span>${escapeHtml(serverNavigatorResourceSummary(server))}</span><small>${escapeHtml(taskSummary)}</small></span></button><button class="server-navigator-favorite favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="${favorite}" aria-label="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}" title="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}">${icon('star')}</button></div>`;
+  return `<div class="server-navigator-entry${paused ? ' is-paused' : ''}${pinned ? ' is-pinned' : ''}" data-server-id="${escapeHtml(server.server_id)}"><button class="server-navigator-item ${escapeHtml(state)}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-controls="${escapeHtml(anchor)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="server-navigator-marker"><span>${position}</span><i class="status-dot ${escapeHtml(state)}"></i></span><span class="server-navigator-copy"><strong>${escapeHtml(server.display_name)}</strong>${pinned ? `<span class="server-navigator-pin-mark" title="${escapeHtml(localizedText('已置顶'))}">${icon('pin')}</span>` : ''}${moduleCueMarkup}${favoriteKindMarkup}<span>${escapeHtml(serverNavigatorResourceSummary(server))}</span><small>${escapeHtml(taskSummary)}</small></span></button><button class="server-navigator-favorite favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="${favorite}" aria-label="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}" title="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}">${icon('star')}</button></div>`;
 }
 
 function setActiveServer(serverId) {
@@ -2439,7 +2980,7 @@ function renderServerNavigator(servers) {
     lastNavigatorRenderSignature = 'hidden';
     ui.serverNavigatorCount.textContent = '';
     ui.serverNavigatorEmpty.hidden = true;
-    ui.serverNavigatorPosition.textContent = '—';
+    ui.serverNavigatorPosition.textContent = '--';
     ui.previousServer.disabled = true;
     ui.nextServer.disabled = true;
     serverNavigatorVisibleIds = [];
@@ -2463,7 +3004,7 @@ function renderServerNavigator(servers) {
     serverNavigatorItems = new Map();
     serverNavigatorPositions = new Map();
     ui.serverNavigatorEmpty.hidden = true;
-    ui.serverNavigatorPosition.textContent = '—';
+    ui.serverNavigatorPosition.textContent = '--';
     ui.previousServer.disabled = true;
     ui.nextServer.disabled = true;
     ui.serverNavigator.querySelectorAll('[data-server-navigator-filter]').forEach(button => {
@@ -2527,10 +3068,25 @@ function navigateToServer(serverId) {
       render(currentSnapshot);
     }
   }
-  const card = document.getElementById(serverCardAnchor(serverId));
+  // Bump after any fleet-page reconcile so restore/center passes are not cancelled.
+  const generation = bumpViewportScrollGeneration();
+  const card = document.getElementById(serverCardAnchor(serverId))
+    || serverNavigationCardsById.get(serverId);
   if (!card) return;
   setActiveServer(serverId);
   restoreServerLeavePosition(serverId);
+  // Sidebar clicks must land near visual center. Leave-restore / under-titlebar
+  // alone often only nudges a little while the card stays at the top edge.
+  const finishSidebarJump = () => {
+    if (generation !== viewportScrollGeneration) return;
+    scrollServerIntoVisualCenter(serverId);
+    if (serverCardOutsideViewport(serverId)) {
+      scrollServerIntoVisualCenter(serverId);
+    }
+  };
+  finishSidebarJump();
+  // Leave-restore schedules its own rAF; run after it so centering wins the race.
+  requestAnimationFrame(finishSidebarJump);
   const server = currentSnapshot?.servers?.find(item => item.server_id === serverId);
   ui.serverNavigatorStatus.textContent = server
     ? `已定位到服务器 ${server.display_name}`
@@ -2558,7 +3114,7 @@ function renderServer(server, index = 0) {
       ? `${renderConfiguring(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`
       : `${renderError(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`;
   const position = String(index + 1).padStart(2, '0');
-  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><div class="server-head-sentinel" aria-hidden="true"></div><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div><div class="server-location-strip" aria-live="polite"><span class="server-location-text"></span><button type="button" class="button compact-button server-location-home" data-server-id="${escapeHtml(server.server_id)}">回到本机</button></div></header>${body}${renderDirectoryModule(server)}</div></article>`;
+  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card${serverIsPaused(server) ? ' is-paused' : ''} ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><div class="server-head-sentinel" aria-hidden="true"></div><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div><div class="server-location-strip" aria-live="polite"><span class="server-location-text"></span><button type="button" class="button compact-button server-location-home" data-server-id="${escapeHtml(server.server_id)}">回到本机</button></div></header>${body}${renderDirectoryModule(server)}</div></article>`;
 }
 
 function serverCardRenderSignature(server, index) {
@@ -2604,35 +3160,55 @@ function serverCardElement(server, index) {
   const template = document.createElement('template');
   template.innerHTML = renderServer(server, index).trim();
   uiRenderMetrics.serverCardCreates += 1;
-  return template.content.firstElementChild;
+  const card = template.content.firstElementChild;
+  // Card rebuild from live reconcile inserts <details open> which fires toggle in
+  // Chromium/WebView2. Mark bulk so expand-follow does not yank the viewport.
+  markProgrammaticOpenDetails(card);
+  return card;
 }
 
 function reconcileServerCards(entries) {
-  const existing = new Map(
-    [...ui.list.querySelectorAll(':scope > .server-card')].map(card => [card.dataset.serverId, card]),
-  );
-  const desiredIds = new Set(entries.map(item => item.server.server_id));
-  entries.forEach((item, position) => {
-    const serverId = item.server.server_id;
-    const signature = serverCardRenderSignature(item.server, item.index);
-    let card = existing.get(serverId);
-    if (!card || renderedServerCardSignatures.get(serverId) !== signature) {
-      const replacement = serverCardElement(item.server, item.index);
-      if (card) card.replaceWith(replacement);
-      card = replacement;
-      existing.set(serverId, card);
-      renderedServerCardSignatures.set(serverId, signature);
+  const preservedScrollY = window.scrollY;
+  const restoreGeneration = bumpViewportScrollGeneration();
+  suppressExpandFollowScroll += 1;
+  try {
+    const existing = new Map(
+      [...ui.list.querySelectorAll(':scope > .server-card')].map(card => [card.dataset.serverId, card]),
+    );
+    const desiredIds = new Set(entries.map(item => item.server.server_id));
+    entries.forEach((item, position) => {
+      const serverId = item.server.server_id;
+      const signature = serverCardRenderSignature(item.server, item.index);
+      let card = existing.get(serverId);
+      if (!card || renderedServerCardSignatures.get(serverId) !== signature) {
+        const replacement = serverCardElement(item.server, item.index);
+        if (card) card.replaceWith(replacement);
+        card = replacement;
+        existing.set(serverId, card);
+        renderedServerCardSignatures.set(serverId, signature);
+      }
+      const positionNode = ui.list.children[position];
+      if (positionNode !== card) ui.list.insertBefore(card, positionNode || null);
+    });
+    [...ui.list.children].forEach(child => {
+      const serverId = child.dataset?.serverId;
+      if (!serverId || !desiredIds.has(serverId)) child.remove();
+    });
+    [...renderedServerCardSignatures.keys()].forEach(serverId => {
+      if (!desiredIds.has(serverId)) renderedServerCardSignatures.delete(serverId);
+    });
+  } finally {
+    suppressExpandFollowScroll = Math.max(0, suppressExpandFollowScroll - 1);
+  }
+  const restoreScroll = () => {
+    // Drop restore if a newer user navigate/expand claimed the viewport.
+    if (restoreGeneration !== viewportScrollGeneration) return;
+    if (Math.abs(window.scrollY - preservedScrollY) > 0.5) {
+      window.scrollTo({ top: preservedScrollY, left: 0, behavior: 'auto' });
     }
-    const positionNode = ui.list.children[position];
-    if (positionNode !== card) ui.list.insertBefore(card, positionNode || null);
-  });
-  [...ui.list.children].forEach(child => {
-    const serverId = child.dataset?.serverId;
-    if (!serverId || !desiredIds.has(serverId)) child.remove();
-  });
-  [...renderedServerCardSignatures.keys()].forEach(serverId => {
-    if (!desiredIds.has(serverId)) renderedServerCardSignatures.delete(serverId);
-  });
+  };
+  restoreScroll();
+  requestAnimationFrame(restoreScroll);
 }
 
 function snapshotRevision(snapshot) {
@@ -2721,14 +3297,16 @@ function render(snapshot) {
     ui.list.replaceChildren();
     renderedServerCardSignatures.clear();
   } else {
-    const entries = mainServerEntries(snapshot.servers);
+    const displayServers = orderedServersForDisplay(snapshot.servers);
+    const entries = mainServerEntries(displayServers);
     reconcileServerCards(entries);
     if (entries.length && !entries.some(item => item.server.server_id === activeServerId)) activeServerId = entries[0].server.server_id;
   }
-  updateServerFleetPager(snapshot.servers);
+  const displayServersForNav = orderedServersForDisplay(snapshot.servers);
+  updateServerFleetPager(displayServersForNav);
   serverNavigationCards = [...ui.list.querySelectorAll('.server-card')];
   serverNavigationCardsById = new Map(serverNavigationCards.map(card => [card.dataset.serverId, card]));
-  renderServerNavigator(snapshot.servers);
+  renderServerNavigator(displayServersForNav);
   const paused = snapshot.monitoring?.paused ?? snapshot.profile?.monitoring?.paused ?? currentProfile?.monitoring_paused;
   updateMonitoringControls(paused);
   if (!paused) {
@@ -2874,6 +3452,8 @@ function scheduleRefreshCompletion(generation, attempt = 0) {
 
 async function refresh(force = false, serverId = null) {
   const generation = ++refreshPollGeneration;
+  // Cancel leftover expand-follow / navigate scroll passes before DOM churn.
+  bumpViewportScrollGeneration();
   window.clearTimeout(refreshPollTimer);
   ui.refresh.disabled = true;
   setRefreshClock('正在读取服务器…', true);
@@ -3556,8 +4136,8 @@ function renderServerEditorPage(options = {}) {
   const first = indices.length ? settingsServerPageOffset + 1 : 0;
   const last = Math.min(settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE, indices.length);
   ui.editorPageStatus.textContent = settingsServerQuery
-    ? `匹配 ${number(indices.length)} 台 · ${number(first)}–${number(last)}`
-    : `${number(first)}–${number(last)} / ${number(settingsServerDrafts.length)}`;
+    ? `匹配 ${number(indices.length)} 台 · ${number(first)}--${number(last)}`
+    : `${number(first)}--${number(last)} / ${number(settingsServerDrafts.length)}`;
   ui.editorPreviousPage.disabled = settingsServerPageOffset === 0;
   ui.editorNextPage.disabled = settingsServerPageOffset + SERVER_EDITOR_PAGE_SIZE >= indices.length;
   refreshServerEditorOrder();
@@ -4320,6 +4900,11 @@ document.addEventListener('click', event => {
     collapseServerModules(collapseModules.dataset.serverId);
     return;
   }
+  const pinServer = event.target.closest('.pin-server');
+  if (pinServer) {
+    void setPinnedServer(pinServer.dataset.serverId);
+    return;
+  }
   const favorite = event.target.closest('.favorite-server');
   if (favorite) void setFavoriteServer(favorite.dataset.serverId);
   const toggleServer = event.target.closest('.toggle-server-monitoring');
@@ -4397,6 +4982,17 @@ document.addEventListener('click', event => {
       preserveClusterCollapseAnchor(summary, anchorTop);
       updateStuckChrome();
     });
+  } else {
+    // Expand via sticky-summary click path: toggle listener also scrolls, but
+    // schedule here so a missed/raced toggle cannot leave scrollTop unchanged.
+    const generation = beginExpandFollowScroll();
+    if (generation) {
+      afterExpandLayout(() => {
+        if (generation !== viewportScrollGeneration) return;
+        if (!details.isConnected || !details.open) return;
+        forceScrollExpandedClusterToTop(details, generation);
+      }, generation);
+    }
   }
 }, true);
 document.addEventListener('toggle', event => {
@@ -4417,13 +5013,16 @@ document.addEventListener('toggle', event => {
       openClusters.add(`${key}:closed`);
     }
     if (cluster.open) {
-      requestAnimationFrame(() => {
-        if (!cluster.isConnected || !cluster.open) return;
-        if (shouldScrollClusterIntoView(cluster)) {
-          scrollClusterSummaryUnderSticky(cluster);
-        }
-        updateStuckChrome();
-      });
+      const generation = beginExpandFollowScroll();
+      if (generation) {
+        afterExpandLayout(() => {
+          if (generation !== viewportScrollGeneration) return;
+          if (!cluster.isConnected || !cluster.open) return;
+          // Expand-top: after layout settles, force scroll so the expanded summary
+          // sits at usable viewport top under sticky titlebar + stuck server head.
+          forceScrollExpandedClusterToTop(cluster, generation);
+        }, generation);
+      }
     } else {
       updateLocationStrip();
     }
@@ -4435,12 +5034,30 @@ document.addEventListener('toggle', event => {
       if (page.status === 'idle') void loadClusterNodes(cluster.dataset.serverId, 0);
     }
   }
+  const processCommand = event.target.matches?.('.process-command-details') ? event.target : null;
+  if (processCommand && event.target === processCommand) {
+    const key = processCommandKey(
+      processCommand.dataset.serverId,
+      {pid: processCommand.dataset.processPid, started_at: processCommand.dataset.processStarted},
+    );
+    if (processCommand.open) openProcessCommands.add(key);
+    else openProcessCommands.delete(key);
+  }
   const group = event.target.matches?.('[data-task-group]') ? event.target : null;
   if (group && event.target === group) {
     const key = `${group.dataset.serverId}:${group.dataset.taskModule || 'cluster-tasks'}:${group.dataset.taskGroup}`;
     if (group.open) {
       openTaskGroups.add(key);
       openTaskGroups.delete(`${key}:closed`);
+      // Job/task-group expand under a server: force first line into primary view.
+      const generation = beginExpandFollowScroll();
+      if (generation) {
+        afterExpandLayout(() => {
+          if (generation !== viewportScrollGeneration) return;
+          if (!group.isConnected || !group.open) return;
+          forceScrollExpandedClusterToTop(group, generation);
+        }, generation);
+      }
     } else {
       openTaskGroups.delete(key);
       openTaskGroups.add(`${key}:closed`);
@@ -4529,7 +5146,26 @@ document.addEventListener('keydown', event => {
     void setNotificationCenterOpen(false);
     ui.taskAlertIndicator.focus();
   }
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  const target = event.target;
+  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return;
+  const key = event.key;
+  if (key === '=' || key === '+' || key === 'Add') {
+    event.preventDefault();
+    nudgeUiZoom(UI_ZOOM_STEP);
+  } else if (key === '-' || key === '_' || key === 'Subtract') {
+    event.preventDefault();
+    nudgeUiZoom(-UI_ZOOM_STEP);
+  } else if (key === '0' || key === 'Digit0' || key === 'Numpad0') {
+    event.preventDefault();
+    applyUiZoom(1, {announce: true});
+  }
 });
+document.addEventListener('wheel', event => {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+  event.preventDefault();
+  nudgeUiZoom(event.deltaY < 0 ? UI_ZOOM_STEP : -UI_ZOOM_STEP);
+}, {passive: false});
 ui.language.addEventListener('change', () => {
   window.VRAMRadarI18n?.setLanguage(ui.language.value);
   if (currentSnapshot) renderNotificationCenter(currentSnapshot);
@@ -4602,7 +5238,7 @@ ui.form.addEventListener('submit', saveSettings);
 function syncStickyLayoutOffsets() {
   const titlebar = document.querySelector('.titlebar');
   if (titlebar) {
-    const height = Math.ceil(titlebar.getBoundingClientRect().height);
+    const height = Math.ceil(layoutPxFromViewportRect(titlebar.getBoundingClientRect().height));
     document.documentElement.style.setProperty('--titlebar-height', `${height}px`);
     if (height > 0) cachedTitlebarHeightPx = height;
   } else {
@@ -4654,3 +5290,8 @@ window.addEventListener('focus', () => {
 window.addEventListener('pywebviewready', initialize, {once: true});
 
 document.addEventListener('toggle', () => scheduleStuckChromeUpdate(), true);
+
+pinnedServerIds = loadPinnedFromStorage();
+
+applyUiZoom(loadUiZoomPreference(), {persist: false});
+

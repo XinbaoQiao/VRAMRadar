@@ -107,6 +107,7 @@ class ModelStorageTests(unittest.TestCase):
         self.assertEqual(profile.close_behavior, "tray")
         self.assertEqual(profile.ui_language, "zh-CN")
         self.assertEqual(profile.favorite_server_ids, ())
+        self.assertEqual(profile.pinned_server_ids, ())
         self.assertTrue(profile.favorite_alert_enabled)
         self.assertEqual(profile.favorite_alert_min_memory_gib, 0.0)
         self.assertEqual(profile.ignored_ssh_aliases, ())

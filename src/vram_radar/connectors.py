@@ -1033,6 +1033,9 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         "METADATA_LIMIT",
         "CPU_COUNT",
         "CPU_LOAD_HEX",
+        "CPU_USAGE",
+        "MEM_TOTAL_KIB",
+        "MEM_AVAILABLE_KIB",
     }
     for raw in lines[1:-1]:
         if raw.startswith("META|"):
@@ -1049,7 +1052,7 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         fields[key] = value
     # HOME_HEX was added without changing the direct-GPU protocol version so
     # older cached fixtures remain readable. Fresh probes always include it.
-    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX"}
+    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB"}
     if not required.issubset(fields):
         raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 快照字段", retryable=True)
     if fields["CURRENT_UID"] and not fields["CURRENT_UID"].isdigit():
@@ -1066,7 +1069,14 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
 def _parse_cpu_snapshot(fields: dict[str, str], *, sampled_at: datetime) -> dict[str, Any] | None:
     """Parse optional host CPU facts without making GPU collection depend on them."""
 
-    if "CPU_COUNT" not in fields and "CPU_LOAD_HEX" not in fields:
+    optional_keys = (
+        "CPU_COUNT",
+        "CPU_LOAD_HEX",
+        "CPU_USAGE",
+        "MEM_TOTAL_KIB",
+        "MEM_AVAILABLE_KIB",
+    )
+    if not any(key in fields for key in optional_keys):
         return None
     logical_cores: int | None = None
     raw_count = fields.get("CPU_COUNT", "").strip()
@@ -1093,12 +1103,49 @@ def _parse_cpu_snapshot(fields: dict[str, str], *, sampled_at: datetime) -> dict
                     break
                 parsed.append(number)
             load_average = parsed
-    return {
-        "supported": logical_cores is not None or len(load_average) == 3,
+
+    usage_percent: float | None = None
+    raw_usage = fields.get("CPU_USAGE", "").strip()
+    if re.fullmatch(r"(?:\d+(?:\.\d*)?|\.\d+)", raw_usage):
+        candidate = float(raw_usage)
+        if 0 <= candidate <= 100:
+            usage_percent = round(candidate, 1)
+
+    def _parse_kib(raw: str) -> float | None:
+        value = raw.strip()
+        if not value.isdigit():
+            return None
+        kib = int(value)
+        if not 1 <= kib <= 10**15:
+            return None
+        return round(kib / (1024 * 1024), 2)
+
+    memory_total_gib = _parse_kib(fields.get("MEM_TOTAL_KIB", ""))
+    memory_available_gib = _parse_kib(fields.get("MEM_AVAILABLE_KIB", ""))
+    memory_used_gib: float | None = None
+    if memory_total_gib is not None and memory_available_gib is not None:
+        memory_used_gib = round(max(0.0, memory_total_gib - memory_available_gib), 2)
+
+    supported = (
+        logical_cores is not None
+        or len(load_average) == 3
+        or usage_percent is not None
+        or memory_total_gib is not None
+    )
+    result: dict[str, Any] = {
+        "supported": supported,
         "logical_cores": logical_cores,
         "load_average": load_average,
+        "usage_percent": usage_percent,
         "sampled_at": sampled_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
+    if memory_total_gib is not None:
+        result["memory_total_gib"] = memory_total_gib
+    if memory_available_gib is not None:
+        result["memory_available_gib"] = memory_available_gib
+    if memory_used_gib is not None:
+        result["memory_used_gib"] = memory_used_gib
+    return result
 
 
 def _account_summary(current_user: str, home_directory: str) -> dict[str, str]:
@@ -1844,7 +1891,56 @@ elif command -v sysctl >/dev/null 2>&1; then
     cpu_load=$(sysctl -n vm.loadavg 2>/dev/null | tr -d '{{}}' || true)
 fi
 printf 'CPU_LOAD_HEX='; printf '%s' "$cpu_load" | hex_encode; printf '\\n'
+cpu_usage=''
+if [ -r /proc/stat ]; then
+    cpu_sample() {{
+        awk '/^cpu / {{
+            idle=$5+$6
+            total=0
+            for (i=2; i<=NF; i++) total+=$i
+            if (total > 0) print idle " " total
+            exit
+        }}' /proc/stat 2>/dev/null || true
+    }}
+    sample1=$(cpu_sample)
+    sleep 0.2
+    sample2=$(cpu_sample)
+    if [ -n "$sample1" ] && [ -n "$sample2" ]; then
+        set -- $sample1
+        idle1=$1
+        total1=$2
+        set -- $sample2
+        idle2=$1
+        total2=$2
+        cpu_usage=$(awk -v idle1="$idle1" -v total1="$total1" -v idle2="$idle2" -v total2="$total2" 'BEGIN {{
+            di=idle2-idle1
+            dt=total2-total1
+            if (dt > 0 && di >= 0 && di <= dt) {{
+                usage=(1-di/dt)*100
+                if (usage < 0) usage=0
+                if (usage > 100) usage=100
+                printf "%.1f", usage
+            }}
+        }}')
+    fi
+fi
+printf 'CPU_USAGE=%s\\n' "$cpu_usage"
+mem_total=''
+mem_available=''
+if [ -r /proc/meminfo ]; then
+    mem_total=$(awk '/^MemTotal:/ {{print $2; exit}}' /proc/meminfo 2>/dev/null || true)
+    mem_available=$(awk '/^MemAvailable:/ {{print $2; exit}}' /proc/meminfo 2>/dev/null || true)
+fi
+case "$mem_total" in
+    ''|*[!0-9]*) mem_total='';;
+esac
+case "$mem_available" in
+    ''|*[!0-9]*) mem_available='';;
+esac
+printf 'MEM_TOTAL_KIB=%s\\n' "$mem_total"
+printf 'MEM_AVAILABLE_KIB=%s\\n' "$mem_available"
 gpu_rows=$(nvidia-smi --query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu --format=csv,noheader,nounits)
+
 printf 'GPU_HEX='; printf '%s' "$gpu_rows" | hex_encode; printf '\\n'
 process_a=''
 if process_a=$(nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null); then
