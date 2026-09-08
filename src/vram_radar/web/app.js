@@ -505,36 +505,15 @@ function renderCpuOverview(server) {
     ? `<span class="cpu-overview-mem"><small>${escapeHtml(english ? 'mem' : '\u5185\u5b58')}</small><strong>${escapeHtml(`${number(usedGib)}/${number(memoryTotal)} GiB`)}</strong>${memoryPercent == null ? '' : `<small>${escapeHtml(`${memoryPercent}%`)}</small>`}</span>`
     : '';
   const usageMarkup = hasUsage ? `<strong class="cpu-overview-usage">${escapeHtml(formatCpuPercent(cpu.usage_percent))}</strong>` : '';
-  const tipBits = [];
-  if (modelName) tipBits.push(english ? `Model: ${modelName}` : `\u578b\u53f7\uff1a${modelName}`);
-  tipBits.push(english
-    ? 'Usage %: recent host-wide CPU busy share (not per-process).'
-    : '\u4f7f\u7528\u7387\uff1a\u4e3b\u673a\u8fd1\u671f\u6574\u4f53 CPU \u5fd9\u788c\u5360\u6bd4\uff08\u4e0d\u662f\u5355\u8fdb\u7a0b\uff09\u3002');
-  tipBits.push(english
-    ? 'Load 1/5/15: average runnable or uninterruptible tasks \u2014 compare to logical cores (sustained load above cores \u2248 saturation).'
-    : '\u8d1f\u8f7d 1/5/15\uff1a\u53ef\u8fd0\u884c\u6216\u4e0d\u53ef\u4e2d\u65ad\u7b49\u5f85\u4efb\u52a1\u5e73\u5747\u6570\u2014\u2014\u4e0e\u903b\u8f91\u6838\u5bf9\u6bd4\uff08\u6301\u7eed\u9ad8\u4e8e\u903b\u8f91\u6838\u2248\u504f\u6ee1\uff09\u3002');
-  if (hasCores) {
-    tipBits.push(english
-      ? `Cores: logical ${number(logicalCores)}${hasPhysical ? ` (physical ${number(physicalCores)}; SMT/HT included in logical)` : ' (SMT/HT included when present)'}.`
-      : `\u6838\u5fc3\uff1a\u903b\u8f91 ${number(logicalCores)}${hasPhysical ? `\uff08\u7269\u7406 ${number(physicalCores)}\uff1b\u903b\u8f91\u542b\u8d85\u7ebf\u7a0b\uff09` : '\uff08\u903b\u8f91\u542b\u8d85\u7ebf\u7a0b\uff09'}\u3002`);
-  }
-  tipBits.push(english
-    ? 'Memory: host RAM; prefers MemAvailable when the kernel exposes it.'
-    : '\u5185\u5b58\uff1a\u4e3b\u673a\u5185\u5b58\uff1b\u5185\u6838\u63d0\u4f9b\u65f6\u4f18\u5148\u4f7f\u7528 MemAvailable\u3002');
-  if (hasMhz) tipBits.push(english ? `Clock ~${number(Math.round(mhz))} MHz.` : `\u65f6\u949f\uff1a\u5f53\u524d\u7ea6 ${number(Math.round(mhz))} MHz\u3002`);
-  const explanation = tipBits.join(' ');
-  // Keep title ASCII/English so language switch does not leave a concatenated Chinese title attribute.
-  const titleTips = [];
-  if (modelName) titleTips.push(`Model: ${modelName}`);
-  titleTips.push('Usage %: recent host-wide CPU busy share (not per-process).');
-  titleTips.push('Load 1/5/15: average runnable or uninterruptible tasks \u2014 compare to logical cores (sustained load above cores \u2248 saturation).');
-  if (hasCores) {
-    titleTips.push(`Cores: logical ${number(logicalCores)}${hasPhysical ? ` (physical ${number(physicalCores)}; SMT/HT included in logical)` : ' (SMT/HT included when present)'}.`);
-  }
-  titleTips.push('Memory: host RAM; prefers MemAvailable when the kernel exposes it.');
-  if (hasMhz) titleTips.push(`Clock ~${number(Math.round(mhz))} MHz.`);
-  const explanationTitle = titleTips.join(' ');
-  const explanationHtml = tipBits.map(escapeHtml).join('<br>');
+  const tipBits = [
+    localizedText("CPU 使用率：表示最近一次采样区间内，主机全部逻辑 CPU 处于非空闲状态的时间占比。该指标反映整台主机的总体活动程度，不代表某个进程的 CPU 使用率，也不等同于 GPU 利用率。"),
+    localizedText("系统负载：1、5、15 分钟数值分别表示对应时间窗口内，正在运行、等待 CPU 调度或处于不可中断等待状态的平均任务数量。负载是任务数量而非百分比；较高负载可能来自计算需求，也可能来自 I/O 等待。"),
+    localizedText("核心数量与负载判断：物理核心表示处理器的实际计算核心，逻辑核心表示操作系统可调度的执行单元，启用 SMT 或超线程后两者可能不同。可将负载与逻辑核心数结合观察，例如 16 个逻辑核心对应负载 16，表示平均任务数量与可调度单元数相当；是否存在瓶颈仍需结合 CPU 使用率、I/O 和持续时间判断。"),
+    localizedText("主机内存：此处统计系统 RAM，不包含 GPU 显存。可用内存优先采用内核提供的 MemAvailable，包含预计可回收的部分缓存；因此，可用内存不等于完全未使用的内存。容量以 GiB 为单位，1 GiB 等于 2³⁰ 字节。"),
+    localizedText("数据时效与缺失值：各项指标来自最近一次服务器采样，不能视为连续实时测量。连接中断或数据过期时，请结合卡片上的最后成功时间判断；旧快照仅供参考。未采集到的指标不应按零值理解。"),
+];
+  const explanationTitle = localizedText("CPU 指标说明");
+  const explanationHtml = tipBits.map(text => `<p>${escapeHtml(text)}</p>`).join('');
   const sep = '<span class="cpu-sep" aria-hidden="true">\u00b7</span>';
   const parts = [];
   parts.push('<span class="cpu-overview-kicker">CPU</span>');
@@ -545,7 +524,7 @@ function renderCpuOverview(server) {
   if (memoryMarkup) { parts.push(sep); parts.push(memoryMarkup); }
   parts.push(sep);
   parts.push(loadMarkup);
-  parts.push(`<details class="cpu-overview-help"><summary title="${escapeHtml(explanationTitle)}">${escapeHtml(localizedText('\u8bf4\u660e'))}</summary><p class="cpu-overview-help-body">${explanationHtml}</p></details>`);
+  parts.push(`<details class="cpu-overview-help"><summary title="${escapeHtml(explanationTitle)}">${escapeHtml(localizedText('\u8bf4\u660e'))}</summary><div class="cpu-overview-help-body">${explanationHtml}</div></details>`);
   return `<section class="cpu-overview" aria-label="${escapeHtml(localizedText('\u4e3b\u673a CPU'))}" title="${escapeHtml(explanationTitle)}"><div class="cpu-overview-line">${parts.join('')}</div></section>`;
 }
 

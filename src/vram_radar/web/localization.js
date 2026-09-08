@@ -2,6 +2,13 @@
   'use strict';
 
   const ENGLISH = new Map([
+    ["CPU 指标说明", "CPU metric reference"],
+    ["CPU 使用率：表示最近一次采样区间内，主机全部逻辑 CPU 处于非空闲状态的时间占比。该指标反映整台主机的总体活动程度，不代表某个进程的 CPU 使用率，也不等同于 GPU 利用率。", "CPU utilization: the share of non-idle time across the host’s logical CPUs during the latest sampling interval. It describes overall host activity, not the CPU usage of an individual process or GPU utilization."],
+    ["系统负载：1、5、15 分钟数值分别表示对应时间窗口内，正在运行、等待 CPU 调度或处于不可中断等待状态的平均任务数量。负载是任务数量而非百分比；较高负载可能来自计算需求，也可能来自 I/O 等待。", "System load: the 1, 5 and 15 minute values represent the average number of tasks running, waiting for CPU scheduling or in uninterruptible sleep over those windows. Load is a task count, not a percentage; elevated load may reflect computational demand or I/O waits."],
+    ["核心数量与负载判断：物理核心表示处理器的实际计算核心，逻辑核心表示操作系统可调度的执行单元，启用 SMT 或超线程后两者可能不同。可将负载与逻辑核心数结合观察，例如 16 个逻辑核心对应负载 16，表示平均任务数量与可调度单元数相当；是否存在瓶颈仍需结合 CPU 使用率、I/O 和持续时间判断。", "Core counts and interpretation: physical cores are hardware compute cores; logical CPUs are execution units available to the operating system and may include SMT or Hyper-Threading. Compare load with logical CPU count: on a host with 16 logical CPUs, load 16 means the average task count equals the number of schedulable units. Assess bottlenecks using CPU utilization, I/O activity and the duration of the condition together."],
+    ["主机内存：此处统计系统 RAM，不包含 GPU 显存。可用内存优先采用内核提供的 MemAvailable，包含预计可回收的部分缓存；因此，可用内存不等于完全未使用的内存。容量以 GiB 为单位，1 GiB 等于 2³⁰ 字节。", "Host memory: these values describe system RAM, excluding GPU VRAM. Available memory uses the kernel’s MemAvailable value when provided and includes some reclaimable cache; it is not identical to completely unused memory. Capacity is reported in GiB, where 1 GiB equals 2³⁰ bytes."],
+    ["数据时效与缺失值：各项指标来自最近一次服务器采样，不能视为连续实时测量。连接中断或数据过期时，请结合卡片上的最后成功时间判断；旧快照仅供参考。未采集到的指标不应按零值理解。", "Freshness and missing values: metrics come from the latest server sample and are not continuous real-time measurements. When the connection is interrupted or data becomes stale, refer to the card’s last successful sample time; cached values are for reference only. An unavailable metric must not be interpreted as zero."],
+
     ['显存雷达', 'VRAM Radar'],
     ['欢迎使用显存雷达', 'Welcome to VRAM Radar'],
     ['先添加一台 GPU 服务器', 'Add your first GPU server'],

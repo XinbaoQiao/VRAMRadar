@@ -74,9 +74,9 @@ available on demand.
 
 ## Visual language
 
-- The named direction is **Precision Radar**: a calm technical instrument with
-  editorial hierarchy, not a generic dashboard or marketing surface.
-- `shell`: a warm neutral field that supports long monitoring sessions.
+- The accepted visual direction is **Light Radar**: generous spacing,
+  quiet surfaces, and a clear emphasis on available capacity. It was accepted for the v0.9.6 release.
+- `shell`: a cool neutral field that supports long monitoring sessions.
 - `surface`: crisp data planes separated primarily by spacing and thin rules;
   shadows are reserved for modal elevation.
 - `signal`: one restrained teal accent for live monitoring and primary focus.
@@ -91,12 +91,21 @@ available on demand.
 - Body copy starts at 16 px. Persistent captions and compact controls do not go
   below 12 px; nested labels step down through weight, color, and spacing as well
   as size so information remains readable under Windows/macOS display scaling.
-- The signature elements are the square radar mark, the segmented aggregate
-  VRAM tape, and the indexed server equipment rail. The capacity tape shows the
+- The signature elements are the small radar mark, the segmented aggregate
+  VRAM tape, and the slim server index. The capacity tape shares the light or
+  dark summary surface rather than using a separate dark panel. It shows the
   actual available-to-total ratio; it must not use an ornamental radar, fake
   history, or another shape whose geometry is unrelated to the displayed data.
-- Use 4/6/10 px radii. Pills are reserved for genuine compact statuses; normal
-  controls, cards, and facts use restrained rectangular geometry.
+- Use 7/12/16 px radii. Summary metrics share one surface and thin dividers;
+  server details use spacing and top rules instead of nested outlined boxes.
+  Primary actions use teal, secondary actions use quiet text and hover surfaces.
+- Keep 16 px between a module's accent rail and its heading/content. Nested
+  owner groups and explanatory notes use 12 px of internal inset; never place
+  text directly against a decorative or structural rule.
+- All peer panels within a server share one left/right boundary via
+  `--server-content-inset` (20 px, or 12 px on compact screens). Apply it to
+  headers, GPU tables, summaries, errors and disclosures, including cached-data
+  wrappers. Nested groups keep their own consistent hierarchy inset.
 - Do not use decorative gradients, glow, glass blur, floating-card stacks, or
   ornamental charts. One view gets one accent; semantic colors communicate
   actual state.
@@ -139,6 +148,18 @@ available on demand.
   navigator, tables, and code blocks. Animate only compositor-friendly
   `transform` and `opacity`; disclosure height and padding changes are immediate,
   and `prefers-reduced-motion` disables the remaining motion.
+- Enter the dashboard with a short fade and 7 px movement; dialogs use the same
+  motion over 240 ms and expanded details use a 3 px fade over 220 ms. Do not
+  animate server-card replacement during routine snapshot refreshes.
+- Use a shared ease-out curve for 180–240 ms interaction motion. Nested settings,
+  task and matcher panels fade without animating layout dimensions. Scrollbars
+  use low-opacity neutral thumbs with stronger hover/focus feedback, preserving
+  their drag area. Pointer-hover buttons move at most 1 px.
+- Scrollbar colors use translucent grey-teal at rest (24% light / 28% dark),
+  stronger hover feedback and a teal active thumb. The 10 px Chromium gutter
+  retains transparent 3 px thumb borders in every state, keeping geometry stable.
+  CPU metric help expands within its panel as readable bilingual paragraphs
+  rather than as an absolutely positioned tooltip.
 - Every convenience action remains available as a visible button or menu item.
   Do not register fixed system-wide shortcuts. If configurable in-app shortcuts
   are added later, they must be editable and disableable, ignore text inputs and

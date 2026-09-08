@@ -391,7 +391,7 @@ class WebUiContractTests(unittest.TestCase):
             ".cluster-heading h4 { margin: 0; font-family: var(--display-font); font-size: 16px",
             ".task-owner-heading h5 { margin: 0; font-family: var(--display-font); font-size: 14.5px",
             ".task-period-head h6 { margin: 0; font-family: var(--display-font); font-size: 13px",
-            ".cluster-module { margin: 10px 14px 0",
+            ".cluster-module { margin: 0 20px",
             ".task-owner-stack { display: grid; gap: 8px; margin-left: 5px",
         ):
             self.assertIn(style, self.styles)
@@ -492,16 +492,16 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("window.setTimeout(pass, 80)", self.javascript)
         self.assertIn("window.setTimeout(pass, 180)", self.javascript)
         self.assertIn("Job/task-group expand under a server", self.javascript)
-        self.assertIn("tipBits.map(escapeHtml).join('<br>')", self.javascript)
+        self.assertIn("tipBits.map(text => `<p>${escapeHtml(text)}</p>`)", self.javascript)
         self.assertIn("cpu-overview-help-body", self.javascript)
         self.assertNotIn("cluster.scrollIntoView({behavior: 'auto', block: 'start'})", self.javascript)
         self.assertIn("scroll-margin-top: calc(var(--titlebar-height, 62px) + var(--server-head-height, 64px) + 12px)", self.styles)
         self.assertIn(".server-surface > .table-wrap", self.styles)
-        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: visible;", self.styles)
+        self.assertIn("contain: layout style; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: visible;", self.styles)
         self.assertNotIn('<span class="section-index" aria-hidden="true">01</span>', self.markup)
         self.assertNotIn('<span class="section-index" aria-hidden="true">02</span>', self.markup)
         for layout_contract in (
-            ".server-head { position: sticky; top: var(--titlebar-height, 62px); z-index: 14; display: grid; grid-template-columns: minmax(180px, .75fr) minmax(260px, 1.15fr) minmax(340px, auto)",
+            ".server-head { position: sticky; top: var(--titlebar-height, 62px); z-index: 14; display: grid; grid-template-columns: minmax(160px, .8fr) minmax(200px, 1fr) minmax(280px, auto)",
             ".account-overview { grid-column: 2; min-width: 0; display: flex",
             ".server-head-controls { grid-column: 3; min-width: 0; display: flex",
             ".server-status { display: inline-flex",
@@ -555,11 +555,11 @@ class WebUiContractTests(unittest.TestCase):
     def test_global_layout_density_keeps_one_clear_visual_hierarchy(self):
         for contract in (
             "--font-body: 15px",
-            ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 60px",
+            ".titlebar { position: sticky; top: 0; z-index: 20; grid-column: 1 / -1; min-height: 68px",
             ".button { min-height: 36px",
-            "main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1320px",
-            ".capacity-metric { min-height: 174px",
-            ".server-card { display: grid; grid-template-columns: 46px",
+            "main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px",
+            ".capacity-metric { min-height: 192px",
+            ".server-card { display: grid; grid-template-columns: 34px",
             ".server-head { position: sticky; top: var(--titlebar-height, 62px); z-index: 14; display: grid; grid-template-columns:",
             "dialog { width: min(1020px",
             ".dialog-content { min-width: 0; padding: 16px",
@@ -984,7 +984,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("window.matchMedia?.('(max-width: 900px)').matches", scroll_sync)
         self.assertIn("contain: layout paint style", self.styles)
         self.assertIn("will-change: transform", self.styles)
-        self.assertIn("transition: transform .16s ease", self.styles)
+        self.assertIn("transition: transform .24s var(--motion-ease)", self.styles)
         self.assertNotIn("transition: width .2s ease", self.styles)
         schedule_sync = self.javascript[
             self.javascript.index("function scheduleServerNavigationSync"):self.javascript.index("function renderServerNavigator(servers)")
@@ -1238,10 +1238,10 @@ class WebUiContractTests(unittest.TestCase):
             self.assertIn(token, self.styles)
         for forbidden in ("backdrop-filter", "border-radius: 999"):
             self.assertNotIn(forbidden, self.styles)
-        # Functional same-hue status fills may use linear-gradient; decorative blur/pill chrome stays banned.
-        self.assertIn("same-hue", self.javascript)
-        self.assertIn("--memory-fill", self.styles)
-        self.assertIn("linear-gradient(90deg,", self.styles)
+        # Flat meters retain distinct capacity states and reduced-motion support.
+        self.assertIn(".memory-track.warning::-webkit-progress-value { background: var(--amber); }", self.styles)
+        self.assertIn(".memory-track.critical::-webkit-progress-value { background: var(--red); }", self.styles)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", self.styles)
 
     def test_memory_meter_has_accessible_semantics(self):
         self.assertIn('role="progressbar"', self.javascript)
