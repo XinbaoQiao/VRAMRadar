@@ -527,14 +527,14 @@ class TrayControllerTests(unittest.TestCase):
         self.assertFalse(hide_thread.is_alive())
         self.assertEqual(restore_application.call_count, 2)
 
-    def test_native_caption_icon_is_hidden_without_removing_taskbar_presence(self):
-        form = SimpleNamespace(Handle=0, ShowIcon=True, ShowInTaskbar=False)
+    def test_native_icon_remains_available_to_running_taskbar_buttons(self):
+        form = SimpleNamespace(Handle=0, ShowIcon=False, ShowInTaskbar=False)
         window = SimpleNamespace(native=form, gui=None)
 
         with patch("vram_radar.tray.sys.platform", "win32"):
             self.assertTrue(tray.configure_windows_native_chrome(window))
 
-        self.assertFalse(form.ShowIcon)
+        self.assertTrue(form.ShowIcon)
         self.assertTrue(form.ShowInTaskbar)
 
     def test_native_caption_customization_is_a_safe_noop_on_macos(self):

@@ -112,11 +112,12 @@ def _windows_apps_use_dark_theme() -> bool:
 
 
 def configure_windows_native_chrome(window: Any) -> bool:
-    """Remove the duplicate caption icon and align the caption with app theme.
+    """Keep the application icon available and align the caption with app theme.
 
-    The packaged Windows backend is WinForms. ``ShowIcon`` controls only the
-    caption decoration; the form remains a normal taskbar window and the
-    independent notification-area icon is untouched. DWM attributes are
+    WinForms clears WM_GETICON when ShowIcon is false, which also deprives
+    running taskbar buttons of their application identity. Keep the native
+    caption icon enabled alongside the independent notification-area icon.
+    DWM attributes are
     best-effort because older Windows builds do not expose all of them.
     """
 
@@ -125,7 +126,7 @@ def configure_windows_native_chrome(window: Any) -> bool:
     form = _native_window_form(window)
     if form is not None:
         try:
-            form.ShowIcon = False
+            form.ShowIcon = True
             form.ShowInTaskbar = True
         except Exception:
             logging.getLogger("vram_radar").exception("failed to simplify the native caption")

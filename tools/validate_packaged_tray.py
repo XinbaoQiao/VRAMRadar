@@ -261,6 +261,14 @@ def run() -> None:
 
             wait_until(window_started, 20, "packaged desktop window did not become visible")
             assert window is not None
+            # A tray icon or EXE resource alone does not prove taskbar identity.
+            # WinForms ShowIcon=False clears both of these native icon handles.
+            get_icon = ctypes.windll.user32.SendMessageW
+            get_icon.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+            get_icon.restype = ctypes.c_ssize_t
+            for kind in (0, 1):  # ICON_SMALL and ICON_BIG
+                if not get_icon(window, 0x007F, kind, 0):  # WM_GETICON
+                    raise RuntimeError("packaged window has no native taskbar icon")
             if not window_has_usable_size(window):
                 raise RuntimeError("packaged desktop window started below the supported minimum size")
             wait_until(
