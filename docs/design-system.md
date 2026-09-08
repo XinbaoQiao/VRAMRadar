@@ -172,3 +172,15 @@ available on demand.
 
 - <https://github.com/ibelick/ui-skills>
 - <https://github.com/nextlevelbuilder/ui-ux-pro-max-skill>
+
+## Application mark
+
+The application mark uses an open circular track, a diagonal scanning pointer,
+and one signal dot. A deep teal tile (#183e3a), pale ring (#e5f3ed), and mint
+signal (#85d9bc) give the mark a consistent silhouette on light and dark surfaces.
+There are no letters, hardware illustrations, or gradients at icon sizes.
+
+`tools/build_icon.py` owns the geometry and emits the dashboard SVG, 1024 px PNG,
+Windows ICO (16–256 px), and macOS ICNS. Header, welcome, and onboarding surfaces
+reference `web/brand.svg`; native application and tray assets use the matching PNG
+and platform bundles. Run the icon builder before packaging after geometry edits.

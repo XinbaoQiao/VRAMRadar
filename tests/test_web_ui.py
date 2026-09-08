@@ -1220,7 +1220,7 @@ class WebUiContractTests(unittest.TestCase):
     def test_precision_radar_identity_uses_functional_svg_and_restrained_surfaces(self):
         for contract in (
             'class="brand-mark"',
-            'class="signal-sweep"',
+            'src="brand.svg"',
             "function capacityTape",
             "function serverGlyph",
             'class="metric capacity-metric"',

@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#f8f9f4" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#111816" media="(prefers-color-scheme: dark)">
   <title>显存雷达</title>
+  <link rel="icon" type="image/svg+xml" href="brand.svg">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -14,7 +15,7 @@
     <header class="titlebar">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 44 44" focusable="false"><rect x=".75" y=".75" width="42.5" height="42.5" rx="5"></rect><circle cx="22" cy="22" r="12"></circle><path d="M22 7v30M7 22h30"></path><path class="signal-sweep" d="m22 22 9-7"></path><circle class="signal-point" cx="31" cy="15" r="2.25"></circle></svg>
+          <img src="brand.svg" width="38" height="38" alt="">
         </span>
         <div class="brand-lockup"><h1 class="brand-name">显存雷达</h1><div class="brand-en">VRAM RADAR</div></div>
       </div>
@@ -35,7 +36,7 @@
       <section id="global-notice" class="global-notice" aria-live="polite" hidden></section>
       <section id="update-notice" class="update-notice" aria-live="polite" hidden></section>
       <section id="first-run-home" class="first-run-home" aria-labelledby="first-run-title" hidden>
-        <div class="first-run-radar" aria-hidden="true"><svg viewBox="0 0 120 120" focusable="false"><circle cx="60" cy="60" r="43"></circle><circle cx="60" cy="60" r="27"></circle><circle cx="60" cy="60" r="11"></circle><path d="M60 8v104M8 60h104"></path><path class="signal-sweep" d="m60 60 34-28"></path><circle class="signal-point" cx="94" cy="32" r="4"></circle></svg></div>
+        <div class="first-run-radar" aria-hidden="true"><img src="brand.svg" width="88" height="88" alt=""></div>
         <div class="eyebrow">欢迎使用显存雷达</div>
         <h2 id="first-run-title">先添加一台 GPU 服务器</h2>
         <p>自动查找本机 SSH 配置，确认连接方式后开始监控。</p>
@@ -156,7 +157,7 @@
           <li data-onboarding-marker="3"><span>3</span><div><strong>检查并完成</strong><small>确认连接与登录方式</small></div></li>
         </ol>
         <section id="onboarding-welcome" class="onboarding-welcome" hidden>
-          <div class="onboarding-symbol" aria-hidden="true"><svg viewBox="0 0 120 120" focusable="false"><circle cx="60" cy="60" r="43"></circle><circle cx="60" cy="60" r="27"></circle><circle cx="60" cy="60" r="11"></circle><path d="M60 8v104M8 60h104"></path><path class="signal-sweep" d="m60 60 34-28"></path><circle class="signal-point" cx="94" cy="32" r="4"></circle></svg></div>
+          <div class="onboarding-symbol" aria-hidden="true"><img src="brand.svg" width="88" height="88" alt=""></div>
           <div class="eyebrow">约 1 分钟完成</div>
           <h3>集中查看每台服务器的 GPU 状态</h3>
           <p>集中查看 GPU 显存、进程和 Slurm 任务。</p>
