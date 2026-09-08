@@ -44,8 +44,8 @@ Source: "..\dist\VRAMRadar\*"; DestDir: "{app}"; Flags: ignoreversion recursesub
 Source: "installed-marker.txt"; DestDir: "{app}"; DestName: ".vram-radar-installed"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "VRAMRadar.Desktop"; Check: not IsValidationInstall
-Name: "{autodesktop}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; AppUserModelID: "VRAMRadar.Desktop"; Tasks: desktopicon; Check: not IsValidationInstall
+Name: "{group}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\vram_radar\assets\taskbar-light-radar.ico"; AppUserModelID: "VRAMRadar.Desktop.LightRadar"; Check: not IsValidationInstall
+Name: "{autodesktop}\VRAM Radar"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\_internal\vram_radar\assets\taskbar-light-radar.ico"; AppUserModelID: "VRAMRadar.Desktop.LightRadar"; Tasks: desktopicon; Check: not IsValidationInstall
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标："

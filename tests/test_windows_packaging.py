@@ -34,7 +34,7 @@ class WindowsPackagingContractTests(unittest.TestCase):
         for line in icon_lines:
             self.assertIn('Filename: "{app}\\{#MyAppExeName}"', line)
             self.assertIn('WorkingDir: "{app}"', line)
-            self.assertIn('AppUserModelID: "VRAMRadar.Desktop"', line)
+            self.assertIn('AppUserModelID: "VRAMRadar.Desktop.LightRadar"', line)
             self.assertNotIn("MyAppVersion", line)
         self.assertIn('Name: "{group}\\VRAM Radar.lnk"; Check: not IsValidationInstall', self.manifest)
         self.assertIn('Name: "{autodesktop}\\VRAM Radar.lnk"; Check: not IsValidationInstall', self.manifest)

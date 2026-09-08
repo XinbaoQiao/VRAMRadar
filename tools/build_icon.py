@@ -60,6 +60,7 @@ def main() -> None:
     TARGET_SVG.write_text(vector_icon(), encoding="utf-8")
     rgba.save(TARGET_ICO, format="ICO", sizes=[(size, size) for size in SIZES],
               append_images=[render_icon(size) for size in SIZES])
+    (SOURCE.parent / "taskbar-light-radar.ico").write_bytes(TARGET_ICO.read_bytes())
     rgba.save(TARGET_ICNS, format="ICNS")
     print(TARGET_ICO)
     print(TARGET_ICNS)

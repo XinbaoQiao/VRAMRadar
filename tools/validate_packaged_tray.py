@@ -269,6 +269,15 @@ def run() -> None:
             for kind in (0, 1):  # ICON_SMALL and ICON_BIG
                 if not get_icon(window, 0x007F, kind, 0):  # WM_GETICON
                     raise RuntimeError("packaged window has no native taskbar icon")
+            sys.path.insert(0, str(ROOT / "src"))
+            from vram_radar.windows_taskbar import APP_ID, window_property
+            if window_property(window, 5) != APP_ID:
+                raise RuntimeError("packaged taskbar grouping identity is missing")
+            icon_resource = window_property(window, 3)
+            if not icon_resource.endswith("taskbar-light-radar.ico,0"):
+                raise RuntimeError("packaged taskbar icon resource is missing")
+            if not Path(icon_resource[:-2]).is_file():
+                raise RuntimeError("packaged taskbar icon resource does not exist")
             if not window_has_usable_size(window):
                 raise RuntimeError("packaged desktop window started below the supported minimum size")
             wait_until(

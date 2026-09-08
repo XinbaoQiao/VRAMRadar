@@ -134,6 +134,11 @@ def configure_windows_native_chrome(window: Any) -> bool:
     handle = _native_window_handle(window)
     if not handle:
         return form is not None
+    try:
+        from .windows_taskbar import configure_identity
+        configure_identity(handle, Path(__file__).parent / "assets" / "taskbar-light-radar.ico")
+    except Exception:
+        logging.getLogger("vram_radar").exception("failed to configure taskbar identity")
     dark = _windows_apps_use_dark_theme()
     try:
         dwmapi = ctypes.windll.dwmapi
@@ -692,3 +697,15 @@ class WindowsTrayController:
             self.window.events.minimized -= self._on_minimized
         self._stop_icon()
         self.started = False
+
+
+def refresh_windows_taskbar(window: Any) -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        from .windows_taskbar import refresh_button
+        handle = _native_window_handle(window)
+        if handle:
+            refresh_button(handle)
+    except Exception:
+        logging.getLogger("vram_radar").exception("failed to refresh taskbar button")

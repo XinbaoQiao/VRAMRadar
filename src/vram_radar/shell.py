@@ -82,6 +82,7 @@ from .storage import (
 from .tray import (
     WindowsTrayController,
     configure_windows_native_chrome,
+    refresh_windows_taskbar,
     native_window_is_normal,
     restore_window,
     show_macos_notification,
@@ -4512,6 +4513,7 @@ def main(argv: list[str] | None = None) -> int:
                 # WinForms caption properties must be set on its native UI
                 # thread rather than from the asynchronous ``shown`` event.
                 window.events.before_show += lambda: configure_windows_native_chrome(window)
+                window.events.shown += lambda: refresh_windows_taskbar(window)
                 shutdown = WindowShutdownCoordinator(
                     window,
                     activation_requested,

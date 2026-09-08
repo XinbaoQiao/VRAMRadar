@@ -6,6 +6,7 @@ This release introduces the Light Radar interface: quieter surfaces, clearer emp
 
 - Refreshed application identity: one deep-teal and mint radar mark across the dashboard, welcome screens, Windows executable/taskbar/tray, and macOS Dock.
 - Fixed running Windows taskbar buttons losing the application icon when the native caption icon was hidden; packaged validation now checks both native window icon handles.
+- Explicit taskbar grouping and a dedicated icon resource keep running buttons and shortcuts on the new identity; the button is refreshed when its window is shown.
 - Simplified cards, controls, and capacity meters with restrained teal accents.
 - Aligned server headers, GPU tables, CPU summaries, and expanded modules; corrected narrow-window and sticky-header overlaps.
 - Increased space between module accent lines and text, including GPU processes and code working directories.
@@ -36,6 +37,7 @@ The Windows installer remains unsigned, so SmartScreen may ask for confirmation.
 
 - 统一应用标识：界面、欢迎页、Windows 程序/任务栏/托盘及 macOS Dock 均采用深青与薄荷绿的新雷达图标。
 - 修复隐藏原生标题栏图标时，已打开窗口的 Windows 任务栏图标一并丢失的问题；打包验证现在会检查窗口的大、小图标句柄。
+- 明确指定任务栏分组及独立图标资源，并在窗口显示时刷新按钮，避免运行窗口及快捷方式继续使用旧图标。
 - 简化卡片、控件和显存容量条，以克制的青绿色突出重点信息。
 - 统一服务器标题、GPU 表格、CPU 概览及展开模块的内容宽度，修正窄窗口和吸顶状态下的组件重叠。
 - 增加模块强调线与文字之间的间距，改善 GPU 进程、代码工作目录等区域的阅读体验。
