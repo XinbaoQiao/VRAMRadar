@@ -35,6 +35,17 @@
   <img src="docs/assets/readme/vibe-coding-cover.webp" width="560" alt="Vibe Coding 越顺手，GPU 状态反而越难感知">
 </p>
 
+## 最新更新 · v0.9.6
+
+当前更新为 **v0.9.6 刷新版**，包含 Light Radar 界面、统一应用图标、交互稳定性修复和 SSH 进程计时检查。
+
+- 简化界面层次，统一模块对齐，采用半透明滚动条和尊重系统“减少动态效果”设置的轻量动效。
+- 修正进程、工作目录展开时的重复滚动调整，后台刷新时保持当前服务器的位置。
+- 将任务结束提醒的说明放到标题下方，并在卡片替换时释放过期的尺寸监听。
+- 正常进程计时保持原样；持续返回零的异常数据经过检查后明确显示为不可用，能够验证进程身份时另列已观测运行下限。
+
+**已经安装 v0.9.6？请从 [Latest Release](../../releases/latest) 重新下载并安装刷新后的安装包，版本号没有变化。** 详细内容见 [发布说明](docs/release-notes-v0.9.6.md)。
+
 ## 为什么做这个工具
 
 现在很多开发流程已经变成直接用自然语言驱动代码和任务执行。Agent 可以改代码、跑命令、启动长任务，我们不必一直守着终端。
@@ -58,11 +69,32 @@ VRAM Radar 想补回的就是这层“状态感”。它把 Direct SSH 与 Slurm
   <tr>
     <td><strong>一个界面看多台服务器</strong><br>Direct SSH 工作站和 Slurm 集群不再分散在不同终端。</td>
     <td><strong>任务状态与 GPU 放在一起</strong><br>查看当前账号的运行、排队、节点和资源状态。</td>
-    <td><strong>提醒集中且不漏报</strong><br>任务完成与 GPU 可用统一进入铃铛；离线期间结束的已观测任务会在下次实时刷新后补报，其他人的任务只在逐项选择后关注。</td>
+    <td><strong>提醒集中，减少反复查看</strong><br>任务完成与 GPU 可用消息统一进入本地通知中心；保留未读记录，其他人的任务只在逐项选择后关注。</td>
   </tr>
 </table>
 
 服务器总览优先展示可用显存和连接状态；节点、任务、进程、资源匹配和代码目录在需要时再展开。图中的服务器数据均为合成示例，不包含真实地址、账号、密钥或本地 Profile。
+
+### 日常使用
+
+| 功能 | 可以做什么 |
+|---|---|
+| 服务器导航 | 搜索、筛选与收藏服务器，在需要时暂停监控。 |
+| GPU 可用性 | 在后端支持时查看每张卡的显存、使用率和温度；收藏的服务器或 GPU 整卡空闲、或达到设定空闲显存时接收提醒。 |
+| 任务与进程 | 查看 Slurm 运行和排队任务，以及 Direct SSH GPU 进程的归属、GPU 分配和可用计时信息。 |
+| 任务结束提醒 | 开启当前账号任务提醒，或逐项关注其他用户的任务；在本地通知中心查看消息和未读记录。 |
+| CPU 与内存 | 在 GPU 视图旁查看 CPU 使用率、平均负载、核心数量与主机内存，并阅读内置指标说明。 |
+| 工作目录 | 按需浏览账号目录、固定默认目录，减少反复打开终端的操作。 |
+
+### 如何理解计时与连接状态
+
+Direct SSH 进程的运行时长依赖远端系统提供的元数据。容器隔离、权限限制或时钟不一致，都可能导致这些信息缺失或不可靠。
+
+- **正常计时**：正数时长沿用原有显示；刚启动的进程确实可能短暂显示零。
+- **计时待确认**：零值无法对应到可验证的进程身份，此时不生成运行时间估计。
+- **运行时长不可用**：确认是同一进程，连续至少三次采样、跨越 30 秒仍返回零。另列的 **“已观测运行至少……”** 只表示软件实际观测到的时间下限，不代表任务从启动至今的完整时长。
+
+进程身份变化、进程消失、连接失败、暂停监控或采样间隔过长后，观测会重新计数。缓存或离线数据不能证明任务仍在运行；任务结束提醒依赖成功采样，无法保证捕获两次采样之间启动并结束的短任务。
 
 <p align="center">
   <img src="docs/assets/readme/product-boundary.webp" width="560" alt="VRAM Radar 不替代调度器，只把状态感补回来">
@@ -75,6 +107,7 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 1. 从 [Latest Release](../../releases/latest) 下载与你的平台对应的正式包。
 2. 启动 VRAM Radar，检查它在本机发现的 SSH 别名。
 3. 确认每台服务器使用 Direct SSH 还是 Slurm，保存 Profile 后进入资源总览。
+4. 在设置中选择任务结束提醒和收藏 GPU 提醒。最小化后可从通知区域或菜单栏访问应用；关闭窗口时隐藏还是退出，也可以在设置中选择。
 
 自动发现覆盖常见 OpenSSH、VS Code、Cursor、Windsurf、Colima、OrbStack、XDG 与 Harness 目录。发现过程只读取本地配置；一个条目只有在保存后的连接和采集都成功后，才会显示为**监控就绪**并计入实时容量。
 
@@ -123,7 +156,12 @@ Windows：
 uv sync --extra build --frozen
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check src\vram_radar\web\app.js
+node --check src\vram_radar\web\localization.js
+.\.venv\Scripts\python.exe -m compileall -q src tests tools
+.\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
 .\Build-VramRadar.ps1 -SkipSync
+.\.venv\Scripts\python.exe tools\validate_packaged_askpass.py
+.\.venv\Scripts\python.exe tools\validate_packaged_tray.py
 ```
 
 macOS：
@@ -132,11 +170,14 @@ macOS：
 uv sync --extra build --frozen
 ./.venv/bin/python -m unittest discover -s tests -v
 node --check src/vram_radar/web/app.js
+node --check src/vram_radar/web/localization.js
+./.venv/bin/python -m compileall -q src tests tools
+./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```
 
-发布验证必须使用空的临时 Profile 和 `--no-auto-import`，避免接触维护者自己的服务器配置。
+界面基准使用合成数据，并会短暂显示原生窗口以验证滚动与动画帧。发布验证必须使用空的临时 Profile 和 `--no-auto-import`，避免接触维护者自己的服务器配置。发布前，还应使用临时 `--home`、`--profile`、`--no-auto-import` 和 `--show-paths` 启动一次打包程序；macOS 打包验证会检查其原生启动路径。
 
 </details>
 

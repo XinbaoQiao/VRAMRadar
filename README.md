@@ -33,6 +33,17 @@
 
 ![VRAM Radar overview](docs/assets/vram-radar-overview.png)
 
+## Latest update · v0.9.6
+
+The refreshed v0.9.6 packages include the Light Radar interface, a consistent application icon, more stable navigation, and checks for unreliable SSH process timing.
+
+- Lighter surfaces, aligned modules, translucent scrollbars, and subtle motion that respects reduced-motion settings.
+- Process and directory expansion no longer schedules repeated scroll corrections; live refresh preserves the visible server's position.
+- Task-completion guidance is separated from its heading, and old resize observers are released as cards are replaced.
+- Normal process durations keep their existing behavior. Persistent zero readings are checked before being presented as unavailable; an observed-running lower bound is shown separately when the process identity can be verified.
+
+**Already using v0.9.6? Download and reinstall the refreshed package from [Latest Release](../../releases/latest). The version number has not changed.** See the [release notes](docs/release-notes-v0.9.6.md) for details.
+
 ## Vibe Coding made the code flow easier—and the server state harder to feel
 
 Agents can edit code, run commands, and start long tasks while you stay focused on the outcome. But once the terminal is no longer in front of you, simple operational questions become harder to answer:
@@ -55,11 +66,33 @@ It is intentionally not a scheduler: VRAM Radar does not submit jobs, reserve GP
 
 The interface starts with available VRAM and server state. Nodes, tasks, processes, matching controls, and code directories stay collapsed until you need them. Screenshots use synthetic data and contain no private hosts, keys, or Profiles.
 
+### Everyday workflow
+
+| Capability | What you can do |
+|---|---|
+| Server navigation | Search and filter servers, keep favorites close, and pause monitoring when needed. |
+| GPU availability | Inspect per-GPU memory, utilization, and temperature when the backend provides them; receive alerts for favorite servers or GPUs that become idle or meet your free-memory threshold. |
+| Tasks and processes | Review Slurm running/queued jobs and Direct SSH GPU processes, including ownership, GPU allocation, and available timing metadata. |
+| Completion notifications | Enable alerts for your account's tasks, or select another user's task individually. Review messages and unread history in the local notification center. |
+| CPU and memory | Read CPU usage, load averages, core counts, and host memory alongside the GPU view, with built-in explanations. |
+| Working directories | Browse account directories on demand and pin a default directory without repeatedly opening a terminal. |
+
+### Reading task timing and connection state
+
+For Direct SSH, process runtime depends on metadata exposed by the remote system. Container isolation, permissions, or inconsistent clocks can make that metadata unavailable or unreliable.
+
+- **Normal runtime:** positive durations retain the existing display. A newly started process may legitimately report zero.
+- **Timing unverified:** a zero reading cannot be tied to a verifiable process identity; no running-time estimate is invented.
+- **Runtime unavailable:** the same verified process reports zero for at least three samples spanning 30 seconds. A separate **Observed running for at least …** value records only the observation interval, not the full time since the task started.
+
+Observation restarts after a process identity change, disappearance, connection failure, monitoring pause, or a long sampling gap. Cached/offline data is not evidence that a task is still running. Completion alerts depend on successful observations and cannot guarantee notification of a task that started and ended between samples.
+
 ## Quick start
 
 1. Download the package for your platform from the [Latest Release](../../releases/latest).
 2. Start VRAM Radar and review the SSH aliases found on your computer.
 3. Confirm whether each server uses Direct SSH or Slurm, save the Profile, and open the resource view.
+4. In Settings, choose task-completion and favorite-GPU alerts. Minimize the app to keep it accessible from the notification area or menu bar; configure whether closing the window hides it or exits.
 
 Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, OrbStack, XDG, and Harness catalog locations. Discovery is local and reviewable; finding an SSH entry does not count it as live capacity. A server becomes **monitoring ready** only after its saved connection and collector succeed.
 
@@ -110,8 +143,12 @@ Windows:
 uv sync --extra build --frozen
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check src\vram_radar\web\app.js
+node --check src\vram_radar\web\localization.js
+.\.venv\Scripts\python.exe -m compileall -q src tests tools
 .\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
 .\Build-VramRadar.ps1 -SkipSync
+.\.venv\Scripts\python.exe tools\validate_packaged_askpass.py
+.\.venv\Scripts\python.exe tools\validate_packaged_tray.py
 ```
 
 macOS:
@@ -120,12 +157,14 @@ macOS:
 uv sync --extra build --frozen
 ./.venv/bin/python -m unittest discover -s tests -v
 node --check src/vram_radar/web/app.js
+node --check src/vram_radar/web/localization.js
+./.venv/bin/python -m compileall -q src tests tools
 ./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```
 
-Release validation must use an empty temporary Profile with `--no-auto-import`, so maintainer server configuration is never contacted.
+The UI benchmark uses synthetic data and briefly shows a native window to verify scrolling and animation frames. Release validation must use an empty temporary Profile with `--no-auto-import`, so maintainer server configuration is never contacted. Before publication, launch the packaged executable once with a disposable `--home`, `--profile`, `--no-auto-import`, and `--show-paths`; macOS bundle validation covers its packaged startup path.
 
 </details>
 

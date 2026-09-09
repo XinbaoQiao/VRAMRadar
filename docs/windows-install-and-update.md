@@ -8,7 +8,7 @@ installer uses these stable identities:
 - application ID: `{1B2F9822-D7AF-47E9-9757-72F98DB2C106}`;
 - default directory: `%LOCALAPPDATA%\Programs\VRAM Radar`;
 - executable target: `VRAMRadar.exe`;
-- shell identity: `VRAMRadar.Desktop`.
+- shell identity: `VRAMRadar.Desktop.LightRadar`.
 
 When a later setup uses the same application ID, Inno Setup reuses the previous
 install directory and task selections. It closes a running copy when possible,
