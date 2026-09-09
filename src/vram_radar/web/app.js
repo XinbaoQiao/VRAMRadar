@@ -98,6 +98,7 @@ let refreshPollGeneration = 0;
 let refreshDeferredWhileHidden = false;
 let viewportScrollGeneration = 0;
 let suppressExpandFollowScroll = 0;
+const userExpandedDetails = new WeakSet();
 let toastTimer = null;
 let updateCheckTimer = null;
 let updateCheckInFlight = false;
@@ -685,7 +686,7 @@ function renderTaskOwnerGroup(server, options) {
 }
 
 function formatElapsedSeconds(value) {
-  if (value == null || Number.isNaN(Number(value))) return '权限受限';
+  if (value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) return '权限受限';
   let seconds = Math.max(0, Math.floor(Number(value)));
   const days = Math.floor(seconds / 86400);
   seconds %= 86400;
@@ -698,6 +699,15 @@ function formatElapsedSeconds(value) {
   if (minutes) units.push(`${minutes}分钟`);
   if (!units.length) units.push(`${seconds}秒`);
   return units.slice(0, 2).join('');
+}
+
+function renderProcessElapsed(process) {
+  if (!process.timing_status) return escapeHtml(formatElapsedSeconds(process.elapsed_seconds));
+  const label = process.timing_status === 'unverified' ? '计时待确认' : '运行时长不可用';
+  const observed = Number(process.observed_running_seconds);
+  const detail = Number.isFinite(observed) && observed >= 30
+    ? `<small>${escapeHtml(localizedText('已观测运行至少'))} ${escapeHtml(formatElapsedSeconds(observed))}</small>` : '';
+  return `<span class="process-timing-status">${escapeHtml(localizedText(label))}${detail}</span>`;
 }
 
 function formatCpuPercent(value) {
@@ -734,7 +744,7 @@ function renderProcessAllocations(process) {
 
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${escapeHtml(formatElapsedSeconds(process.elapsed_seconds))}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : '权限受限'}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText(process.timing_status ? '运行时长不可用' : '权限受限'))}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
@@ -1336,68 +1346,28 @@ function markProgrammaticOpenDetails(root) {
 }
 
 function afterExpandLayout(callback, generation = viewportScrollGeneration) {
-  // Layout settle: double rAF + delayed passes for sticky stack / WebView2.
-  // generation token drops stale passes after refresh / newer navigate / expand.
   requestAnimationFrame(() => {
     if (generation !== viewportScrollGeneration) return;
     requestAnimationFrame(() => {
-      if (generation !== viewportScrollGeneration) return;
-      callback();
-      window.setTimeout(() => {
-        if (generation !== viewportScrollGeneration) return;
-        callback();
-      }, 48);
-      window.setTimeout(() => {
-        if (generation !== viewportScrollGeneration) return;
-        callback();
-      }, 160);
+      if (generation === viewportScrollGeneration) callback();
     });
   });
 }
 
 function forceScrollExpandedClusterToTop(details, generation = viewportScrollGeneration) {
-  if (!details?.isConnected || !details.open) return;
-  if (generation !== viewportScrollGeneration) return;
-  // Expand-follow: pin sticky chrome, then put the FIRST CONTENT ITEM of the
-  // opened module/job-group under that stack. Re-pass until layout settles —
-  // scrolling only the sticky <summary> looks like the view never moved.
-  const pass = () => {
-    if (generation !== viewportScrollGeneration) return;
-    if (!details.isConnected || !details.open) return;
-    updateStuckChrome();
-    const anchor = expandedSectionFirstLine(details);
-    if (!(anchor instanceof Element)) return;
-    const topLine = expandModuleAnchorTop(details);
-    let stickyPad = 0;
-    if (details.matches?.('details.cluster-module') && details.classList.contains('sticky-active')) {
-      const sum = details.querySelector(':scope > summary');
-      if (sum) stickyPad = Math.max(0, sum.getBoundingClientRect().height);
-    }
-    const targetTop = topLine + stickyPad + 8;
-    const rect = anchor.getBoundingClientRect();
-    const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
-    if (Math.abs(nextTop - window.scrollY) > 1) {
-      window.scrollTo({ top: nextTop, left: 0, behavior: 'auto' });
-    } else if (Math.abs(rect.top - targetTop) > 2) {
-      anchor.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
-      const fix = window.scrollY + anchor.getBoundingClientRect().top - targetTop;
-      if (Math.abs(fix - window.scrollY) > 1) {
-        window.scrollTo({ top: Math.max(0, fix), left: 0, behavior: 'auto' });
-      }
-    }
-    updateStuckChrome();
-  };
-  pass();
-  requestAnimationFrame(() => {
-    if (generation !== viewportScrollGeneration) return;
-    pass();
-    requestAnimationFrame(() => {
-      if (generation !== viewportScrollGeneration) return;
-      pass();
-      window.setTimeout(pass, 80);
-      window.setTimeout(pass, 180);
-    });
-  });
+  if (!details?.isConnected || !details.open || generation !== viewportScrollGeneration) return;
+  const anchor = expandedSectionFirstLine(details);
+  if (!(anchor instanceof Element)) return;
+  // Keep an already visible expansion stationary. One bounded adjustment is
+  // enough; repeated sticky-layout corrections compete with native anchoring.
+  const rect = anchor.getBoundingClientRect();
+  const targetTop = expandModuleAnchorTop(details) + 8;
+  if (rect.top >= targetTop && rect.top < window.innerHeight - 40) return;
+  const nextTop = Math.max(0, window.scrollY + rect.top - targetTop);
+  if (Math.abs(nextTop - window.scrollY) > 2) {
+    window.scrollTo({top: nextTop, left: 0, behavior: 'auto'});
+  }
+  scheduleStuckChromeUpdate();
 }
 
 function scrollServerIntoVisualCenter(serverId) {
@@ -2936,6 +2906,14 @@ function syncActiveServerFromScroll() {
     : precedingIndex >= serverNavigationCards.length - 1
       ? [serverNavigationCards.length - 1]
       : [precedingIndex, precedingIndex + 1];
+  // A tall expanded card owns the focus line even when the next heading is nearer.
+  if (precedingIndex >= 0) {
+    const containingCard = serverNavigationCards[precedingIndex];
+    if (containingCard.getBoundingClientRect().bottom > focusLine) {
+      setActiveServer(containingCard.dataset.serverId);
+      return;
+    }
+  }
   let closest = null;
   let closestDistance = Number.POSITIVE_INFINITY;
   candidateIndexes.forEach(index => {
@@ -3159,6 +3137,14 @@ function serverCardElement(server, index) {
 
 function reconcileServerCards(entries) {
   const preservedScrollY = window.scrollY;
+  const visibleCards = [...ui.list.querySelectorAll(':scope > .server-card')];
+  const anchorCard = visibleCards.find(card => {
+    const rect = card.getBoundingClientRect();
+    return rect.top <= (cachedTitlebarHeightPx || 62) && rect.bottom > (cachedTitlebarHeightPx || 62);
+  }) || visibleCards.find(card => card.getBoundingClientRect().bottom > 0);
+  const anchorId = anchorCard?.dataset.serverId;
+  const anchorTop = anchorCard?.getBoundingClientRect().top;
+  let mutated = false;
   const restoreGeneration = bumpViewportScrollGeneration();
   suppressExpandFollowScroll += 1;
   try {
@@ -3171,18 +3157,26 @@ function reconcileServerCards(entries) {
       const signature = serverCardRenderSignature(item.server, item.index);
       let card = existing.get(serverId);
       if (!card || renderedServerCardSignatures.get(serverId) !== signature) {
+        mutated = true;
         const replacement = serverCardElement(item.server, item.index);
-        if (card) card.replaceWith(replacement);
+        if (card) {
+          // Keep the sticky geometry while live data replaces the card.
+          replacement.querySelector('.server-head')?.classList.toggle('is-stuck',
+            Boolean(card.querySelector('.server-head.is-stuck')));
+          replacement.querySelector('.server-location-strip')?.classList.toggle('is-visible',
+            Boolean(card.querySelector('.server-location-strip.is-visible')));
+          card.replaceWith(replacement);
+        }
         card = replacement;
         existing.set(serverId, card);
         renderedServerCardSignatures.set(serverId, signature);
       }
       const positionNode = ui.list.children[position];
-      if (positionNode !== card) ui.list.insertBefore(card, positionNode || null);
+      if (positionNode !== card) { mutated = true; ui.list.insertBefore(card, positionNode || null); }
     });
     [...ui.list.children].forEach(child => {
       const serverId = child.dataset?.serverId;
-      if (!serverId || !desiredIds.has(serverId)) child.remove();
+      if (!serverId || !desiredIds.has(serverId)) { mutated = true; child.remove(); }
     });
     [...renderedServerCardSignatures.keys()].forEach(serverId => {
       if (!desiredIds.has(serverId)) renderedServerCardSignatures.delete(serverId);
@@ -3192,13 +3186,17 @@ function reconcileServerCards(entries) {
   }
   const restoreScroll = () => {
     // Drop restore if a newer user navigate/expand claimed the viewport.
-    if (restoreGeneration !== viewportScrollGeneration) return;
-    if (Math.abs(window.scrollY - preservedScrollY) > 0.5) {
-      window.scrollTo({ top: preservedScrollY, left: 0, behavior: 'auto' });
+    if (!mutated || restoreGeneration !== viewportScrollGeneration) return;
+    const anchor = anchorId ? document.getElementById(serverCardAnchor(anchorId)) : null;
+    const top = anchor && Number.isFinite(anchorTop)
+      ? window.scrollY + anchor.getBoundingClientRect().top - anchorTop
+      : preservedScrollY;
+    if (Math.abs(window.scrollY - top) > 0.5) {
+      window.scrollTo({top: Math.max(0, top), left: 0, behavior: 'auto'});
     }
   };
   restoreScroll();
-  requestAnimationFrame(restoreScroll);
+  afterExpandLayout(restoreScroll, restoreGeneration);
 }
 
 function snapshotRevision(snapshot) {
@@ -4956,11 +4954,14 @@ document.addEventListener('focusin', event => {
   if (serverCard) setActiveServer(serverCard.dataset.serverId);
 });
 document.addEventListener('click', event => {
-  const summary = event.target.closest?.('details.cluster-module > summary');
+  const summary = event.target.closest?.('details > summary');
   if (!summary || event.defaultPrevented) return;
   if (event.target.closest('button, a, input, label')) return;
   const details = summary.parentElement;
   if (!(details instanceof HTMLDetailsElement)) return;
+  if (!details.open) userExpandedDetails.add(details);
+  if (!details.matches('.cluster-module')) return;
+  bumpViewportScrollGeneration();
   // Sticky <summary> hit-testing is unreliable in Chromium/WebView2; toggle once ourselves.
   event.preventDefault();
   const collapsing = details.open;
@@ -4972,20 +4973,10 @@ document.addEventListener('click', event => {
       preserveClusterCollapseAnchor(summary, anchorTop);
       updateStuckChrome();
     });
-  } else {
-    // Expand via sticky-summary click path: toggle listener also scrolls, but
-    // schedule here so a missed/raced toggle cannot leave scrollTop unchanged.
-    const generation = beginExpandFollowScroll();
-    if (generation) {
-      afterExpandLayout(() => {
-        if (generation !== viewportScrollGeneration) return;
-        if (!details.isConnected || !details.open) return;
-        forceScrollExpandedClusterToTop(details, generation);
-      }, generation);
-    }
   }
 }, true);
 document.addEventListener('toggle', event => {
+  const userExpanded = userExpandedDetails.delete(event.target);
   if (event.target.dataset?.bulkDisclosure === 'true') {
     delete event.target.dataset.bulkDisclosure;
     return;
@@ -5002,7 +4993,7 @@ document.addEventListener('toggle', event => {
       openClusters.delete(key);
       openClusters.add(`${key}:closed`);
     }
-    if (cluster.open) {
+    if (cluster.open && userExpanded) {
       const generation = beginExpandFollowScroll();
       if (generation) {
         afterExpandLayout(() => {
@@ -5040,7 +5031,7 @@ document.addEventListener('toggle', event => {
       openTaskGroups.add(key);
       openTaskGroups.delete(`${key}:closed`);
       // Job/task-group expand under a server: force first line into primary view.
-      const generation = beginExpandFollowScroll();
+      const generation = userExpanded ? beginExpandFollowScroll() : 0;
       if (generation) {
         afterExpandLayout(() => {
           if (generation !== viewportScrollGeneration) return;
@@ -5245,8 +5236,24 @@ let stickyLayoutObserver = null;
 function observeStickyLayoutTargets() {
   if (!window.ResizeObserver) return;
   if (!stickyLayoutObserver) {
-    stickyLayoutObserver = new ResizeObserver(() => syncStickyLayoutOffsets());
+    stickyLayoutObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target.classList.contains('titlebar')) {
+          const height = Math.ceil(layoutPxFromViewportRect(entry.target.getBoundingClientRect().height));
+          if (height > 0 && height !== cachedTitlebarHeightPx) {
+            cachedTitlebarHeightPx = height;
+            document.documentElement.style.setProperty('--titlebar-height', `${height}px`);
+          }
+        }
+        else {
+          const card = entry.target.closest('.server-card');
+          if (card?.isConnected) setServerHeadHeight(card, entry.target);
+        }
+      }
+      scheduleStuckChromeUpdate();
+    });
   }
+  stickyLayoutObserver.disconnect();
   const titlebar = document.querySelector('.titlebar');
   if (titlebar) stickyLayoutObserver.observe(titlebar);
   document.querySelectorAll('.server-head').forEach(head => stickyLayoutObserver.observe(head));
@@ -5254,6 +5261,9 @@ function observeStickyLayoutTargets() {
 
 syncStickyLayoutOffsets();
 observeStickyLayoutTargets();
+for (const type of ['wheel', 'touchstart', 'pointerdown', 'keydown']) {
+  window.addEventListener(type, bumpViewportScrollGeneration, {passive: true, capture: true});
+}
 window.addEventListener('scroll', () => {
   scheduleServerNavigationSync();
   scheduleStuckChromeUpdate();

@@ -243,7 +243,11 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px; margin: 0 au
 .disclosure-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .compact-button { min-height: 34px; padding: 5px 9px; color: var(--muted); font-size: var(--font-small); }
 .server-card { display: grid; grid-template-columns: 34px minmax(0, 1fr); scroll-margin-top: 78px; contain: layout style; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: visible; box-shadow: none; }
-.server-list { display: grid; gap: 20px; }
+/* Live reconciliation preserves the visible server explicitly. Avoid a second
+   browser scroll-anchor correction after sticky headers change size. */
+.server-list { display: grid; gap: 20px; overflow-anchor: none; }
+.process-timing-status { display: grid; gap: 4px; }
+.process-timing-status small { color: var(--muted); font-size: var(--font-caption); }
 .server-card.stale { border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); }
 .server-card.offline, .server-card.auth_required, .server-card.security_blocked, .server-card.misconfigured { border-color: color-mix(in srgb, var(--red) 42%, var(--border)); }
 .server-rail { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 20px 5px; color: var(--muted); background: transparent; border-right: 0; border-radius: var(--radius-md) 0 0 var(--radius-md); overflow: hidden; gap: 10px; }

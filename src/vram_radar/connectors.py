@@ -4,6 +4,7 @@ import csv
 from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 import io
 import os
 from pathlib import Path
@@ -1725,6 +1726,13 @@ def _parse_process_rows(text: str) -> list[dict[str, Any]]:
 
 
 def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
+    identity = None
+    if text.startswith("VRAM_ID "):
+        header, separator, text = text.partition("\n")
+        match = re.fullmatch(r"VRAM_ID ([0-9a-fA-F-]{36}) ([0-9]+)", header)
+        if separator and match:
+            # Do not expose the remote boot identifier in the UI or cache.
+            identity = hashlib.sha256(f"{match[1]}:{pid}:{match[2]}".encode()).hexdigest()
     parts = text.strip().split(None, 4)
     if len(parts) < 4 or parts[0] != pid or not parts[1].isdigit() or not parts[3].isdigit():
         return None
@@ -1740,6 +1748,7 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
         "uid": parts[1],
         "user": parts[2],
         "elapsed_seconds": int(parts[3]),
+        "process_identity": identity,
         "cpu_percent": cpu_percent,
         "command": command,
     }
@@ -1826,6 +1835,7 @@ def _build_direct_processes(
                 "command_truncated": command_truncated,
                 "command_visibility": command_visibility,
                 "elapsed_seconds": elapsed_seconds,
+                "process_identity": metadata.get("process_identity") if metadata else None,
                 "cpu_percent": metadata["cpu_percent"] if metadata else None,
                 "started_at": started_at,
                 "metadata_visibility": "full" if metadata else "none",
@@ -1967,8 +1977,23 @@ pids=$(
         }}
     ' | sort -k1,1n -k2,2n | sed -n '1,{DIRECT_METADATA_LIMIT}p' | awk '{{ print $2 }}'
 )
+boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
+process_start_ticks() {{
+    stat_line=''
+    IFS= read -r stat_line < "/proc/$1/stat" 2>/dev/null || return
+    stat_fields=${{stat_line##*) }}
+    set -- $stat_fields
+    [ "$#" -ge 20 ] || return
+    shift 19
+    printf '%s' "$1"
+}}
 for pid in $pids; do
+    start_before=$(process_start_ticks "$pid") || start_before=''
     if meta=$(ps -ww -p "$pid" -o pid= -o uid= -o user:64= -o etimes= -o pcpu= -o args= 2>/dev/null); then
+        start_after=$(process_start_ticks "$pid") || start_after=''
+        if [ -n "$boot_id" ] && [ -n "$start_before" ] && [ "$start_before" = "$start_after" ]; then
+            meta=$(printf 'VRAM_ID %s %s\\n%s' "$boot_id" "$start_before" "$meta")
+        fi
         printf 'META|%s|OK|' "$pid"; printf '%s' "$meta" | hex_encode; printf '\\n'
     else
         printf 'META|%s|ERR|\\n' "$pid"

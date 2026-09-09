@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
@@ -13,6 +13,8 @@ from pathlib import Path
 import threading
 import time
 from typing import Any, Callable
+
+from .process_timing import ProcessTimingTracker
 
 from .connectors import (
     MAX_CONCURRENT_REMOTE_CAPTURES,
@@ -595,6 +597,7 @@ class RuntimeState:
     retry_at: str | None = None
     payload_revision: int = 0
     cache_dirty: bool = False
+    process_timing: ProcessTimingTracker = field(default_factory=ProcessTimingTracker)
 
 
 @dataclass(frozen=True)
@@ -688,6 +691,8 @@ class DashboardService:
         with self.lock:
             if not self._paused:
                 self._paused = True
+                for runtime in self.states.values():
+                    runtime.process_timing.clear()
                 self._touch_locked(data_changed=False)
         return self.snapshot()
 
@@ -761,6 +766,7 @@ class DashboardService:
                 was_enabled = previous.server.enabled
                 previous.server = server
                 if not server.enabled:
+                    previous.process_timing.clear()
                     previous.state = "disabled"
                     previous.next_attempt_monotonic = float("inf")
                     previous.retry_at = None
@@ -801,8 +807,11 @@ class DashboardService:
     def _record_success(self, server_id: str, payload: dict[str, Any]) -> None:
         timestamp = utc_now()
         prepared_payload = _prepare_runtime_payload(payload)
+        if isinstance(prepared_payload.get("processes"), dict):
+            prepared_payload["processes"] = deepcopy(prepared_payload["processes"])
         with self.lock:
             runtime = self.states[server_id]
+            runtime.process_timing.update(prepared_payload, self.clock(), max(60, self.profile.refresh_seconds * 3))
             payload_changed = runtime.payload != prepared_payload
             connection_recovered = (
                 runtime.state != "online"
@@ -849,6 +858,7 @@ class DashboardService:
         with self.lock:
             runtime = self.states[server_id]
             runtime.failure_count += 1
+            runtime.process_timing.clear()
             delay = RETRY_SECONDS[min(runtime.failure_count - 1, len(RETRY_SECONDS) - 1)] if failure.retryable else None
             runtime.next_attempt_monotonic = self.clock() + delay if delay is not None else float("inf")
             runtime.retry_at = future_utc(delay) if delay is not None else None

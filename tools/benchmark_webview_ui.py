@@ -1108,6 +1108,19 @@ def main() -> int:
                 process_after = _windows_process_tree_metrics(os.getpid())
                 if not isinstance(payload, dict):
                     raise TypeError(f"unexpected JavaScript result: {type(payload).__name__}")
+                interaction_script = Path(__file__).with_name("web_interaction_checks.js").read_text(encoding="utf-8")
+                # WebView2 suspends animation frames in hidden windows. The
+                # interaction check must exercise the visible rendering path.
+                window.show()
+                window.evaluate_js(interaction_script)
+                interaction = None
+                while time.monotonic() < deadline:
+                    interaction = window.evaluate_js("window.__interactionChecks || null")
+                    if interaction is not None:
+                        break
+                    time.sleep(0.1)
+                payload["interactions"] = interaction
+                payload["ok"] = payload.get("ok") is True and bool(interaction and interaction.get("ok"))
                 payload["startup_to_ready_wall_ms"] = startup_wall_ms
                 payload["fake_api_calls"] = dict(api.calls)
                 payload["timeout_seconds"] = timeout_seconds

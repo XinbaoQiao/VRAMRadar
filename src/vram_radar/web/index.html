@@ -181,8 +181,8 @@
             <label><span>单卡最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：只提醒整卡空闲"></label>
           </div>
           <div class="task-completion-setting">
-            <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong><small>默认提醒当前账号下的 Slurm 任务与 GPU 进程；也可在任务表中单独关注</small></span></label>
-            <p class="task-watch-policy">其他用户的任务不会自动关注；只提醒你在任务表中逐项选择的任务。</p>
+            <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong></span></label>
+            <p class="task-watch-policy"><span>默认提醒当前账号下的 Slurm 任务与 GPU 进程；也可在任务表中单独关注</span><br><span>其他用户的任务不会自动关注；只提醒你在任务表中逐项选择的任务。</span></p>
           </div>
           <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
           <details class="local-tools">

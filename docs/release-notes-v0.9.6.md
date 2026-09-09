@@ -4,6 +4,9 @@ This release introduces the Light Radar interface: quieter surfaces, clearer emp
 
 ### What changed
 
+- Stabilized process/directory expansion and live refresh: preserve the visible server, cancel obsolete scroll adjustments, and release obsolete resize observers.
+- Moved task-completion reminder guidance below its heading for clearer spacing.
+- Added conservative SSH process timing checks. Repeated zero readings for a verified process become “Runtime unavailable,” with a separate observed-running lower bound. Positive durations retain their existing behavior; observation does not reconstruct earlier runtime.
 - Refreshed application identity: one deep-teal and mint radar mark across the dashboard, welcome screens, Windows executable/taskbar/tray, and macOS Dock.
 - Fixed running Windows taskbar buttons losing the application icon when the native caption icon was hidden; packaged validation now checks both native window icon handles.
 - Explicit taskbar grouping and a dedicated icon resource keep running buttons and shortcuts on the new identity; the button is refreshed when its window is shown.
@@ -20,7 +23,7 @@ Publication requires source tests, JavaScript and Python syntax checks, native l
 
 ### Downloads and trust boundary
 
-The v0.9.6 downloads were refreshed with the new application icon. The version number remains unchanged; if you installed the earlier v0.9.6 package, download and reinstall this refreshed package to receive the icon update.
+The v0.9.6 downloads include the refreshed icon, interaction fixes, and process timing checks. The version number remains unchanged; if you installed an earlier v0.9.6 package, download and reinstall this refreshed package to receive these fixes.
 
 - Windows: `VRAMRadar-Setup-0.9.6.exe`.
 - macOS: `VRAMRadar-0.9.6-macos.zip`, containing separate native Apple Silicon and Intel applications.
@@ -35,6 +38,9 @@ The Windows installer remains unsigned, so SmartScreen may ask for confirmation.
 
 ### 主要变化
 
+- 修复进程、工作目录展开及后台刷新时的滚动干扰，保持当前服务器位置，并释放过期的尺寸监听。
+- 将任务结束提醒的说明移到标题下方，改善文字间距。
+- 增加 SSH 进程计时异常检查：确认是同一进程且持续返回零时，显示“运行时长不可用”，另列已观测运行下限。正常正数计时保持原样，观测下限不代表此前的完整运行时间。
 - 统一应用标识：界面、欢迎页、Windows 程序/任务栏/托盘及 macOS Dock 均采用深青与薄荷绿的新雷达图标。
 - 修复隐藏原生标题栏图标时，已打开窗口的 Windows 任务栏图标一并丢失的问题；打包验证现在会检查窗口的大、小图标句柄。
 - 明确指定任务栏分组及独立图标资源，并在窗口显示时刷新按钮，避免运行窗口及快捷方式继续使用旧图标。
@@ -51,7 +57,7 @@ The Windows installer remains unsigned, so SmartScreen may ask for confirmation.
 
 ### 下载与信任边界
 
-v0.9.6 下载包已更新为新版应用图标，版本号保持不变。已安装较早 v0.9.6 下载包的用户，请重新下载并安装本次更新包，以获得图标更新。
+v0.9.6 下载包包含新版图标、交互修复和进程计时检查，版本号保持不变。已安装较早 v0.9.6 下载包的用户，请重新下载并安装本次更新包。
 
 - Windows：`VRAMRadar-Setup-0.9.6.exe`。
 - macOS：`VRAMRadar-0.9.6-macos.zip`，内含 Apple Silicon 与 Intel 两套原生应用。
