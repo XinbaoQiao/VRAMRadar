@@ -727,7 +727,8 @@ function processCommandOpenAttr(serverId, process) {
 }
 
 function renderProcessName(process, serverId = '') {
-  const preview = String(process.command_preview || '').trim();
+  const preview = String(process.command_preview || '').trim()
+    .replaceAll('[已隐藏]', localizedText('[已隐藏]'));
   const command = preview
     ? `<details class="process-command-details" data-server-id="${escapeHtml(serverId)}" data-process-pid="${escapeHtml(process.pid)}" data-process-started="${escapeHtml(process.started_at || '')}"${processCommandOpenAttr(serverId, process)}><summary>查看命令摘要</summary><code>${escapeHtml(preview)}</code><small>敏感参数已遮盖${process.command_truncated ? ' · 已安全截断' : ''}</small></details>`
     : process.command_visibility === 'hidden_for_privacy'
@@ -1020,7 +1021,7 @@ function formatFileSize(value) {
     size /= 1024;
     unit += 1;
   }
-  return `${size.toLocaleString('zh-CN', {maximumFractionDigits: unit ? 1 : 0})} ${units[unit]}`;
+  return `${size.toLocaleString(activeLocale(), {maximumFractionDigits: unit ? 1 : 0})} ${units[unit]}`;
 }
 
 function directoryNodeOpen(serverId, path) {
@@ -3219,7 +3220,7 @@ function syncUnchangedSnapshotStatus(snapshot) {
     setRefreshClock(
       inFlight
         ? '后台读取中…界面仍可操作'
-        : `状态更新于 ${new Date(snapshotDataUpdatedAt(snapshot)).toLocaleTimeString('zh-CN')} · 每 ${snapshot.profile.refresh_seconds} 秒`,
+        : `状态更新于 ${new Date(snapshotDataUpdatedAt(snapshot)).toLocaleTimeString(activeLocale())} · 每 ${snapshot.profile.refresh_seconds} 秒`,
       inFlight,
     );
   }
@@ -3301,7 +3302,7 @@ function render(snapshot) {
     setRefreshClock(
       inFlight
         ? '后台读取中…界面仍可操作'
-        : `状态更新于 ${new Date(snapshotDataUpdatedAt(snapshot)).toLocaleTimeString('zh-CN')} · 每 ${snapshot.profile.refresh_seconds} 秒`,
+        : `状态更新于 ${new Date(snapshotDataUpdatedAt(snapshot)).toLocaleTimeString(activeLocale())} · 每 ${snapshot.profile.refresh_seconds} 秒`,
       inFlight,
     );
   }
@@ -3313,7 +3314,7 @@ function render(snapshot) {
 }
 
 function showToast(message) {
-  ui.toast.textContent = message;
+  ui.toast.textContent = localizedText(message);
   ui.toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { ui.toast.hidden = true; }, 3000);
@@ -3889,7 +3890,7 @@ async function configureServerSshKey(editor) {
   const confirmation = mode === 'generate'
     ? `将为“${targetName}”生成一把独立的 Ed25519 密钥。\n\n私钥只保存在本机且不会覆盖现有密钥；公钥只会追加到服务器，不替换 authorized_keys。若追加后验证或本地保存失败，为避免误删并发修改，应用会保留远端公钥和配套本地私钥，并提示重试或精确手动移除。是否继续？`
     : `将为“${targetName}”部署所选密钥的公钥。\n\n私钥不会上传；公钥只在无重复项时追加，不替换 authorized_keys。若追加后验证或本地保存失败，应用不会自动改写远端文件，会报告需要恢复并提示重试或精确手动移除。是否继续？`;
-  if (!window.confirm(confirmation)) return;
+  if (!window.confirm(localizedText(confirmation))) return;
 
   const controls = [...editor.querySelectorAll('.ssh-key-setup-body input, .ssh-key-setup-body button')];
   controls.forEach(control => { control.disabled = true; });
@@ -4656,7 +4657,7 @@ async function installLatestUpdate(button) {
     const explanation = reason
       ? `${portableHint}\n${localizedText(reason)}`
       : portableHint;
-    if (!window.confirm(explanation)) return;
+    if (!window.confirm(localizedText(explanation))) return;
     if (api?.open_latest_release) await api.open_latest_release();
     showToast(portableHint);
     return;
@@ -4664,7 +4665,7 @@ async function installLatestUpdate(button) {
   const explanation = latestUpdateAction === 'one_click'
     ? '将从官方 GitHub Release 下载并校验安装包。校验成功后应用会关闭、安装并自动重启；失败时保留当前版本。是否继续？'
     : '将从官方 GitHub Release 下载并校验更新包。校验成功后会在 Finder 中显示，仍需你手动替换应用。是否继续？';
-  if (!window.confirm(explanation)) return;
+  if (!window.confirm(localizedText(explanation))) return;
   latestUpdateProgress = {state: 'running', phase: 'checking', percent: null, message: ''};
   renderNotificationCenter(currentSnapshot);
   try {

@@ -61,6 +61,40 @@
     assertions.abnormal_timing_is_distinct_from_observed_lower_bound =
       abnormalTiming.includes('运行时长不可用') && abnormalTiming.includes('已观测运行至少') && !abnormalTiming.includes('0秒');
     assertions.normal_timing_display_is_unchanged = renderProcessElapsed({elapsed_seconds: 86400}) === '1天';
+    window.VRAMRadarI18n.setLanguage('en');
+    const translationProbe = document.createElement('div');
+    translationProbe.textContent = '已取消收藏 GPU';
+    translationProbe.setAttribute('title', '文件夹路径');
+    translationProbe.setAttribute('aria-label', '工作目录路径');
+    translationProbe.setAttribute('alt', '复制 SSH 命令');
+    translationProbe.setAttribute('data-label', '运行时长');
+    document.body.append(translationProbe);
+    showToast('已恢复监控');
+    await wait(100);
+    const hasChinese = value => /[一-鿿]/u.test(value);
+    assertions.dynamic_english_text_and_attributes_are_translated =
+      [translationProbe.textContent, ui.toast.textContent, ...['title', 'aria-label', 'alt', 'data-label'].map(name => translationProbe.getAttribute(name))].every(value => !hasChinese(value));
+    assertions.command_redaction_marker_is_english = renderProcessName({pid: 1,
+      name: 'train', command_preview: 'python train.py --token [已隐藏]'}).includes('[redacted]');
+    translationProbe.textContent = '已暂停这台服务器';
+    await wait(50);
+    assertions.dynamic_english_updates_are_translated = !hasChinese(translationProbe.textContent);
+    const originalConfirm = window.confirm;
+    const originalUpdateAction = latestUpdateAction;
+    let confirmationText = '';
+    try {
+      window.confirm = message => { confirmationText = message; return false; };
+      latestUpdateAction = 'one_click';
+      await installLatestUpdate(document.createElement('button'));
+    } finally {
+      window.confirm = originalConfirm;
+      latestUpdateAction = originalUpdateAction;
+    }
+    assertions.native_update_confirmation_is_english = confirmationText.includes('GitHub') && !hasChinese(confirmationText);
+    window.VRAMRadarI18n.setLanguage('zh-CN');
+    assertions.language_round_trip_restores_chinese = translationProbe.textContent === '已暂停这台服务器'
+      && translationProbe.getAttribute('title') === '文件夹路径';
+    translationProbe.remove();
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
         anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top}, scrollCalls};

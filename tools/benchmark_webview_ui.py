@@ -870,9 +870,9 @@ BENCHMARK_JAVASCRIPT = r"""
       ) untranslatedChinese.push((translationNode.nodeValue || '').trim());
       translationNode = translationWalker.nextNode();
     }
-    document.querySelectorAll('[aria-label], [title], [placeholder]').forEach(element => {
+    document.querySelectorAll('[aria-label], [title], [placeholder], [alt], [data-label]').forEach(element => {
       if (element.closest('template')) return;
-      for (const attribute of ['aria-label', 'title', 'placeholder']) {
+      for (const attribute of ['aria-label', 'title', 'placeholder', 'alt', 'data-label']) {
         const value = element.getAttribute(attribute) || '';
         if (/[\u3400-\u9fff]/u.test(value)) untranslatedChinese.push(`${attribute}: ${value}`);
       }

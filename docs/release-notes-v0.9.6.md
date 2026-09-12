@@ -4,6 +4,8 @@ This release introduces the Light Radar interface: quieter surfaces, clearer emp
 
 ### What changed
 
+- Completed English translations for dynamic feedback, SSH setup and errors, directory states, process durations, native confirmation dialogs, and narrow-window table labels. Dates and file sizes follow the selected language; user-provided names and paths are retained.
+- Added translation coverage tests and native interaction checks for dynamic content, accessibility attributes, confirmation dialogs, and switching back to Chinese.
 - Stabilized process/directory expansion and live refresh: preserve the visible server, cancel obsolete scroll adjustments, and release obsolete resize observers.
 - Moved task-completion reminder guidance below its heading for clearer spacing.
 - Added conservative SSH process timing checks. Repeated zero readings for a verified process become “Runtime unavailable,” with a separate observed-running lower bound. Positive durations retain their existing behavior; observation does not reconstruct earlier runtime.
@@ -23,7 +25,7 @@ Publication requires source tests, JavaScript and Python syntax checks, native l
 
 ### Downloads and trust boundary
 
-The v0.9.6 downloads include the refreshed icon, interaction fixes, and process timing checks. The version number remains unchanged; if you installed an earlier v0.9.6 package, download and reinstall this refreshed package to receive these fixes.
+The v0.9.6 downloads include the refreshed icon, interaction fixes, process timing checks, and English localization fixes. The version number remains unchanged; if you installed an earlier v0.9.6 package, download and reinstall this refreshed package to receive these fixes.
 
 - Windows: `VRAMRadar-Setup-0.9.6.exe`.
 - macOS: `VRAMRadar-0.9.6-macos.zip`, containing separate native Apple Silicon and Intel applications.
@@ -38,6 +40,8 @@ The Windows installer remains unsigned, so SmartScreen may ask for confirmation.
 
 ### 主要变化
 
+- 补齐动态提示、SSH 配置与错误、目录状态、进程时长、原生确认弹窗和窄窗口表格标签的英文翻译。日期与文件大小格式随所选语言切换，保留用户填写的名称与路径。
+- 增加翻译覆盖测试和原生交互检查，覆盖动态内容、无障碍属性、确认弹窗及切回中文的行为。
 - 修复进程、工作目录展开及后台刷新时的滚动干扰，保持当前服务器位置，并释放过期的尺寸监听。
 - 将任务结束提醒的说明移到标题下方，改善文字间距。
 - 增加 SSH 进程计时异常检查：确认是同一进程且持续返回零时，显示“运行时长不可用”，另列已观测运行下限。正常正数计时保持原样，观测下限不代表此前的完整运行时间。
@@ -57,7 +61,7 @@ The Windows installer remains unsigned, so SmartScreen may ask for confirmation.
 
 ### 下载与信任边界
 
-v0.9.6 下载包包含新版图标、交互修复和进程计时检查，版本号保持不变。已安装较早 v0.9.6 下载包的用户，请重新下载并安装本次更新包。
+v0.9.6 下载包包含新版图标、交互修复、进程计时检查及英文漏译修复，版本号保持不变。已安装较早 v0.9.6 下载包的用户，请重新下载并安装本次更新包。
 
 - Windows：`VRAMRadar-Setup-0.9.6.exe`。
 - macOS：`VRAMRadar-0.9.6-macos.zip`，内含 Apple Silicon 与 Intel 两套原生应用。

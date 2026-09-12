@@ -1195,7 +1195,7 @@ class WebUiContractTests(unittest.TestCase):
         for contract in (
             "async function configureServerSshKey",
             "api.configure_ssh_key(serverId",
-            "window.confirm(confirmation)",
+            "window.confirm(localizedText(confirmation))",
             "private_key_path",
             "public_key_path",
             "prefer_identity_auth",
@@ -1721,7 +1721,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("api.get_update_progress()", self.javascript)
         self.assertIn("function pollUpdateProgress", self.javascript)
         self.assertIn("api.install_latest_update()", self.javascript)
-        self.assertIn("window.confirm(explanation)", self.javascript)
+        self.assertIn("window.confirm(localizedText(explanation))", self.javascript)
         self.assertIn("latestUpdateAction === 'browser'", self.javascript)
         self.assertIn("open_latest_release", self.javascript)
         self.assertIn(".update-notice", self.styles)
