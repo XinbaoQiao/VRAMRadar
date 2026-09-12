@@ -179,16 +179,29 @@ def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
         "--no-auto-import",
         *extra_args,
     ]
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        env=finder_like_environment(),
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env=finder_like_environment(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        # This home is an empty validation Profile with auto-import disabled.
+        # Preserve bounded diagnostics before main() removes its temporary home.
+        log_path = home / "logs" / "app.log"
+        log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:] if log_path.is_file() else "no app log"
+        stderr = exc.stderr or ""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"packaged macOS smoke timed out ({extra_args!r}, {timeout}s); "
+            f"stderr={stderr[-2000:]!r}; app_log={log_tail!r}"
+        ) from exc
     if result.returncode != 0:
         detail = result.stderr.strip()[-500:] or "no diagnostic detail"
         raise RuntimeError(
