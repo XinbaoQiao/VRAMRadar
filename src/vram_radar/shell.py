@@ -4457,6 +4457,12 @@ def main(argv: list[str] | None = None) -> int:
     update_smoke_completed = threading.Event()
     update_smoke_result: dict[str, Any] = {}
     if args.gui_update_smoke:
+        # Only the disposable packaged smoke enables this diagnostic timer.
+        # Capture native bridge/shutdown stalls before the outer validator kills it.
+        import faulthandler
+        faulthandler.enable()
+        faulthandler.dump_traceback_later(40.0)
+
         def observe_update_smoke(value: dict[str, Any]) -> None:
             update_smoke_result.clear()
             update_smoke_result.update(value)
@@ -4629,6 +4635,8 @@ def main(argv: list[str] | None = None) -> int:
                 finally:
                     shutdown.request()
                     api._bind_update_check_observer(None)
+                    if args.gui_update_smoke:
+                        faulthandler.cancel_dump_traceback_later()
                     if not shutdown.wait(timeout=15):
                         logging.getLogger("vram_radar").error(
                             "desktop shutdown did not finish within 15 seconds"
