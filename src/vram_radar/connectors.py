@@ -2839,11 +2839,12 @@ fi
         elif stripped:
             allocation_lines.append(raw)
     slurm_allocations = parse_job_rows("\n".join(allocation_lines))
-    unknown_allocation_nodes = {
+    known_allocation_nodes = {
         row.split("|", 1)[0].strip()
         for row in allocation_lines
-        if row.endswith("|__UNKNOWN__")
+        if not row.endswith("|__UNKNOWN__")
     }
+    unknown_allocation_nodes = {node["node"] for node in parsed_nodes} - known_allocation_nodes
     visible_task_allocations = allocated_gpus_from_tasks(live_tasks)
     used_by_node = {
         node["node"]: (

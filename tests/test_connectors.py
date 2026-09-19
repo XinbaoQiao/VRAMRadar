@@ -512,6 +512,8 @@ esac
             for body, free, supported in (
                 ("printf '%s\\n' 'NodeName=gpu-1 GresUsed=gpu:A100:0(IDX:N/A) AllocTRES=cpu=4'", 2, True),
                 ("printf '%s\\n' 'NodeName=gpu-1 CfgTRES=cpu=8,gres/gpu=2 AllocTRES=cpu=4'", 0, False),
+                ("printf '%s\\n' 'NodeName=other-node GresUsed=gpu:A100:0(IDX:N/A)'", 0, False),
+                ("exit 0", 0, False),
                 ("exit 7", 0, False),
             ):
                 with self.subTest(body=body):
