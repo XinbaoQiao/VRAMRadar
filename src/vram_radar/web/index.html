@@ -44,7 +44,7 @@
           <span><strong>1</strong>自动发现</span><span><strong>2</strong>检查登录方式</span><span><strong>3</strong>保存并开始监控</span>
         </div>
         <button id="start-onboarding" class="button primary first-run-action" type="button">开始配置</button>
-        <small>没有 SSH 配置也没关系，向导内有 Windows 和 macOS 的完整教程。</small>
+        <small>若尚无 SSH 配置，可在向导中查看 Windows 与 macOS 说明。</small>
       </section>
 
       <div id="dashboard-content" hidden>
@@ -107,7 +107,7 @@
     <nav id="server-navigator" class="server-navigator" data-side="right" aria-label="服务器快速导航" hidden>
       <div class="server-navigator-panel">
         <header class="server-navigator-head">
-          <button id="server-navigator-drag" class="server-navigator-drag" type="button" aria-label="服务器目录在右侧，拖动或按回车移到左侧" title="拖动到左侧或右侧">
+          <button id="server-navigator-drag" class="server-navigator-drag" type="button" aria-label="服务器目录在右侧；拖动或按回车移至左侧" title="拖动到左侧或右侧">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="7" r="1"></circle><circle cx="15" cy="7" r="1"></circle><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="9" cy="17" r="1"></circle><circle cx="15" cy="17" r="1"></circle></svg>
           </button>
           <strong>服务器</strong>
@@ -142,7 +142,7 @@
   <dialog id="settings-dialog">
     <form id="settings-form" method="dialog">
       <header class="dialog-header">
-        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">先用自动发现完成常见设置，需要时再展开登录与高级选项。</p></div>
+        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">先通过自动发现完成基础设置；需要时展开登录与高级选项。</p></div>
         <div class="dialog-header-actions">
           <div id="settings-disclosure-tools" class="disclosure-tools" aria-label="设置内容显示方式">
             <button id="collapse-settings" class="button compact-button" type="button">一键收起</button>
@@ -193,7 +193,7 @@
         </details>
         <details id="import-panel" class="import-panel settings-group">
           <summary class="settings-section-heading import-intro">
-            <div><h3>服务器发现与导入</h3><p>自动读取本机 SSH 配置；检测不到时再查看教程</p></div>
+            <div><h3>服务器发现与导入</h3><p>自动读取本机 SSH 配置；未检测到时查看说明</p></div>
             <span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span>
           </summary>
           <div class="settings-group-body import-panel-body">
@@ -218,7 +218,7 @@
               <details class="platform-guide" open data-default-open>
                 <summary><span><strong>Windows 教程</strong><small>PowerShell 是 Windows 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
                 <div class="platform-guide-body">
-                  <div class="guide-launcher"><div><strong>先打开 PowerShell</strong><p>点击右侧按钮即可打开；也可以按 Windows 键，搜索 <b>PowerShell</b>。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="windows">一键打开 PowerShell</button></div>
+                  <div class="guide-launcher"><div><strong>先打开 PowerShell</strong><p>点击右侧按钮打开，或按 Windows 键搜索 <b>PowerShell</b>。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="windows">一键打开 PowerShell</button></div>
                   <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的 PowerShell，再按 Enter。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-find-config" aria-label="复制 Windows 查找 SSH 配置命令">复制</button><pre><code id="windows-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | Select-String "Reading configuration data"</code></pre></div></div></section>
                   <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>如果上一步没有显示用户配置，检查 <code>%USERPROFILE%\.ssh\config</code> 或 <code>%HOME%\.ssh\config</code>。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-list-ssh" aria-label="复制 Windows 查看 SSH 目录命令">复制</button><pre><code id="windows-list-ssh">Get-ChildItem -Force "$HOME\.ssh"</code></pre></div></div></section>
                   <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令只会确保 <code>.ssh</code> 目录存在，然后用记事本打开配置文件；已有文件不会被清空。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-open-config" aria-label="复制 Windows 创建 SSH 配置命令">复制</button><pre><code id="windows-open-config">New-Item -ItemType Directory -Force "$HOME\.ssh" | Out-Null; notepad "$HOME\.ssh\config"</code></pre></div></div></details>
@@ -228,7 +228,7 @@
               <details class="platform-guide">
                 <summary><span><strong>macOS 教程</strong><small>“终端”是 macOS 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
                 <div class="platform-guide-body">
-                  <div class="guide-launcher"><div><strong>先打开“终端”</strong><p>点击右侧按钮即可打开；也可以按 Command + 空格，搜索“终端”。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="macos">一键打开终端</button></div>
+                  <div class="guide-launcher"><div><strong>先打开“终端”</strong><p>点击右侧按钮打开终端，或按 Command + 空格搜索“终端”。仅打开窗口，不自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="macos">一键打开终端</button></div>
                   <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的终端，再按 Return。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-find-config" aria-label="复制 macOS 查找 SSH 配置命令">复制</button><pre><code id="macos-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | grep "Reading configuration data"</code></pre></div></div></section>
                   <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>通常是 <code>~/.ssh/config</code>；也可能是 <code>~/.config/ssh/config</code>、Colima 或 OrbStack 的配置。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-list-ssh" aria-label="复制 macOS 查看 SSH 目录命令">复制</button><pre><code id="macos-list-ssh">ls -la ~/.ssh</code></pre></div></div></section>
                   <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令会创建标准目录和文件、设置推荐权限，再用文本编辑器打开。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-open-config" aria-label="复制 macOS 创建 SSH 配置命令">复制</button><pre><code id="macos-open-config">mkdir -p ~/.ssh &amp;&amp; touch ~/.ssh/config &amp;&amp; chmod 600 ~/.ssh/config &amp;&amp; open -e ~/.ssh/config</code></pre></div></div></details>
@@ -252,7 +252,7 @@
           </details>
           </div>
         </details>
-        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动左侧手柄排序；使用键盘时，聚焦手柄后按上下方向键。连接与登录细节仍放在第二层设置中。</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动以调整服务器顺序</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
           <span id="server-editor-page-status" class="server-editor-page-status" aria-live="polite"></span>
@@ -276,7 +276,7 @@
   <template id="server-editor-template">
     <details class="server-editor">
       <summary class="server-editor-head">
-        <span class="server-editor-title"><span class="server-drag-handle" role="button" tabindex="0" draggable="true" title="拖动排序；也可按上下方向键" aria-label="拖动服务器排序" aria-describedby="server-order-instructions"><svg viewBox="0 0 16 20" aria-hidden="true" focusable="false"><circle cx="5" cy="4" r="1.25"></circle><circle cx="11" cy="4" r="1.25"></circle><circle cx="5" cy="10" r="1.25"></circle><circle cx="11" cy="10" r="1.25"></circle><circle cx="5" cy="16" r="1.25"></circle><circle cx="11" cy="16" r="1.25"></circle></svg></span><span class="server-position" aria-hidden="true">01</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
+        <span class="server-editor-title"><span class="server-drag-handle" role="button" tabindex="0" draggable="true" title="拖动以调整服务器顺序" aria-label="拖动以调整服务器顺序" aria-describedby="server-order-instructions"><svg viewBox="0 0 16 20" aria-hidden="true" focusable="false"><circle cx="5" cy="4" r="1.25"></circle><circle cx="11" cy="4" r="1.25"></circle><circle cx="5" cy="10" r="1.25"></circle><circle cx="11" cy="10" r="1.25"></circle><circle cx="5" cy="16" r="1.25"></circle><circle cx="11" cy="16" r="1.25"></circle></svg></span><span class="server-position" aria-hidden="true">01</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
         <span class="summary-action"><span class="when-closed">编辑</span><span class="when-open">收起</span></span>
       </summary>
       <div class="server-editor-body">
@@ -290,7 +290,7 @@
         <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option></select><small>自动识别会在保存验证时实际连接；失败后可手动指定。</small></label>
         <label><span>OpenSSH 别名（优先）</span><input data-field="ssh_alias" placeholder="gpu-lab"></label>
         <label><span>主机地址</span><input data-field="host" placeholder="gpu.example.edu"></label>
-        <p class="editor-help primary-help">OpenSSH 别名与主机地址填写一个即可。自动导入会沿用 SSH Config，并尽量确认私钥路径和连接类型。</p>
+        <p class="editor-help primary-help">填写 OpenSSH 别名或主机地址之一。自动导入将沿用 SSH Config，并确认私钥路径与连接类型。</p>
       </div>
       <div class="connection-test-result" role="status" aria-live="polite" hidden></div>
       <details class="server-editor-more">
@@ -319,7 +319,7 @@
       <details class="ssh-key-setup">
         <summary><span><strong>一键配置 SSH 免密登录</strong><small data-key-setup-overview>安全生成或复用密钥，部署后自动验证</small></span><span class="summary-action"><span class="when-closed">开始</span><span class="when-open">收起</span></span></summary>
         <div class="ssh-key-setup-body">
-          <p class="ssh-key-intro"><strong>SSH Key</strong> 是更方便的服务器登录方式。配置完成后，后续连接通常不需要重复输入密码。</p>
+          <p class="ssh-key-intro"><strong>SSH Key</strong> 用于服务器免密登录。配置完成后，后续连接通常无需再次输入密码。</p>
           <ul class="ssh-key-safety">
             <li>私钥始终留在本机；只把公钥写入当前账号的 <code>authorized_keys</code>。</li>
             <li>远端只做非替换式追加；会检查重复项、文件类型、所有者和权限。</li>

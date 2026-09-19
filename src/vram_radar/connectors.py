@@ -2630,10 +2630,12 @@ fi
 printf '{SLURM_INVENTORY_MODE_MARKER}%s\\n' "$inventory_mode"
 printf '%s\\n' "$node_rows"
 printf '{SPLIT_MARKER}\\n'
-if allocation_rows=$(scontrol show nodes -o | awk '
+if allocation_nodes=$(scontrol show nodes -d -o); then
+    allocation_rows=$(printf '%s\\n' "$allocation_nodes" | awk '
 {{
     node = ""
     alloc = ""
+    used = ""
     for (i = 1; i <= NF; i++) {{
         if ($i ~ /^NodeName=/) {{
             node = $i
@@ -2641,11 +2643,20 @@ if allocation_rows=$(scontrol show nodes -o | awk '
         }} else if ($i ~ /^AllocTRES=/) {{
             alloc = $i
             sub(/^AllocTRES=/, "", alloc)
+        }} else if ($i ~ /^GresUsed=/) {{
+            used = $i
+            sub(/^GresUsed=/, "", used)
         }}
     }}
-    if (node != "")
-        printf "%s|%s\\n", node, alloc
-}}'); then
+    if (node != "") {{
+        if (used ~ /(^|,)gpu[:=]/)
+            printf "%s|%s\\n", node, used
+        else if (alloc ~ /gres[/]gpu/)
+            printf "%s|%s\\n", node, alloc
+        else
+            printf "%s|__UNKNOWN__\\n", node
+    }}
+}}')
     printf '{SLURM_ALLOCATION_SUPPORT_MARKER}1|0\\n'
     printf '%s\\n' "$allocation_rows"
 else
@@ -2828,6 +2839,11 @@ fi
         elif stripped:
             allocation_lines.append(raw)
     slurm_allocations = parse_job_rows("\n".join(allocation_lines))
+    unknown_allocation_nodes = {
+        row.split("|", 1)[0].strip()
+        for row in allocation_lines
+        if row.endswith("|__UNKNOWN__")
+    }
     visible_task_allocations = allocated_gpus_from_tasks(live_tasks)
     used_by_node = {
         node["node"]: (
@@ -2835,7 +2851,7 @@ fi
                 slurm_allocations.get(node["node"], 0),
                 visible_task_allocations.get(node["node"], 0),
             )
-            if allocation_detail_supported
+            if allocation_detail_supported and node["node"] not in unknown_allocation_nodes
             # Without scheduler-wide allocation detail, visible squeue rows may
             # cover only the current account. Treat capacity as unavailable
             # rather than inventing free GPUs that another user may own.
@@ -2850,9 +2866,10 @@ fi
         job_ids_by_node=job_ids_by_node_from_tasks(live_tasks),
         live_tasks=live_tasks,
     )
-    if not allocation_detail_supported:
-        for node in nodes:
+    for node in nodes:
+        if not allocation_detail_supported or node["node"] in unknown_allocation_nodes:
             node["allocation_detail_supported"] = False
+            node["free_vram_gib"] = None
     counts: dict[str, int] = {}
     for task in [*live_tasks, *recent_tasks]:
         counts[task["state"]] = counts.get(task["state"], 0) + 1
@@ -2884,7 +2901,9 @@ fi
         },
         "account": _account_summary(current_user, home_directory),
         "slurm_capabilities": {
-            "node_allocation_detail": allocation_detail_supported,
+            "node_allocation_detail": allocation_detail_supported and not any(
+                node.get("allocation_detail_supported") is False for node in nodes
+            ),
             "node_allocation_exit_code": allocation_detail_exit_code,
             "task_gpu_request_detail": queue_detail_supported,
             "queue_scope": queue_scope_mode,

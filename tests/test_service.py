@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from vram_radar.connectors import ConnectorFailure
 from vram_radar.models import Profile
 from vram_radar.service import (
+    _aggregate_node_groups,
     DashboardService,
     connection_fingerprint,
     favorite_resource_matches,
@@ -95,6 +96,21 @@ def scheduler_payload(node_count: int = 1000) -> dict:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_node_group_preserves_unknown_allocation_capacity(self):
+        known = {
+            "node": "gpu-1", "partition": "gpu", "gpu_type": "A100", "state": "mix",
+            "total_gpus": 2, "free_gpus": 1, "total_vram_gib": 80, "free_vram_gib": 40,
+        }
+        unknown = {
+            **known, "node": "gpu-2", "free_gpus": 0, "free_vram_gib": None,
+            "allocation_detail_supported": False,
+        }
+        group = _aggregate_node_groups([known, unknown])[0]
+        self.assertFalse(group["allocation_detail_supported"])
+        self.assertIsNone(group["free_vram_gib"])
+        self.assertEqual(group["total_gpus"], 4)
+        self.assertEqual(group["free_gpus"], 1)  # Only proven free devices can match requests.
+
     def test_favorite_resource_matches_live_direct_idle_or_memory_threshold(self):
         snapshot = {
             "servers": [

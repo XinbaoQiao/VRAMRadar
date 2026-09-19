@@ -33,16 +33,15 @@
 
 ![VRAM Radar overview](docs/assets/vram-radar-overview.png)
 
-## Latest update · v0.9.6
+## Latest update · v0.9.7
 
-The refreshed v0.9.6 packages include the Light Radar interface, a consistent application icon, more stable navigation, and checks for unreliable SSH process timing.
+Slurm GPU allocation now stays visible when other users' task details are hidden.
 
-- Lighter surfaces, aligned modules, translucent scrollbars, and subtle motion that respects reduced-motion settings.
-- Process and directory expansion no longer schedules repeated scroll corrections; live refresh preserves the visible server's position.
-- Task-completion guidance is separated from its heading, and old resize observers are released as cards are replaced.
-- Normal process durations keep their existing behavior. Persistent zero readings are checked before being presented as unavailable; an observed-running lower bound is shown separately when the process identity can be verified.
+- Read allocated GPU counts directly from scheduler node details, including clusters that omit GPUs from `AllocTRES`.
+- Keep unavailable allocation data marked unknown instead of reporting free GPUs.
+- Simplify setup guidance and fix English accessibility labels for server navigation and ordering.
 
-**Already using v0.9.6? Download and reinstall the refreshed package from [Latest Release](../../releases/latest). The version number has not changed.** See the [release notes](docs/release-notes-v0.9.6.md) for details.
+Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.7.md).
 
 ## Vibe Coding made the code flow easier—and the server state harder to feel
 
@@ -98,12 +97,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.9.6**.
+The current public stable release is **v0.9.7**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.6.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.9.6-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-0.9.7.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-0.9.7-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -112,7 +111,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.6 release notes](docs/release-notes-v0.9.6.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.7 release notes](docs/release-notes-v0.9.7.md) for the exact boundaries.
 
 ## Local-first by design
 

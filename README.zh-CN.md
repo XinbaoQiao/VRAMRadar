@@ -35,16 +35,15 @@
   <img src="docs/assets/readme/vibe-coding-cover.webp" width="560" alt="Vibe Coding 越顺手，GPU 状态反而越难感知">
 </p>
 
-## 最新更新 · v0.9.6
+## 最新更新 · v0.9.7
 
-当前更新为 **v0.9.6 刷新版**，包含 Light Radar 界面、统一应用图标、交互稳定性修复和 SSH 进程计时检查。
+关闭其他用户的任务详情后，仍然正确显示 Slurm 的 GPU 分配和调度显存占用。
 
-- 简化界面层次，统一模块对齐，采用半透明滚动条和尊重系统“减少动态效果”设置的轻量动效。
-- 修正进程、工作目录展开时的重复滚动调整，后台刷新时保持当前服务器的位置。
-- 将任务结束提醒的说明放到标题下方，并在卡片替换时释放过期的尺寸监听。
-- 正常进程计时保持原样；持续返回零的异常数据经过检查后明确显示为不可用，能够验证进程身份时另列已观测运行下限。
+- 直接读取调度器节点的 GPU 分配数，兼容 `AllocTRES` 不含 GPU 的集群。
+- 无法读取分配信息时显示未知，不再误报 GPU 空闲。
+- 简化配置引导，补齐服务器导航和排序的英文无障碍标签。
 
-**已经安装 v0.9.6？请从 [Latest Release](../../releases/latest) 重新下载并安装刷新后的安装包，版本号没有变化。** 详细内容见 [发布说明](docs/release-notes-v0.9.6.md)。
+从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v0.9.7.md)。
 
 ## 为什么做这个工具
 
@@ -113,19 +112,19 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 
 ## 下载与首次启动边界
 
-当前公开稳定版为 **v0.9.6**。
+当前公开稳定版为 **v0.9.7**。
 
 | 平台 | 下载文件 | 当前边界 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.6.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-0.9.6-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-0.9.7.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
+| macOS | `VRAMRadar-0.9.7-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
 
 Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
 更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
 macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
 **打开**，不要关闭 Gatekeeper。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.6 发布说明](docs/release-notes-v0.9.6.md)。
+Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.7 发布说明](docs/release-notes-v0.9.7.md)。
 
 ## 本地优先，不接管你的基础设施
 

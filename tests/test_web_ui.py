@@ -525,7 +525,7 @@ class WebUiContractTests(unittest.TestCase):
         for selector in ("server-drag-handle", "server-position", "server-order-status"):
             self.assertIn(selector, self.markup)
         self.assertIn('draggable="true"', self.markup)
-        self.assertIn("聚焦手柄后按上下方向键", self.markup)
+        self.assertIn("拖动以调整服务器顺序", self.markup)
         self.assertNotIn("move-server-up", self.markup)
         self.assertNotIn("move-server-down", self.markup)
         for text in (
@@ -1005,7 +1005,7 @@ class WebUiContractTests(unittest.TestCase):
             "先添加一台 GPU 服务器",
             "自动发现",
             "检查并完成",
-            "没有 SSH 配置也没关系",
+            "若尚无 SSH 配置",
             "稍后设置",
         ):
             self.assertIn(text, self.markup)
@@ -1072,7 +1072,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertLess(editor_template.index('<details class="ssh-key-setup">'), body_end)
         self.assertIn('<details class="server-editor-more">', self.markup)
         self.assertIn("登录与高级设置", self.markup)
-        self.assertIn("连接与登录细节仍放在第二层设置中", self.markup)
+        self.assertIn("拖动以调整服务器顺序", self.markup)
         self.assertIn('data-server-editor-name', self.markup)
         self.assertIn('data-auth-overview', self.markup)
         self.assertIn("refreshEditorName", self.javascript)

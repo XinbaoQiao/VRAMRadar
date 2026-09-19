@@ -475,6 +475,9 @@ def _aggregate_node_groups(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
             task_ids[key] = set()
             anonymous_task_counts[key] = 0
         group = grouped[key]
+        if node.get("allocation_detail_supported") is False:
+            group["allocation_detail_supported"] = False
+            unknown_free_vram.add(key)
         group["node_count"] += 1
         group["available_nodes"] += int(int(node.get("free_gpus") or 0) > 0 and not _node_has_issue(node))
         group["issue_nodes"] += int(_node_has_issue(node))

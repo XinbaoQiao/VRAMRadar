@@ -454,6 +454,83 @@ class ConnectorTests(unittest.TestCase):
         self.assertNotIn(" -t PENDING,RUNNING", script)
         self.assertNotIn("squeue -t RUNNING -h -o '%i|%N|%b'", script)
 
+    def test_slurm_capacity_is_independent_of_other_user_visibility(self):
+        # A100's AllocTRES contains CPU only; detailed GresUsed owns GPU usage.
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            self._write_fake_command(root, "sinfo", "printf '%s\\n' 'gpu-1|gpu|mix|gpu:A100:2'")
+            self._write_fake_command(root, "sacct", "exit 1")
+            self._write_fake_command(root, "squeue", """
+case " $* " in
+  *" -a "*) printf '%s\\n' '101|RUNNING|other|00:10|01:00||gpu-1|gpu-1|1|gres/gpu:1|private-job' ;;
+esac
+printf '%s\\n' "102|PENDING|$(id -un)|00:00|01:00|||(Priority)|1|gres/gpu:1|my-job"
+""")
+            root_posix = self._posix_bash_path(root)
+            for fields, expected, known in (
+                ("GresUsed=gpu:A100:1(IDX:0) AllocTRES=cpu=4", 1, True),
+                ("GresUsed=gpu:A100:1(IDX:0) AllocTRES=cpu=4,gres/gpu=1", 1, True),
+                ("GresUsed=gpu:A100:2(IDX:0-1) AllocTRES=cpu=4", 2, True),
+                ("AllocTRES=cpu=4,gres/gpu=1", 1, True),
+                ("AllocTRES=cpu=4", 2, False),
+            ):
+                self._write_fake_command(root, "scontrol", f"""
+case " $* " in
+  *" -d "*) printf '%s\\n' 'NodeName=gpu-1 {fields}' ;;
+  *) printf '%s\\n' 'NodeName=gpu-1 AllocTRES=cpu=4' ;;
+esac
+""")
+                for show_others in (False, True):
+                    with self.subTest(fields=fields, show_others=show_others):
+                        server = ServerProfile(
+                            id="cluster", display_name="Cluster", backend="slurm_ssh",
+                            ssh_alias="cluster", slurm_bin_directory=root_posix,
+                            gpu_memory_gib={"A100": 40}, show_other_user_commands=show_others,
+                        )
+                        with patch("vram_radar.connectors.run_remote", side_effect=self._bash_remote_runner(
+                            f"{root_posix}:/usr/bin:/bin"
+                        )):
+                            snapshot = query_slurm_ssh(server)
+                        node = snapshot["nodes"][0]
+                        self.assertEqual(node["allocated_gpus"], expected)
+                        self.assertEqual(node["free_gpus"], 2 - expected)
+                        self.assertEqual(node["free_vram_gib"], (2 - expected) * 40 if known else None)
+                        self.assertEqual(snapshot["slurm_capabilities"]["node_allocation_detail"], known)
+                        self.assertEqual(node.get("allocation_detail_supported", True), known)
+                        self.assertEqual(len(snapshot["tasks"]["active"]), 2 if show_others else 1)
+                        if not show_others:
+                            self.assertNotIn("private-job", json.dumps(snapshot))
+                            self.assertEqual(node["tasks"], [])
+
+    def test_slurm_zero_allocation_and_missing_node_permission(self):
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            self._write_fake_command(root, "sinfo", "printf '%s\\n' 'gpu-1|gpu|mix|gpu:A100:2'")
+            self._write_fake_command(root, "squeue", "exit 0")
+            self._write_fake_command(root, "sacct", "exit 1")
+            root_posix = self._posix_bash_path(root)
+            for body, free, supported in (
+                ("printf '%s\\n' 'NodeName=gpu-1 GresUsed=gpu:A100:0(IDX:N/A) AllocTRES=cpu=4'", 2, True),
+                ("printf '%s\\n' 'NodeName=gpu-1 CfgTRES=cpu=8,gres/gpu=2 AllocTRES=cpu=4'", 0, False),
+                ("exit 7", 0, False),
+            ):
+                with self.subTest(body=body):
+                    self._write_fake_command(root, "scontrol", body)
+                    server = ServerProfile(
+                        id="cluster", display_name="Cluster", backend="slurm_ssh",
+                        ssh_alias="cluster", slurm_bin_directory=root_posix,
+                        gpu_memory_gib={"A100": 40}, show_other_user_commands=False,
+                    )
+                    with patch("vram_radar.connectors.run_remote", side_effect=self._bash_remote_runner(
+                        f"{root_posix}:/usr/bin:/bin"
+                    )):
+                        snapshot = query_slurm_ssh(server)
+                    self.assertEqual(snapshot["free_gpus"], free)
+                    self.assertEqual(snapshot["slurm_capabilities"]["node_allocation_detail"], supported)
+                    if not supported:
+                        self.assertEqual(snapshot["slurm_capabilities"]["node_allocation_exit_code"], 7 if body == "exit 7" else 0)
+                        self.assertFalse(snapshot["nodes"][0]["allocation_detail_supported"])
+
     def test_generated_slurm_collector_executes_real_fallback_branches(self):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
             root = Path(temporary)

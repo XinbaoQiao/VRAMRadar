@@ -880,7 +880,7 @@ function renderLargeClusterSummary(server) {
   if (!groups.length) return '<div class="large-cluster-empty">容量汇总将在刷新后显示</div>';
   return `<div class="cluster-group-grid">${groups.map(group => {
     const totalNodes = group.total_nodes ?? group.node_count;
-    const freeGpus = group.free_gpus ?? group.available_gpus;
+    const freeGpus = group.allocation_detail_supported === false ? null : (group.free_gpus ?? group.available_gpus);
     const totalGpus = group.total_gpus;
     const issueNodes = group.issue_nodes ?? group.unavailable_nodes ?? 0;
     return `<article class="cluster-group"><div><strong>${escapeHtml(formatGpuType(group.gpu_type))}</strong><span>${escapeHtml(group.partition || '未分区')}</span></div><dl><div><dt>空闲 GPU</dt><dd>${number(freeGpus)} / ${number(totalGpus)}</dd></div><div><dt>节点</dt><dd>${number(totalNodes)}</dd></div>${Number(issueNodes) ? `<div class="issue"><dt>异常</dt><dd>${number(issueNodes)}</dd></div>` : ''}</dl></article>`;
@@ -2108,7 +2108,7 @@ function applyServerNavigatorSide(side) {
   ui.serverNavigator.dataset.side = serverNavigatorSide;
   const currentLabel = serverNavigatorSide === 'left' ? '左侧' : '右侧';
   const targetLabel = serverNavigatorSide === 'left' ? '右侧' : '左侧';
-  ui.serverNavigatorDrag.setAttribute('aria-label', `服务器目录在${currentLabel}，拖动或按回车移到${targetLabel}`);
+  ui.serverNavigatorDrag.setAttribute('aria-label', `服务器目录在${currentLabel}；拖动或按回车移至${targetLabel}`);
   ui.serverNavigatorDrag.title = `拖动到${targetLabel}`;
 }
 
@@ -3718,7 +3718,7 @@ function refreshServerEditorOrder() {
       ? '清除搜索后可排序'
       : settingsServerDrafts.length <= 1
         ? '仅一台服务器，无需排序'
-        : `拖动第 ${position} 台服务器排序；按上下方向键微调`);
+        : `拖动以调整第 ${position} 台服务器的顺序`);
   });
 }
 
@@ -4284,8 +4284,8 @@ function setSettingsMode(mode) {
   ui.dialogKicker.textContent = onboarding ? '首次使用引导' : '设置与服务器';
   ui.dialogTitle.textContent = onboarding ? '欢迎使用显存雷达' : '本地配置';
   ui.dialogDescription.textContent = onboarding
-    ? '按三个简单步骤完成第一台服务器配置，详细教程随时可以展开。'
-    : '先用自动发现完成常见设置，需要时再展开登录与高级选项。';
+    ? '按三步完成首台服务器配置；需要时展开详细说明。'
+    : '先通过自动发现完成基础设置；需要时展开登录与高级选项。';
   ui.settingsDisclosureTools.hidden = onboarding;
   ui.closeSettings.hidden = onboarding;
   ui.cancelSettings.hidden = onboarding;
