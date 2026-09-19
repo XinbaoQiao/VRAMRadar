@@ -2651,7 +2651,7 @@ if allocation_nodes=$(scontrol show nodes -d -o); then
     if (node != "") {{
         if (used ~ /(^|,)gpu[:=]/)
             printf "%s|%s\\n", node, used
-        else if (alloc ~ /gres[/]gpu/)
+        else if (index(alloc, "gres/gpu") > 0)
             printf "%s|%s\\n", node, alloc
         else
             printf "%s|__UNKNOWN__\\n", node
