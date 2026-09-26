@@ -84,6 +84,9 @@ const ui = {
   onboardingProgress: document.getElementById('onboarding-progress'),
   onboardingWelcome: document.getElementById('onboarding-welcome'),
   profileSettings: document.getElementById('profile-settings'),
+  extensionsSettings: document.getElementById('extensions-settings'),
+  codexEnabled: document.getElementById('quota-usage-enabled'),
+  codexExecutable: document.getElementById('quota-executable'),
   importPanel: document.getElementById('import-panel'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
@@ -96,6 +99,10 @@ const ui = {
 };
 
 let currentProfile = null;
+let codexUsageState = {state: 'disabled', windows: []};
+let codexUsageTimer = null;
+let codexUsageBusy = false;
+let codexSettingsBusy = false;
 let pendingAliasChoices = [];
 let aliasChoiceDeferredThisSession = false;
 let aliasChoicePromptedSignature = '';
@@ -142,6 +149,24 @@ let lastStuckServerId = '';
 let lastStickyActiveModule = null;
 let lastLocationStripKey = '';
 const lastServerHeadHeightByCard = new WeakMap();
+const expandedServerHeadHeight = new WeakMap();
+
+function reserveServerHeadSpace(card, head, stuck) {
+  if (!head.classList.contains('is-stuck')) {
+    expandedServerHeadHeight.set(card, head.getBoundingClientRect().height);
+  }
+  head.classList.toggle('is-stuck', stuck);
+  let spacer = card.querySelector('.server-head-spacer');
+  if (!spacer) {
+    spacer = document.createElement('div');
+    spacer.className = 'server-head-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
+    head.after(spacer);
+  }
+  const delta = stuck ? Math.max(0, (expandedServerHeadHeight.get(card) || head.getBoundingClientRect().height)
+    - head.getBoundingClientRect().height) : 0;
+  spacer.style.height = `${layoutPxFromViewportRect(delta)}px`;
+}
 const lastStuckServerHeadHeightByCard = new WeakMap();
 let serverNavigationCards = [];
 let serverNavigationCardsById = new Map();
@@ -1461,7 +1486,8 @@ function clearStuckServerHead(serverId) {
   if (!serverId) return;
   const card = serverNavigationCardsById.get(serverId)
     || document.querySelector(`.server-card[data-server-id="${CSS.escape(serverId)}"]`);
-  card?.querySelector('.server-head')?.classList.remove('is-stuck');
+  const head = card?.querySelector('.server-head');
+  if (head) reserveServerHeadSpace(card, head, false);
 }
 
 function updateStuckChrome() {
@@ -1484,7 +1510,7 @@ function updateStuckChrome() {
     if (!head) continue;
 
     const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebar + 1 : false;
-    head.classList.toggle('is-stuck', isStuck);
+    reserveServerHeadSpace(card, head, isStuck);
     const headHeight = setServerHeadHeight(card, head);
     if (isStuck) stuckServerId = card.dataset.serverId || stuckServerId;
 
@@ -2262,10 +2288,126 @@ function acceptProfile(candidate) {
     ) return false;
   }
   currentProfile = candidate;
+  if (!navigatorResizeState && !navigatorSizeSaving) applyNavigatorSize(candidate.navigator_width || 0, candidate.navigator_height || 0);
   window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN');
   syncProfileConvenienceState(currentProfile);
   syncPendingAliasChoices(currentProfile);
+  void pollCodexUsage();
   return true;
+}
+
+function codexUsageMessage(state) {
+  if (!currentProfile?.codex_usage_enabled) return '额度监测已关闭';
+  if (state.state === 'loading') return '正在读取 Codex 额度…';
+  const errors = {
+    not_installed: '尚未找到 Codex，安装后会自动连接',
+    invalid_executable: 'Codex 程序路径无效，请填写可执行文件的完整路径',
+    start_failed: '无法启动 Codex，请检查程序路径和运行权限',
+    login_required: '请在 Codex 中登录 ChatGPT 账号，登录后会自动连接',
+    unsupported_account: '当前登录方式不提供订阅额度，请使用 ChatGPT 账号登录 Codex',
+    timeout: '读取额度超时，请检查网络后重试',
+    service_error: '额度服务暂不可用，请确认 Codex 已登录后重试',
+    invalid_response: '无法识别额度数据，请更新 Codex 后重试',
+    disconnected: 'Codex 连接已断开，请稍后重试',
+  };
+  if (state.state === 'error') return errors[state.code] || '暂时无法读取额度，请稍后重试';
+  if (state.stale) return '数据已过期，请刷新额度';
+  if (!state.windows?.length) return '账号暂未返回可显示的额度';
+  return '额度已更新';
+}
+
+function codexWindowLabel(window) {
+  const minutes = window.window_minutes;
+  if (minutes === 300) return localizedText('5 小时额度');
+  if (minutes === 10080) return localizedText('每周额度');
+  if (!minutes) return localizedText('未知周期');
+  return `${number(minutes)} ${localizedText('分钟额度')}`;
+}
+
+function codexResetLabel(window, now) {
+  if (!Number.isFinite(window.resets_at)) return localizedText('重置时间未知');
+  const left = Math.ceil((window.resets_at * 1000 - now) / 60000);
+  if (left <= 0) return localizedText('等待额度更新');
+  const days = Math.floor(left / 1440);
+  const hours = Math.floor(left % 1440 / 60);
+  const minutes = left % 60;
+  const countdown = `${days ? `${days}d ` : ''}${hours ? `${hours}h ` : ''}${minutes}m`;
+  return `${localizedText('重置倒计时')} ${countdown}`;
+}
+
+function renderCodexUsage(state = codexUsageState) {
+  codexUsageState = state;
+  const enabled = Boolean(currentProfile?.codex_usage_enabled);
+  const message = localizedText(codexUsageMessage(state));
+  const fetched = Number.isFinite(state.fetched_at)
+    ? new Date(state.fetched_at * 1000).toLocaleTimeString(activeLocale(), {hour: '2-digit', minute: '2-digit'}) : '';
+  document.getElementById('quota-usage-status').textContent =
+    [state.plan, message, fetched ? `${localizedText('上次读取')} ${fetched}` : ''].filter(Boolean).join(' · ');
+  document.getElementById('refresh-quota-usage').disabled = !enabled || state.state === 'loading' || codexUsageBusy;
+  const now = Date.now();
+  const cards = enabled ? (state.windows || []).map(window => {
+    const expired = Number.isFinite(window.resets_at) && window.resets_at * 1000 <= now;
+    const percent = Number.isFinite(window.remaining_percent) && !state.stale && !expired
+      ? Math.max(0, Math.min(100, window.remaining_percent)) : null;
+    const resetTime = Number.isFinite(window.resets_at)
+      ? new Date(window.resets_at * 1000).toLocaleString(activeLocale()) : '';
+    return `<article class="quota-quota-card${percent != null && percent <= 10 ? ' quota-low' : ''}">
+      <div class="quota-quota-label"><span>${escapeHtml(window.name || 'Codex')}</span><strong>${escapeHtml(codexWindowLabel(window))}</strong></div>
+      <div class="quota-quota-value">${percent == null ? '—' : `${number(percent)}<small>%</small>`}<span>${escapeHtml(localizedText('剩余额度'))}</span></div>
+      <div class="quota-quota-track" style="--quota-width:${percent ?? 0}%" ${percent == null ? '' : `role="meter" aria-label="${escapeHtml(localizedText('剩余额度'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`}><i></i></div>
+      <small class="quota-quota-reset" title="${escapeHtml(resetTime)}">${escapeHtml(codexResetLabel(window, now))}</small>
+    </article>`;
+  }).join('') : '';
+  for (const id of ['quota-usage-details']) {
+    const container = document.getElementById(id);
+    if (container.innerHTML !== cards) container.innerHTML = cards;
+  }
+}
+
+async function pollCodexUsage(force = false) {
+  clearTimeout(codexUsageTimer);
+  if (codexUsageBusy || !api?.get_codex_usage) return;
+  codexUsageBusy = true;
+  try {
+    // The native worker owns the five-minute interval, including while hidden.
+    const state = await api.get_codex_usage(force);
+    renderCodexUsage(state);
+  } catch (_) {
+    renderCodexUsage({state: 'error', code: 'unavailable', windows: []});
+  } finally {
+    codexUsageBusy = false;
+    renderCodexUsage();
+    if (currentProfile?.codex_usage_enabled) {
+      codexUsageTimer = setTimeout(() => void pollCodexUsage(), codexUsageState.state === 'loading' ? 1000 : 15000);
+    }
+  }
+}
+
+async function applyCodexSettings(executable = currentProfile?.codex_executable || '') {
+  if (codexSettingsBusy) return;
+  codexSettingsBusy = true;
+  const button = document.getElementById('apply-quota-settings');
+  const automatic = document.getElementById('auto-quota-settings');
+  button.disabled = true;
+  automatic.disabled = true;
+  ui.codexEnabled.disabled = true;
+  try {
+    const result = await api.save_codex_usage_settings(ui.codexEnabled.checked, executable, currentProfile.profile_revision);
+    if (!result.ok) throw new Error(result.error);
+    acceptProfile(result.profile);
+    ui.codexEnabled.checked = Boolean(currentProfile.codex_usage_enabled);
+    ui.codexExecutable.value = currentProfile.codex_executable || '';
+    renderCodexUsage(result.usage);
+    showToast('额度设置已保存');
+  } catch (error) {
+    ui.codexEnabled.checked = Boolean(currentProfile?.codex_usage_enabled);
+    showToast(error.message || '额度设置保存失败');
+  } finally {
+    codexSettingsBusy = false;
+    button.disabled = false;
+    automatic.disabled = false;
+    ui.codexEnabled.disabled = false;
+  }
 }
 
 function renderNavigatorTaskWatches() {
@@ -2629,6 +2771,62 @@ async function persistServerNavigatorSide(side) {
     showToast(error.message || String(error));
   }
 }
+
+let navigatorResizeState = null;
+let navigatorSizeSaving = false;
+function applyNavigatorSize(width = 0, height = 0) {
+  const nav = ui.serverNavigator;
+  if (width) nav.style.setProperty('--navigator-panel-width', `min(${Math.max(190, Math.min(640, width))}px, calc(100vw - 70px))`);
+  else nav.style.removeProperty('--navigator-panel-width');
+  if (height) nav.style.setProperty('--navigator-height', `${Math.max(240, Math.min(1600, height))}px`);
+  else nav.style.removeProperty('--navigator-height');
+  nav.classList.toggle('has-custom-size', Boolean(height));
+}
+function beginNavigatorResize(event) {
+  const handle = event.target.closest('[data-resize]');
+  if (!handle || event.button !== 0 || navigatorSizeSaving) return;
+  const rect = ui.serverNavigator.querySelector('.server-navigator-panel').getBoundingClientRect();
+  navigatorResizeState = {id: event.pointerId, handle, edge: handle.dataset.resize, x: event.clientX, y: event.clientY,
+    width: layoutPxFromViewportRect(rect.width), height: layoutPxFromViewportRect(rect.height),
+    previous: [currentProfile?.navigator_width || 0, currentProfile?.navigator_height || 0]};
+  ui.serverNavigator.classList.add('resizing');
+  handle.setPointerCapture?.(event.pointerId);
+  event.preventDefault();
+}
+function moveNavigatorResize(event) {
+  const drag = navigatorResizeState;
+  if (!drag || event.pointerId !== drag.id) return;
+  const dx = layoutPxFromViewportRect(event.clientX-drag.x);
+  const dy = layoutPxFromViewportRect(event.clientY-drag.y);
+  drag.next = [Math.round(Math.max(190, Math.min(640, drag.width + (drag.edge.includes('w') ? -dx : drag.edge.includes('e') ? dx : 0)))),
+    Math.round(Math.max(240, Math.min(1600, drag.height + (drag.edge.includes('s') ? dy : 0))))];
+  applyNavigatorSize(...drag.next);
+  event.preventDefault();
+}
+async function finishNavigatorResize(event, cancelled = false) {
+  const drag = navigatorResizeState;
+  if (!drag || event.pointerId !== drag.id) return;
+  navigatorResizeState = null;
+  ui.serverNavigator.classList.remove('resizing');
+  if (drag.handle.hasPointerCapture?.(drag.id)) drag.handle.releasePointerCapture(drag.id);
+  if (cancelled || !drag.next) { applyNavigatorSize(...drag.previous); return; }
+  navigatorSizeSaving = true;
+  try {
+    const result = await api.set_navigator_size(...drag.next);
+    if (!result?.ok) throw new Error(result?.error || '无法保存侧栏尺寸');
+    acceptProfile(result.profile);
+  } catch (error) {
+    applyNavigatorSize(...drag.previous);
+    showToast(error.message || String(error));
+  } finally { navigatorSizeSaving = false; }
+}
+ui.serverNavigator.addEventListener('pointerdown', beginNavigatorResize);
+ui.serverNavigator.addEventListener('pointermove', moveNavigatorResize);
+ui.serverNavigator.addEventListener('pointerup', event => void finishNavigatorResize(event));
+ui.serverNavigator.addEventListener('pointercancel', event => void finishNavigatorResize(event, true));
+ui.serverNavigator.addEventListener('lostpointercapture', event => {
+  if (navigatorResizeState) void finishNavigatorResize(event, true);
+});
 
 function beginServerNavigatorDrag(event) {
   if (event.button !== 0 || event.isPrimary === false) return;
@@ -3175,6 +3373,11 @@ function reconcileServerCards(entries) {
             Boolean(card.querySelector('.server-head.is-stuck')));
           replacement.querySelector('.server-location-strip')?.classList.toggle('is-visible',
             Boolean(card.querySelector('.server-location-strip.is-visible')));
+          if (expandedServerHeadHeight.has(card)) {
+            expandedServerHeadHeight.set(replacement, expandedServerHeadHeight.get(card));
+            const spacer = card.querySelector('.server-head-spacer');
+            if (spacer) replacement.querySelector('.server-head')?.after(spacer.cloneNode());
+          }
           card.replaceWith(replacement);
         }
         card = replacement;
@@ -4431,6 +4634,7 @@ function setOnboardingStep(step) {
   ui.onboardingWelcome.hidden = !onboarding || onboardingStep !== 1;
   ui.importPanel.hidden = onboarding && onboardingStep !== 2;
   ui.profileSettings.hidden = onboarding && onboardingStep !== 3;
+  ui.extensionsSettings.hidden = onboarding;
   ui.serverSettingsHeading.hidden = onboarding && onboardingStep !== 3;
   ui.editorList.hidden = onboarding && onboardingStep !== 3;
   ui.editorToolbar.hidden = (onboarding && onboardingStep !== 3)
@@ -4480,6 +4684,7 @@ function setSettingsMode(mode) {
     ui.onboardingProgress.hidden = true;
     ui.onboardingWelcome.hidden = true;
     ui.profileSettings.hidden = false;
+    ui.extensionsSettings.hidden = false;
     ui.importPanel.hidden = false;
     ui.serverSettingsHeading.hidden = false;
     ui.editorList.hidden = false;
@@ -4500,6 +4705,9 @@ function openSettings(options = {}) {
   ui.refreshSeconds.value = currentProfile?.refresh_seconds || 15;
   ui.language.value = currentProfile?.ui_language === 'en' ? 'en' : 'zh-CN';
   ui.closeBehavior.value = currentProfile?.close_behavior === 'exit' ? 'exit' : 'tray';
+  ui.codexEnabled.checked = Boolean(currentProfile?.codex_usage_enabled);
+  ui.codexExecutable.value = currentProfile?.codex_executable || '';
+  renderCodexUsage();
   ui.favoriteAlertEnabled.checked = currentProfile?.favorite_alert_enabled !== false;
   ui.favoriteAlertMinMemory.value = Number(currentProfile?.favorite_alert_min_memory_gib) > 0
     ? String(currentProfile.favorite_alert_min_memory_gib)
@@ -4619,6 +4827,8 @@ function collectProfile() {
     navigator_side: serverNavigatorSide,
     close_behavior: ui.closeBehavior.value,
     ui_language: ui.language.value,
+    codex_usage_enabled: ui.codexEnabled.checked,
+    codex_executable: ui.codexExecutable.value.trim(),
     favorite_alert_enabled: ui.favoriteAlertEnabled.checked,
     favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0),
     task_completion_alert_enabled: ui.taskCompletionAlertEnabled.checked,
@@ -5392,7 +5602,11 @@ ui.serverNavigatorDrag.addEventListener('click', () => {
 });
 ui.previousServer.addEventListener('click', () => navigateRelativeServer(-1));
 ui.nextServer.addEventListener('click', () => navigateRelativeServer(1));
-ui.settings.addEventListener('click', () => openSettings({onboarding: !currentProfile?.servers?.length}));
+ui.settings.addEventListener('click', () => openSettings({forceNormal: true}));
+ui.codexEnabled.addEventListener('change', () => void applyCodexSettings());
+document.getElementById('apply-quota-settings').addEventListener('click', () => void applyCodexSettings(ui.codexExecutable.value.trim()));
+document.getElementById('auto-quota-settings').addEventListener('click', () => void applyCodexSettings(''));
+document.getElementById('refresh-quota-usage').addEventListener('click', () => void pollCodexUsage(true));
 ui.startOnboarding.addEventListener('click', () => openSettings({onboarding: true}));
 ui.collapseDashboard.addEventListener('click', collapseDashboardDisclosure);
 document.getElementById('collapse-settings').addEventListener('click', collapseSettingsDisclosure);

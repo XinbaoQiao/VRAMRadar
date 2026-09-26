@@ -25,6 +25,9 @@ import time
 import webbrowser
 from typing import Any, Callable
 
+from .usage_monitor import CodexUsageMonitor
+from .usage_surface import CodexUsageSurface
+
 from .connectors import (
     PASSWORD_FALLBACK_AUTH_CODES,
     ConnectorFailure,
@@ -919,6 +922,8 @@ class AppApi:
         if isinstance(service, DashboardService):
             self._profile_mutation_lock = service.profile_mutation_lock
         self._profile_revision = 0
+        self._codex_usage = CodexUsageMonitor(getattr(paths, "runtime", None))
+        self._codex_usage.configure(profile.codex_usage_enabled, profile.codex_executable)
         self._automatic_import_enabled = bool(automatic_import_enabled)
         self._restart_arguments = list(restart_arguments or ["--profile", profile.id])
         self._update_progress_lock = threading.Lock()
@@ -1190,6 +1195,39 @@ class AppApi:
         with self._profile_mutation_lock:
             return self._desktop_profile(self.profile)
 
+    def get_codex_usage(self, force: bool = False) -> dict[str, Any]:
+        with self._profile_mutation_lock:
+            self._codex_usage.configure(self.profile.codex_usage_enabled, self.profile.codex_executable)
+            return self._codex_usage.snapshot(force=force is True)
+
+    def save_codex_usage_settings(self, enabled: bool, executable: str, revision: int) -> dict[str, Any]:
+        """Save this extension independently without discovering/connecting servers."""
+        with self._profile_mutation_lock:
+            if type(revision) is not int or revision != self._profile_revision:
+                return {"ok": False, "error": "设置已被其他操作更新，请重新打开后再保存", "code": "profile_changed"}
+            try:
+                raw = self.profile.to_dict()
+                raw.update(codex_usage_enabled=enabled, codex_executable=executable)
+                updated = Profile.from_dict(raw)
+            except ConfigError:
+                return {"ok": False, "error": "Codex 设置无效，请检查程序路径", "code": "invalid_codex_settings"}
+            result = self._persist_local_preferences(updated, replace_service=True)
+            if result["ok"]:
+                result["usage"] = self.get_codex_usage()
+            return result
+
+    def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
+        if key not in {"codex_show_disks", "codex_time_format"}:
+            return {"ok": False, "code": "invalid_codex_display"}
+        with self._profile_mutation_lock:
+            raw = self.profile.to_dict()
+            raw[key] = value
+            try:
+                updated = Profile.from_dict(raw)
+            except ConfigError:
+                return {"ok": False, "code": "invalid_codex_display"}
+            return self._persist_local_preferences(updated)
+
     @staticmethod
     def _auth_ref(profile_id: str, server_id: str) -> str:
         return f"server:{profile_id}:{server_id}:login-password"
@@ -1248,6 +1286,7 @@ class AppApi:
                     raise RuntimeError("profile_rollback_failed") from rollback_exc
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = updated_profile
+            self._codex_usage.configure(updated_profile.codex_usage_enabled, updated_profile.codex_executable)
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, updated_profile)
             self._reset_task_alerts_if_servers_changed(old_profile, updated_profile)
@@ -2337,6 +2376,16 @@ class AppApi:
         updated_profile = replace(base_profile, navigator_side=side.strip().lower())
         return self._persist_local_preferences(updated_profile, expected_profile=base_profile)
 
+    def set_navigator_size(self, width: int, height: int) -> dict[str, Any]:
+        with self._profile_mutation_lock:
+            try:
+                raw = self.profile.to_dict()
+                raw.update(navigator_width=width, navigator_height=height)
+                updated = Profile.from_dict(raw)
+            except ConfigError:
+                return {"ok": False, "code": "invalid_navigator_size", "error": "侧栏尺寸无效"}
+            return self._persist_local_preferences(updated)
+
     def set_close_behavior(self, behavior: str) -> dict[str, Any]:
         if not isinstance(behavior, str) or behavior.strip().lower() not in {"tray", "exit"}:
             return {
@@ -3403,6 +3452,12 @@ class AppApi:
             for preference in (
                 "close_behavior",
                 "ui_language",
+                "navigator_width",
+                "navigator_height",
+                "codex_usage_enabled",
+                "codex_executable",
+                "codex_show_disks",
+                "codex_time_format",
                 "favorite_server_ids",
                 "pinned_server_ids",
                 "favorite_gpus",
@@ -3663,6 +3718,7 @@ class AppApi:
                     raise RuntimeError("profile_rollback_failed") from rollback_exc
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = profile
+            self._codex_usage.configure(profile.codex_usage_enabled, profile.codex_executable)
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, profile)
             self._reset_task_alerts_if_servers_changed(old_profile, profile)
@@ -4830,8 +4886,41 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 shutdown.bind_worker(worker)
                 tray_controller: WindowsTrayController | None = None
+                usage_surface: CodexUsageSurface | None = None
                 macos_notification_bound = False
                 gui_smoke = args.gui_smoke or args.gui_update_smoke
+                if not gui_smoke and sys.platform in {"win32", "darwin"}:
+                    def show_usage_settings() -> None:
+                        shutdown.restore(lambda: window.evaluate_js(
+                            "api.get_profile().then(profile => { acceptProfile(profile);"
+                            "openSettings({forceNormal:true}); ui.extensionsSettings.open=true;"
+                            "document.getElementById('quota-usage-options').open=true;"
+                            "ui.extensionsSettings.scrollIntoView({block:'nearest'}); });"
+                        ))
+
+                    def disable_usage_surface() -> None:
+                        with api._profile_mutation_lock:
+                            api.save_codex_usage_settings(False, api.profile.codex_executable, api._profile_revision)
+
+                    usage_surface = CodexUsageSurface(
+                        window, api._codex_usage.snapshot, language=lambda: api.profile.ui_language,
+                        open_settings=show_usage_settings,
+                        display_options=lambda: {"codex_show_disks": api.profile.codex_show_disks,
+                                                 "codex_time_format": api.profile.codex_time_format},
+                        save_display=api.save_codex_display,
+                        open_home=lambda: shutdown.restore(lambda: window.evaluate_js(
+                            "document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());"
+                        )),
+                        refresh=lambda: api.get_codex_usage(True), disable=disable_usage_surface,
+                        quit_application=shutdown.request,
+                    )
+                    window.events.loaded += usage_surface.start
+
+                    def close_native_surfaces() -> None:
+                        usage_surface.stop()
+                        window_state.close()
+
+                    shutdown.before_destroy = close_native_surfaces
                 if sys.platform == "win32" and not gui_smoke:
                     candidate: WindowsTrayController | None = None
 
@@ -4896,7 +4985,13 @@ def main(argv: list[str] | None = None) -> int:
                     macos_notification_bound = True
                 non_tray_closing_handler: Callable[[], bool] | None = None
                 if tray_controller is None:
-                    non_tray_closing_handler = shutdown.on_closing
+                    def non_tray_closing_handler() -> bool:
+                        if (sys.platform == "darwin" and usage_surface is not None
+                                and usage_surface.active and api.profile.close_behavior == "tray"
+                                and not shutdown.shutdown_ready.is_set()):
+                            shutdown.hide()
+                            return False
+                        return shutdown.on_closing()
                     window.events.closing += non_tray_closing_handler
                 worker.start()
                 smoke_result: dict[str, Any] = {}
@@ -4922,6 +5017,7 @@ def main(argv: list[str] | None = None) -> int:
                     webview.start(**start_options)
                 finally:
                     shutdown.request()
+                    api._codex_usage.close()
                     api._bind_update_check_observer(None)
                     if args.gui_update_smoke:
                         faulthandler.cancel_dump_traceback_later()

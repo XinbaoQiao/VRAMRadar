@@ -33,15 +33,15 @@
 
 ![VRAM Radar overview](docs/assets/vram-radar-overview.png)
 
-## Latest update · v0.9.8
+## Latest update · v0.9.9
 
-SSH discovery now groups duplicate aliases and lets you choose a route or keep them all.
+Monitor Codex quota from the Windows taskbar or macOS menu bar with the optional Extensions module.
 
-- Preserve route choices across multi-file imports and keep each alias bound to its original SSH configuration.
-- Protect saved credentials and distinct authentication routes during duplicate detection; keep settings saves consistent with background refresh.
-- Recover from damaged local window/cache files and improve connection guidance and bilingual interface text.
+- Automatically detect a local signed-in Codex installation; no API key or manual path is required.
+- Use a compact Windows quota strip with bold decimal-hour countdowns, continuous colors, optional disks and a dock/free-move toggle.
+- Resize the server navigator and scroll to the bottom without sticky server headings jittering.
 
-Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.8.md).
+Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.9.md).
 
 ## Vibe Coding made the code flow easier—and the server state harder to feel
 
@@ -97,12 +97,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.9.8**.
+The current public stable release is **v0.9.9**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.8.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.9.8-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-0.9.9.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-0.9.9-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -111,7 +111,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.8 release notes](docs/release-notes-v0.9.8.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.9 release notes](docs/release-notes-v0.9.9.md) for the exact boundaries.
 
 ## Local-first by design
 
@@ -133,6 +133,14 @@ Read the full [privacy policy](PRIVACY.md) and [server reliability audit](docs/s
 
 ## Development
 
+Radar includes optional [Codex usage monitoring](docs/subscription-usage.md)
+under **Settings → Extensions**, with a compact taskbar strip/menu-bar display
+for remaining quota and reset countdowns.
+It is off by default and requires a local Codex installation signed in to ChatGPT.
+Enable it once: the switch saves immediately, detects Codex automatically and
+restores monitoring after restarting Radar. Installation/sign-in is retried
+automatically; a manual executable path is only an advanced fallback.
+
 <details>
 <summary><strong>Build and test locally</strong></summary>
 
@@ -145,6 +153,7 @@ node --check src\vram_radar\web\app.js
 node --check src\vram_radar\web\localization.js
 .\.venv\Scripts\python.exe -m compileall -q src tests tools
 .\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
+.\.venv\Scripts\python.exe tools\validate_usage_surface.py
 .\Build-VramRadar.ps1 -SkipSync
 .\.venv\Scripts\python.exe tools\validate_packaged_askpass.py
 .\.venv\Scripts\python.exe tools\validate_packaged_tray.py
@@ -159,6 +168,7 @@ node --check src/vram_radar/web/app.js
 node --check src/vram_radar/web/localization.js
 ./.venv/bin/python -m compileall -q src tests tools
 ./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
+./.venv/bin/python tools/validate_usage_surface.py
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```

@@ -35,15 +35,15 @@
   <img src="docs/assets/readme/vibe-coding-cover.webp" width="560" alt="Vibe Coding 越顺手，GPU 状态反而越难感知">
 </p>
 
-## 最新更新 · v0.9.8
+## 最新更新 · v0.9.9
 
-SSH 配置发现支持重复别名整理，可选择保留一条连接，也可全部保留。
+新增可选的 Codex 额度监测，在 Windows 任务栏或 macOS 菜单栏查看剩余额度与重置倒计时。
 
-- 修复多文件导入后的选择保存，保留每条连接所属的 SSH 配置文件。
-- 去重时保护已保存密码和不同认证方式的连接，避免后台刷新覆盖正在保存的设置。
-- 改善损坏的窗口状态与缓存文件的恢复，完善连接提示和中英文界面文案。
+- 自动查找已登录的本地 Codex，无需填写 API 密钥或手动配置路径。
+- Windows 额度条支持加粗小数小时、连续渐变、可选饼图，以及固定／自由移动切换。
+- 支持拖动边框调整服务器侧栏尺寸，修复列表底部悬浮标题抖动。
 
-从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v0.9.8.md)。
+从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v0.9.9.md)。
 
 ## 为什么做这个工具
 
@@ -112,19 +112,19 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 
 ## 下载与首次启动边界
 
-当前公开稳定版为 **v0.9.8**。
+当前公开稳定版为 **v0.9.9**。
 
 | 平台 | 下载文件 | 当前边界 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.8.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-0.9.8-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-0.9.9.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
+| macOS | `VRAMRadar-0.9.9-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
 
 Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
 更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
 macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
 **打开**，不要关闭 Gatekeeper。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.8 发布说明](docs/release-notes-v0.9.8.md)。
+Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.9 发布说明](docs/release-notes-v0.9.9.md)。
 
 ## 本地优先，不接管你的基础设施
 
@@ -145,6 +145,10 @@ Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 
 - [隐私说明](PRIVACY.md)
 
 ## 开发
+
+在「设置 → 扩展功能 → Codex 额度」开启监测，通过任务栏旁的小条或菜单栏显示剩余额度和重置倒计时；设置中只保留紧凑开关和折叠详情。
+此功能默认关闭，需要先安装 Codex 并登录 ChatGPT 账号。打开一次开关即可自动保存、查找程序并连接，重启后自动恢复；安装或登录完成后会自动重试，无需填路径、密钥或再点“应用”，不触发服务器连接。手动路径仅作为高级选项保留。
+详见 [Codex 额度说明](docs/subscription-usage.md)。
 
 <details>
 <summary><strong>本地构建与测试</strong></summary>

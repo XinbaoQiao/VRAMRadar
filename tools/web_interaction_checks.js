@@ -142,9 +142,133 @@
     assertions.cancelled_import_does_not_leak_choices_into_next_editor =
       importAliasChoiceDrafts.length === 0 && !document.getElementById('import-alias-choices');
     ui.dialog.close();
+    const beforeUsageProfile = currentProfile;
+    const beforeUsageState = codexUsageState;
+    currentProfile = {...currentProfile, codex_usage_enabled: true};
+    openSettings({forceNormal: true});
+    ui.extensionsSettings.open = true;
+    assertions.codex_settings_compact_by_default = !document.getElementById('quota-usage-options').open
+      && !ui.extensionsSettings.querySelector('.local-only-badge')
+      && !document.getElementById('quota-usage-dashboard');
+    document.getElementById('quota-usage-options').open = true;
+    const usageFixture = {state: 'ready', plan: 'Pro', fetched_at: Date.now() / 1000, windows: [
+      {name: 'Codex', window_minutes: 300, remaining_percent: 63, resets_at: Date.now() / 1000 + 3600},
+      {name: 'Codex', window_minutes: 10080, remaining_percent: null, resets_at: null},
+    ]};
+    renderCodexUsage(usageFixture);
+    assertions.codex_extension_is_peer_and_preserves_unknown =
+      ui.extensionsSettings.parentElement === ui.profileSettings.parentElement
+      && document.querySelectorAll('#quota-usage-details [role="meter"]').length === 1
+      && document.querySelector('#quota-usage-details [role="meter"]').getAttribute('aria-valuenow') === '63'
+      && document.getElementById('quota-usage-details').textContent.includes('—');
+    assertions.codex_cards_fit_settings = [...document.querySelectorAll('#quota-usage-details .quota-quota-card')]
+      .every(node => node.scrollWidth <= node.clientWidth + 1);
+    window.VRAMRadarI18n.setLanguage('en');
+    renderCodexUsage(usageFixture);
+    await wait(50);
+    assertions.codex_english_labels = !hasChinese(document.getElementById('quota-usage-details').textContent)
+      && document.getElementById('quota-usage-details').textContent.includes('Weekly quota');
+    renderCodexUsage({...usageFixture, windows: [{...usageFixture.windows[0], resets_at: 1}]});
+    assertions.codex_expired_quota_not_presented_as_current =
+      !document.querySelector('#quota-usage-details [role="meter"]')
+      && document.getElementById('quota-usage-details').textContent.includes('Awaiting quota update');
+    currentProfile = {...currentProfile, codex_usage_enabled: false};
+    renderCodexUsage({state: 'disabled', windows: []});
+    assertions.codex_disabled_clears_details = !document.getElementById('quota-usage-details').textContent;
+    const originalUsageApi = api;
+    const savedCalls = [];
+    let failUsageSave = false;
+    try {
+      currentProfile = {...currentProfile, codex_usage_enabled: false, codex_executable: ''};
+      api = {
+        get_codex_usage: async () => ({enabled: currentProfile.codex_usage_enabled, state: currentProfile.codex_usage_enabled ? 'ready' : 'disabled', windows: []}),
+        save_codex_usage_settings: async (enabled, executable, revision) => {
+          savedCalls.push({enabled, executable});
+          await wait(20);
+          if (failUsageSave) return {ok: false, error: 'Synthetic save failure'};
+          return {ok: true, profile: {...currentProfile, codex_usage_enabled: enabled, codex_executable: executable,
+            profile_revision: Number(revision || 0) + 1}, usage: {enabled, state: enabled ? 'ready' : 'disabled', windows: []}};
+        },
+      };
+      ui.codexEnabled.checked = false;
+      ui.codexExecutable.value = 'unsaved-path';
+      ui.codexEnabled.click();
+      const lockedDuringSave = ui.codexEnabled.disabled;
+      await waitUntil(() => !codexSettingsBusy && !codexUsageBusy, 'Automatic usage save did not finish');
+      assertions.codex_toggle_saves_immediately_using_auto_detection = lockedDuringSave
+        && savedCalls.length === 1 && savedCalls[0].enabled && savedCalls[0].executable === ''
+        && currentProfile.codex_usage_enabled && !ui.codexEnabled.disabled;
+      failUsageSave = true;
+      ui.codexEnabled.click();
+      await waitUntil(() => !codexSettingsBusy, 'Failed usage save did not finish');
+      assertions.codex_failed_toggle_restores_saved_state = currentProfile.codex_usage_enabled && ui.codexEnabled.checked;
+      failUsageSave = false;
+      currentProfile = {...currentProfile, codex_executable: 'previous-custom-path'};
+      ui.codexExecutable.value = 'previous-custom-path';
+      document.getElementById('auto-quota-settings').click();
+      await waitUntil(() => !codexSettingsBusy && !codexUsageBusy, 'Automatic detection reset did not finish');
+      assertions.codex_restore_auto_detection_clears_manual_path = currentProfile.codex_executable === ''
+        && ui.codexExecutable.value === '' && savedCalls[savedCalls.length-1].executable === '';
+    } finally {
+      clearTimeout(codexUsageTimer);
+      api = originalUsageApi;
+    }
+    currentProfile = beforeUsageProfile;
+    renderCodexUsage(beforeUsageState);
+    window.VRAMRadarI18n.setLanguage('zh-CN');
+    ui.dialog.close();
+    const sizeApi = api, sizeProfile = currentProfile;
+    const grip = ui.serverNavigator.querySelector('[data-resize="sw"]');
+    const oldCapture = grip.setPointerCapture;
+    grip.setPointerCapture = () => {};
+    try {
+      let savedSize = null;
+      api = {...api, set_navigator_size: async (width, height) => {
+        savedSize = [width, height];
+        return {ok: true, profile: {...currentProfile, navigator_width: width, navigator_height: height,
+          profile_revision: (Number(currentProfile.profile_revision) || 0)+1}};
+      }};
+      beginNavigatorResize({target: grip, pointerId: 77, button: 0, clientX: 500, clientY: 400, preventDefault() {}});
+      moveNavigatorResize({pointerId: 77, clientX: 430, clientY: 465, preventDefault() {}});
+      await finishNavigatorResize({pointerId: 77});
+      assertions.navigator_edges_resize_and_save = savedSize?.[0] >= 190 && savedSize?.[1] >= 240
+        && ui.serverNavigator.classList.contains('has-custom-size')
+        && getComputedStyle(grip).cursor === 'nesw-resize';
+      const beforeCancel = ui.serverNavigator.style.getPropertyValue('--navigator-height');
+      beginNavigatorResize({target: grip, pointerId: 78, button: 0, clientX: 500, clientY: 400, preventDefault() {}});
+      moveNavigatorResize({pointerId: 78, clientX: 380, clientY: 580, preventDefault() {}});
+      await finishNavigatorResize({pointerId: 78}, true);
+      assertions.navigator_resize_cancel_restores_saved_dimensions = ui.serverNavigator.style.getPropertyValue('--navigator-height') === beforeCancel;
+    } finally {
+      grip.setPointerCapture = oldCapture;
+      api = sizeApi; currentProfile = sizeProfile;
+      applyNavigatorSize(sizeProfile.navigator_width || 0, sizeProfile.navigator_height || 0);
+    }
+    const bottomCard = document.querySelector('.server-card:last-child');
+    const bottomHead = bottomCard?.querySelector('.server-head');
+    if (bottomHead) {
+      reserveServerHeadSpace(bottomCard, bottomHead, false);
+      const beforeCollapse = document.documentElement.scrollHeight;
+      reserveServerHeadSpace(bottomCard, bottomHead, true);
+      assertions.sticky_header_preserves_document_height = Math.abs(document.documentElement.scrollHeight-beforeCollapse) <= 2;
+      originalScrollTo.call(window, 0, document.documentElement.scrollHeight);
+      const samples = [];
+      const headPositions = [];
+      window.__bottomDebug = [];
+      for (let index = 0; index < 24; index++) {
+        updateStuckChrome(); await nextFrame();
+        window.__bottomDebug.push({height:document.documentElement.scrollHeight, y:window.scrollY, head:bottomHead.getBoundingClientRect().top,
+          headHeight:bottomHead.getBoundingClientRect().height, stuck:bottomHead.classList.contains('is-stuck'),
+          sentinel:bottomCard.querySelector('.server-head-sentinel')?.getBoundingClientRect().top,
+          spacer:bottomCard.querySelector('.server-head-spacer')?.style.height});
+        if (index >= 8) { samples.push(document.documentElement.scrollHeight); headPositions.push(bottomHead.getBoundingClientRect().top); }
+      }
+      assertions.bottom_scroll_height_stays_stable = Math.max(...samples)-Math.min(...samples) <= 2;
+      assertions.bottom_server_header_stays_stable = Math.max(...headPositions)-Math.min(...headPositions) <= 2;
+    }
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
-        anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top}, scrollCalls};
+        anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top, bottom:window.__bottomDebug}, scrollCalls};
   } catch (error) {
     window.__interactionChecks = {ok: false, assertions, error: String(error)};
   } finally {

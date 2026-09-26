@@ -135,6 +135,11 @@
           <button id="next-server" type="button" title="下一台服务器" aria-label="下一台服务器"><span>下一台</span><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m10 7 5 5-5 5"></path></svg></button>
         </footer>
         <span id="server-navigator-status" class="sr-only" role="status" aria-live="polite"></span>
+        <span class="navigator-resize-handle" data-resize="w" aria-hidden="true"></span>
+        <span class="navigator-resize-handle" data-resize="e" aria-hidden="true"></span>
+        <span class="navigator-resize-handle" data-resize="s" aria-hidden="true"></span>
+        <span class="navigator-resize-handle" data-resize="sw" aria-hidden="true"></span>
+        <span class="navigator-resize-handle" data-resize="se" aria-hidden="true"></span>
       </div>
     </nav>
   </div>
@@ -189,6 +194,22 @@
             <summary><span><strong>诊断与日志</strong><small>连接异常时使用；复制时会自动隐藏敏感信息</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
             <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制诊断信息</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
           </details>
+          </div>
+        </details>
+        <details id="extensions-settings" class="settings-section settings-group" aria-labelledby="extensions-title">
+          <summary class="settings-section-heading"><div><h3 id="extensions-title">扩展功能</h3><p>按需开启，让常用工具的状态一目了然</p></div><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
+          <div class="settings-group-body quota-extension-body">
+            <div class="quota-extension-row"><label class="check-label"><input id="quota-usage-enabled" type="checkbox"><span><strong>Codex 额度</strong><small>开启后自动连接本机 Codex，并显示任务栏额度</small></span></label></div>
+            <p id="quota-usage-status" role="status" aria-live="polite"></p>
+            <details id="quota-usage-options" class="local-tools"><summary>详情与设置</summary><div class="quota-options-body">
+              <div id="quota-usage-details" class="quota-usage-grid"></div>
+              <div class="quota-usage-actions"><small>每 5 分钟自动刷新</small><button id="refresh-quota-usage" class="button compact-button" type="button">刷新额度</button></div>
+              <details class="local-tools"><summary>高级：手动指定程序</summary>
+                <label><span>Codex 程序路径（可选）</span><input id="quota-executable" placeholder="留空自动查找本机 Codex" maxlength="4096"></label>
+                <div class="quota-usage-actions"><button id="apply-quota-settings" class="button compact-button" type="button">保存路径</button><button id="auto-quota-settings" class="button compact-button" type="button">恢复自动查找</button></div>
+              </details>
+              <p class="quota-usage-help">使用本机 Codex 已登录的 ChatGPT 账号查询；无需填写密钥，不会发起对话。</p>
+            </div></details>
           </div>
         </details>
         <details id="import-panel" class="import-panel settings-group">

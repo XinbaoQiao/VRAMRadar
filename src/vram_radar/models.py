@@ -670,8 +670,14 @@ class Profile:
     pending_alias_choices: tuple[dict[str, Any], ...] = ()
     resolved_alias_choice_keys: tuple[str, ...] = ()
     navigator_side: str = "right"
+    navigator_width: int = 0
+    navigator_height: int = 0
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
+    codex_usage_enabled: bool = False
+    codex_executable: str = ""
+    codex_show_disks: bool = False
+    codex_time_format: str = "days"
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -769,6 +775,10 @@ class Profile:
         if len(resolved_alias_choice_keys) != len(set(resolved_alias_choice_keys)):
             raise ConfigError("profile resolved_alias_choice_keys must be unique")
         navigator_side = raw.get("navigator_side", "right")
+        for key, limit in (("navigator_width", 640), ("navigator_height", 1600)):
+            value = raw.get(key, 0)
+            if type(value) is not int or not 0 <= value <= limit:
+                raise ConfigError(f"invalid {key}")
         if not isinstance(navigator_side, str) or navigator_side.strip().lower() not in {"left", "right"}:
             raise ConfigError("profile navigator_side must be left or right")
         close_behavior = raw.get("close_behavior", "tray")
@@ -861,6 +871,9 @@ class Profile:
             task_completion_watches_list.append(watch)
         task_completion_watches = tuple(task_completion_watches_list)
         saved_view_rows = raw.get("saved_views", [])
+        codex_time_format = raw.get("codex_time_format", "days")
+        if not isinstance(codex_time_format, str) or codex_time_format not in {"days", "hours", "decimal"}:
+            raise ConfigError("invalid codex_time_format")
         if not isinstance(saved_view_rows, (list, tuple)):
             raise ConfigError("profile saved_views must be an array")
         if len(saved_view_rows) > MAX_SAVED_VIEWS:
@@ -884,8 +897,14 @@ class Profile:
             pending_alias_choices=pending_alias_choices,
             resolved_alias_choice_keys=tuple(resolved_alias_choice_keys),
             navigator_side=navigator_side.strip().lower(),
+            navigator_width=raw.get("navigator_width", 0),
+            navigator_height=raw.get("navigator_height", 0),
             close_behavior=close_behavior.strip().lower(),
             ui_language=ui_language.strip(),
+            codex_usage_enabled=require_bool(raw.get("codex_usage_enabled", False), "codex_usage_enabled"),
+            codex_executable=require_optional_local_path(raw.get("codex_executable", ""), "codex_executable"),
+            codex_show_disks=require_bool(raw.get("codex_show_disks", False), "codex_show_disks"),
+            codex_time_format=codex_time_format,
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -906,8 +925,14 @@ class Profile:
             "auto_sync_servers": self.auto_sync_servers,
             "ignored_ssh_aliases": list(self.ignored_ssh_aliases),
             "navigator_side": self.navigator_side,
+            "navigator_width": self.navigator_width,
+            "navigator_height": self.navigator_height,
             "close_behavior": self.close_behavior,
             "ui_language": self.ui_language,
+            "codex_usage_enabled": self.codex_usage_enabled,
+            "codex_executable": self.codex_executable,
+            "codex_show_disks": self.codex_show_disks,
+            "codex_time_format": self.codex_time_format,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],
