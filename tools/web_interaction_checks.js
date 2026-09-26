@@ -3,13 +3,26 @@
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
   const assertions = {};
   const originalScrollTo = window.scrollTo;
+  const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const waitUntil = async (predicate, label) => {
+    const deadline = performance.now() + 5000;
+    while (!predicate()) {
+      if (performance.now() >= deadline) throw new Error(label);
+      await wait(25);
+    }
+  };
   let scrollCalls = 0;
   window.scrollTo = function (...args) {
     scrollCalls += 1;
     return originalScrollTo.apply(window, args);
   };
   try {
-    await wait(300);
+    // Native show() is asynchronous on Cocoa. Timers can run before the
+    // compositor resumes; issuing scrolls then samples an unshown viewport.
+    // Await actual visibility and painted frames before exercising scroll.
+    await waitUntil(() => !document.hidden, 'Native window did not become visible');
+    await nextFrame();
+    await nextFrame();
     const cards = [...document.querySelectorAll('.server-card')];
     const card = cards[1];
     if (!card) throw new Error('Synthetic fixture needs two servers');
@@ -17,8 +30,14 @@
     if (!details) throw new Error('Missing expandable module');
     details.open = false;
     await wait(100);
-    originalScrollTo.call(window, {top: scrollY + details.getBoundingClientRect().top - 300});
-    await wait(250);
+    const setupTop = Math.max(0, Math.min(
+      scrollY + details.getBoundingClientRect().top - 300,
+      document.documentElement.scrollHeight - innerHeight,
+    ));
+    originalScrollTo.call(window, {top: setupTop, behavior: 'auto'});
+    await waitUntil(() => Math.abs(scrollY - setupTop) <= 2, 'Initial viewport scroll did not complete');
+    await nextFrame();
+    await nextFrame();
     scrollCalls = 0;
     details.querySelector(':scope > summary').click();
     await wait(350);
