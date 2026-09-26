@@ -141,6 +141,30 @@ for line in sys.stdin:
             with self.subTest(mode=mode), self.assertRaisesRegex(UsageError, code):
                 self.run_fixture(mode)
 
+    def test_exited_posix_group_permission_race_still_reaps_and_closes(self):
+        from unittest.mock import MagicMock
+        from vram_radar.usage_monitor import _stop_process
+        process = MagicMock()
+        process.poll.return_value = 1
+        with patch("vram_radar.usage_monitor.os.name", "posix"), \
+             patch("vram_radar.usage_monitor.signal.SIGKILL", 9, create=True), \
+             patch("vram_radar.usage_monitor.os.killpg", create=True, side_effect=PermissionError):
+            _stop_process(process)
+        process.wait.assert_called_once_with(timeout=2)
+        process.stdin.close.assert_called_once()
+        process.stdout.close.assert_called_once()
+
+    def test_live_posix_group_permission_denial_is_not_silenced(self):
+        from unittest.mock import MagicMock
+        from vram_radar.usage_monitor import _stop_process
+        process = MagicMock()
+        process.poll.return_value = None
+        with patch("vram_radar.usage_monitor.os.name", "posix"), \
+             patch("vram_radar.usage_monitor.signal.SIGKILL", 9, create=True), \
+             patch("vram_radar.usage_monitor.os.killpg", create=True, side_effect=PermissionError), \
+             self.assertRaises(PermissionError):
+            _stop_process(process)
+
     def test_cancellation_interrupts_pending_read(self):
         cancel = threading.Event()
         timer = threading.Timer(0.2, cancel.set)

@@ -161,6 +161,11 @@ def _stop_process(process: subprocess.Popen) -> None:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin can report EPERM for an already-exited process group.
+            # Reap/check our child; do not mask real denial for a live child.
+            if process.poll() is None:
+                raise
     elif process.poll() is None:
         _terminate_process_tree(process)
     try:
