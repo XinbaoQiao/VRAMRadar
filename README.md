@@ -33,15 +33,15 @@
 
 ![VRAM Radar overview](docs/assets/vram-radar-overview.png)
 
-## Latest update · v0.9.7
+## Latest update · v0.9.8
 
-Slurm GPU allocation now stays visible when other users' task details are hidden.
+SSH discovery now groups duplicate aliases and lets you choose a route or keep them all.
 
-- Read allocated GPU counts directly from scheduler node details, including clusters that omit GPUs from `AllocTRES`.
-- Keep unavailable allocation data marked unknown instead of reporting free GPUs.
-- Simplify setup guidance and fix English accessibility labels for server navigation and ordering.
+- Preserve route choices across multi-file imports and keep each alias bound to its original SSH configuration.
+- Protect saved credentials and distinct authentication routes during duplicate detection; keep settings saves consistent with background refresh.
+- Recover from damaged local window/cache files and improve connection guidance and bilingual interface text.
 
-Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.7.md).
+Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.8.md).
 
 ## Vibe Coding made the code flow easier—and the server state harder to feel
 
@@ -97,12 +97,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.9.7**.
+The current public stable release is **v0.9.8**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.7.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.9.7-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-0.9.8.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-0.9.8-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -111,7 +111,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.7 release notes](docs/release-notes-v0.9.7.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.8 release notes](docs/release-notes-v0.9.8.md) for the exact boundaries.
 
 ## Local-first by design
 

@@ -43,6 +43,9 @@ from .models import (
     MAX_IGNORED_SSH_ALIASES,
     MAX_TASK_COMPLETION_WATCHES,
     Profile,
+    ServerProfile,
+    alias_choice_group_key,
+    normalize_pending_alias_choice,
     normalize_task_completion_watch,
     normalize_saved_view,
     require_bounded_text,
@@ -58,7 +61,9 @@ from .server_catalog import (
     import_server_config,
     resolve_server_config,
     resolve_server_configs,
+    _server_id_from_alias,
 )
+from .openssh_resolution import format_openssh_connection_summary
 from .secrets import SecretStore
 from .service import DashboardService, favorite_resource_matches
 from .ssh_keys import (
@@ -911,6 +916,8 @@ class AppApi:
         self._key_setup_lock = threading.Lock()
         self._host_key_trust_lock = threading.Lock()
         self._profile_mutation_lock = threading.RLock()
+        if isinstance(service, DashboardService):
+            self._profile_mutation_lock = service.profile_mutation_lock
         self._profile_revision = 0
         self._automatic_import_enabled = bool(automatic_import_enabled)
         self._restart_arguments = list(restart_arguments or ["--profile", profile.id])
@@ -924,6 +931,25 @@ class AppApi:
             "message": "",
         }
         self._update_worker: threading.Thread | None = None
+        # Runtime GPU-UUID dedupe mutates the in-memory service profile first;
+        # this callback persists it under the same mutation lock as editor saves.
+        if hasattr(self.service, "profile_persist"):
+            self.service.profile_persist = self._persist_runtime_profile_mutation
+
+    def _persist_runtime_profile_mutation(self, profile: Profile) -> bool:
+        """Persist a service-initiated profile change without replace_profile."""
+
+        with self._profile_mutation_lock:
+            try:
+                self.store.save(profile)
+                self.profile = profile
+                self._profile_revision += 1
+                return True
+            except Exception:
+                logging.getLogger("vram_radar").exception(
+                    "could not persist runtime profile mutation"
+                )
+                return False
 
     @staticmethod
     def _normalize_persisted_task(raw: object) -> dict[str, str] | None:
@@ -1983,14 +2009,14 @@ class AppApi:
                     )
                 else:
                     rows.append(
-                        f"{name}：有 {idle_units} 张卡空闲，最多还能用 {available_text} GiB"
+                        f"{name}：有 {idle_units} 张卡空闲，最多可用 {available_text} GiB"
                     )
             else:
                 threshold_text = f"{minimum_memory_gib:.2f}".rstrip("0").rstrip(".")
                 if english:
                     rows.append(f"{name}: free VRAM reached {threshold_text} GiB")
                 else:
-                    rows.append(f"{name}：有卡空闲显存到了 {threshold_text} GiB")
+                    rows.append(f"{name}：有 GPU 空闲显存已达到 {threshold_text} GiB")
         remaining = len(matches) - len(rows)
         if remaining > 0:
             rows.append(
@@ -2562,14 +2588,14 @@ class AppApi:
                     "id": "connection",
                     "label": "SSH 连接",
                     "state": "blocked",
-                    "message": "这台服务器当前已暂停监控",
+                    "message": "这台服务器已暂停监控",
                 }
             )
             return {
                 "ok": False,
                 "server_id": normalized_id,
                 "code": "server_disabled",
-                "error": "这台服务器已停用，请先恢复监控",
+                "error": "这台服务器已暂停监控，请先恢复监控",
                 "stages": stages,
             }
         try:
@@ -2808,7 +2834,7 @@ class AppApi:
         if not server.enabled:
             return {
                 "ok": False,
-                "error": "这台服务器已停用，请先恢复监控",
+                "error": "这台服务器已暂停监控，请先恢复监控",
                 "code": "server_disabled",
             }
         if not self._host_key_trust_lock.acquire(blocking=False):
@@ -3271,7 +3297,7 @@ class AppApi:
                 "profile",
                 "保存配置",
                 "passed",
-                "已切换为 SSH Key 优先；已保存的密码仅在密钥被拒绝时本地回退",
+                "已切换为 SSH Key 优先；仅在密钥被拒绝时改用已保存的密码",
             )
         )
         return {
@@ -3281,6 +3307,31 @@ class AppApi:
             "stages": stages,
             "profile": self._desktop_profile(updated_profile),
         }
+
+    @staticmethod
+    def _auto_imported_user_edited(previous: ServerProfile, current: ServerProfile) -> bool:
+        """Return True when the editor changed fields beyond sync bookkeeping."""
+
+        return (
+            previous.display_name != current.display_name
+            or previous.backend != current.backend
+            or previous.enabled != current.enabled
+            or previous.ssh_alias != current.ssh_alias
+            or previous.host != current.host
+            or previous.port != current.port
+            or previous.port_override != current.port_override
+            or previous.username != current.username
+            or previous.identity_file != current.identity_file
+            or previous.ssh_config_file != current.ssh_config_file
+            or previous.default_work_directory != current.default_work_directory
+            or previous.slurm_module != current.slurm_module
+            or previous.slurm_bin_directory != current.slurm_bin_directory
+            or previous.slurm_init_script != current.slurm_init_script
+            or previous.connect_timeout_seconds != current.connect_timeout_seconds
+            or previous.show_other_user_commands != current.show_other_user_commands
+            or previous.prefer_identity_auth != current.prefer_identity_auth
+            or previous.auto_detect_backend != current.auto_detect_backend
+        )
 
     def save_profile(
         self,
@@ -3360,9 +3411,18 @@ class AppApi:
                 "task_completion_alert_enabled",
                 "task_completion_watches",
                 "saved_views",
+                "pending_alias_choices",
+                "resolved_alias_choice_keys",
             ):
                 if preference not in candidate:
-                    candidate[preference] = copy.deepcopy(persisted_profile[preference])
+                    if preference in persisted_profile:
+                        candidate[preference] = copy.deepcopy(
+                            persisted_profile[preference]
+                        )
+                    elif preference == "pending_alias_choices":
+                        candidate[preference] = []
+                    elif preference == "resolved_alias_choice_keys":
+                        candidate[preference] = []
             updates = password_updates or {}
             if not isinstance(updates, dict):
                 raise ConfigError("password updates must be a table")
@@ -3491,6 +3551,19 @@ class AppApi:
                 sync_source = source
                 candidate["server_config_path"] = str(source)
             profile = Profile.from_dict(candidate, expected_id=self.profile.id)
+            # The editor may omit auto_imported. Preserve it for untouched
+            # auto-synced rows and clear it once the user edits that server.
+            restored_servers = []
+            for server in profile.servers:
+                previous = old_by_id.get(renames.get(server.id, server.id))
+                if previous is None or not previous.auto_imported:
+                    restored_servers.append(server)
+                    continue
+                if server.auth_ref or self._auto_imported_user_edited(previous, server):
+                    restored_servers.append(replace(server, auto_imported=False))
+                else:
+                    restored_servers.append(replace(server, auto_imported=True))
+            profile = replace(profile, servers=tuple(restored_servers))
             if sync_source is not None:
                 # Apply the same conservative synchronization now that startup
                 # would apply later. A successful save must never expose one
@@ -3841,12 +3914,12 @@ class AppApi:
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-            return {"ok": True, "message": "已打开日志文件夹"}
+            return {"ok": True, "message": "已打开日志目录"}
         except (OSError, TypeError, ValueError) as exc:
             logging.getLogger("vram_radar").warning("could not open logs directory: %s", exc)
             return {
                 "ok": False,
-                "error": "无法打开日志文件夹",
+                "error": "无法打开日志目录",
                 "code": "open_logs_failed",
             }
 
@@ -4114,6 +4187,217 @@ class AppApi:
             "message": f"已发现 {len(sources)} 个服务器设置来源",
         }
 
+
+    def apply_alias_choice(self, choice_id: str, selection: str) -> dict[str, Any]:
+        """Apply one pending SSH-alias duplicate choice under the mutation lock."""
+
+        if not self._profile_mutation_lock.acquire(blocking=False):
+            return {
+                "ok": False,
+                "error": "另一项设置正在保存，请稍后重试",
+                "code": "profile_mutation_busy",
+            }
+        try:
+            return self._apply_alias_choice_locked(choice_id, selection)
+        finally:
+            self._profile_mutation_lock.release()
+
+    def _apply_alias_choice_locked(self, choice_id: str, selection: str) -> dict[str, Any]:
+        try:
+            normalized_id = require_id(
+                choice_id.strip() if isinstance(choice_id, str) else choice_id,
+                "alias choice id",
+            )
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_alias_choice_id"}
+        if not isinstance(selection, str) or not selection.strip():
+            return {"ok": False, "error": "请选择一个 SSH 别名或全部保留", "code": "invalid_alias_choice"}
+        selection = selection.strip()
+        choice = next(
+            (
+                item
+                for item in self.profile.pending_alias_choices
+                if item["id"].casefold() == normalized_id.casefold()
+            ),
+            None,
+        )
+        if choice is None:
+            return {"ok": False, "error": "找不到这项别名选择", "code": "alias_choice_not_found"}
+        routes = list(choice.get("routes") or [])
+        if not routes:
+            routes = [
+                {"primary_alias": alias, "aliases": [alias], "summary": alias}
+                for alias in choice.get("aliases") or []
+            ]
+        primary_keys = {
+            str(route["primary_alias"]).casefold(): route for route in routes if route.get("primary_alias")
+        }
+        kept_server = next(
+            (server for server in self.profile.servers if server.id == choice["kept_server_id"]),
+            None,
+        )
+        if selection.casefold() == "keep_all":
+            return self._apply_alias_choice_keep_all_locked(choice, kept_server)
+        if selection.casefold() not in primary_keys:
+            return {
+                "ok": False,
+                "error": "所选 SSH 别名不在候选项中",
+                "code": "invalid_alias_choice",
+            }
+        chosen_route = primary_keys[selection.casefold()]
+        chosen_alias = str(chosen_route["primary_alias"])
+        if kept_server is None:
+            return {"ok": False, "error": "找不到对应的服务器", "code": "server_not_found"}
+        ignored_by_key = {
+            alias.casefold(): alias for alias in self.profile.ignored_ssh_aliases
+        }
+        # Keep only the chosen route's primary; siblings on that Host line and
+        # every alias on other routes are ignored so auto-sync stays quiet.
+        for route in routes:
+            primary = str(route["primary_alias"])
+            for alias in route.get("aliases") or [primary]:
+                alias = str(alias)
+                if (
+                    route is chosen_route
+                    and alias.casefold() == chosen_alias.casefold()
+                ):
+                    ignored_by_key.pop(alias.casefold(), None)
+                else:
+                    ignored_by_key.setdefault(alias.casefold(), alias)
+        updated_servers = tuple(
+            replace(
+                server,
+                ssh_alias=chosen_alias,
+                ssh_config_file=chosen_route.get("ssh_config_file") or server.ssh_config_file,
+                # Switching the monitored alias is a deliberate user choice.
+                auto_imported=False,
+            )
+            if server.id == kept_server.id
+            else server
+            for server in self.profile.servers
+        )
+        remaining_pending = tuple(
+            item
+            for item in self.profile.pending_alias_choices
+            if item["id"].casefold() != choice["id"].casefold()
+        )
+        resolved_keys = list(self.profile.resolved_alias_choice_keys)
+        if choice["group_key"] not in resolved_keys:
+            resolved_keys.append(choice["group_key"])
+        updated_profile = replace(
+            self.profile,
+            servers=updated_servers,
+            ignored_ssh_aliases=tuple(ignored_by_key.values()),
+            pending_alias_choices=remaining_pending,
+            resolved_alias_choice_keys=tuple(resolved_keys),
+        )
+        # Alias/source changes must pass the same credential-binding and
+        # rollback checks as editing a connection in Settings.
+        candidate = updated_profile.to_dict()
+        candidate["pending_alias_choices"] = list(remaining_pending)
+        persisted = self._save_profile_locked(candidate)
+        if not persisted.get("ok"):
+            return persisted
+        return {
+            "ok": True,
+            "choice_id": choice["id"],
+            "selection": chosen_alias,
+            "profile": persisted.get("profile"),
+        }
+
+    def _apply_alias_choice_keep_all_locked(
+        self,
+        choice: dict[str, Any],
+        kept_server: ServerProfile | None,
+    ) -> dict[str, Any]:
+        routes = list(choice.get("routes") or [])
+        if not routes:
+            routes = [
+                {"primary_alias": alias, "aliases": [alias], "summary": alias}
+                for alias in choice.get("aliases") or []
+            ]
+        ignored_by_key = {
+            alias.casefold(): alias for alias in self.profile.ignored_ssh_aliases
+        }
+        # One server per route: un-ignore each primary, keep Host-line siblings ignored.
+        for route in routes:
+            primary = str(route["primary_alias"])
+            for alias in route.get("aliases") or [primary]:
+                alias = str(alias)
+                if alias.casefold() == primary.casefold():
+                    ignored_by_key.pop(alias.casefold(), None)
+                else:
+                    ignored_by_key.setdefault(alias.casefold(), alias)
+        existing_alias_keys = {
+            server.ssh_alias.casefold()
+            for server in self.profile.servers
+            if server.ssh_alias
+        }
+        used_ids = {server.id.casefold() for server in self.profile.servers}
+        config_path = ""
+        if kept_server is not None and kept_server.ssh_config_file:
+            config_path = kept_server.ssh_config_file
+        elif self.profile.server_config_path:
+            config_path = self.profile.server_config_path
+        primary_keys = {str(route["primary_alias"]).casefold() for route in routes}
+        new_servers: list[ServerProfile] = [
+            replace(server, auto_imported=False)
+            if server.ssh_alias and server.ssh_alias.casefold() in primary_keys
+            else server
+            for server in self.profile.servers
+        ]
+        for route in routes:
+            alias = str(route["primary_alias"])
+            if alias.casefold() in existing_alias_keys:
+                continue
+            server_id = _server_id_from_alias(alias, used_ids)
+            used_ids.add(server_id.casefold())
+            new_servers.append(
+                ServerProfile.from_dict(
+                    {
+                        "id": server_id,
+                        "display_name": alias,
+                        "backend": (
+                            kept_server.backend if kept_server is not None else "direct_ssh"
+                        ),
+                        "enabled": True,
+                        "ssh_alias": alias,
+                        "ssh_config_file": route.get("ssh_config_file") or config_path,
+                        "auto_detect_backend": True,
+                        "auto_imported": False,
+                    }
+                )
+            )
+            existing_alias_keys.add(alias.casefold())
+        remaining_pending = tuple(
+            item
+            for item in self.profile.pending_alias_choices
+            if item["id"].casefold() != choice["id"].casefold()
+        )
+        resolved_keys = list(self.profile.resolved_alias_choice_keys)
+        if choice["group_key"] not in resolved_keys:
+            resolved_keys.append(choice["group_key"])
+        updated_profile = replace(
+            self.profile,
+            servers=tuple(new_servers),
+            ignored_ssh_aliases=tuple(ignored_by_key.values()),
+            pending_alias_choices=remaining_pending,
+            resolved_alias_choice_keys=tuple(resolved_keys),
+        )
+        persisted = self._persist_local_preferences(
+            updated_profile,
+            replace_service=True,
+            expected_profile=self.profile,
+        )
+        if not persisted.get("ok"):
+            return persisted
+        return {
+            "ok": True,
+            "choice_id": choice["id"],
+            "selection": "keep_all",
+            "profile": persisted.get("profile"),
+        }
+
     def import_server_config(self, path: str | list[str] = "") -> dict[str, Any]:
         if (
             not self._automatic_import_enabled
@@ -4149,6 +4433,7 @@ class AppApi:
                     self.profile,
                     [source for source in sources if source is not None],
                 )
+                desktop = self._desktop_profile(synchronized)
                 return {
                     "ok": True,
                     "path": "",
@@ -4156,13 +4441,15 @@ class AppApi:
                     "auto_sync": False,
                     "persisted": False,
                     "validated": False,
-                    "servers": self._desktop_profile(synchronized)["servers"],
+                    "servers": desktop["servers"],
+                    "pending_alias_choices": desktop.get("pending_alias_choices") or [],
                     "warnings": warnings,
                 }
             source = resolve_server_config(path or None)
             if source is None:
                 raise ConfigError("未发现默认 servers.toml，可手动输入文件地址")
             synchronized, warnings = profile_from_server_config(self.profile, source)
+            desktop = self._desktop_profile(synchronized)
             return {
                 "ok": True,
                 "path": str(source),
@@ -4170,7 +4457,8 @@ class AppApi:
                 "auto_sync": True,
                 "persisted": False,
                 "validated": False,
-                "servers": self._desktop_profile(synchronized)["servers"],
+                "servers": desktop["servers"],
+                "pending_alias_choices": desktop.get("pending_alias_choices") or [],
                 "warnings": warnings,
             }
         except (ConfigError, OSError) as exc:

@@ -53,7 +53,7 @@ class ConnectorTests(unittest.TestCase):
         if os.name != "nt":
             return path.as_posix()
         converted = subprocess.run(
-            [bash, "-lc", 'cygpath -u "$1"', "vram-radar-test", str(path)],
+            [bash, "--noprofile", "--norc", "-c", 'cygpath -u "$1"', "vram-radar-test", str(path)],
             check=True,
             text=True,
             capture_output=True,

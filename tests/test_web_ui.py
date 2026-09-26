@@ -77,7 +77,7 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript,
         )
         self.assertIn("整台", self.javascript)
-        self.assertIn("仅 GPU", self.javascript)
+        self.assertNotIn("gpuFavoriteOnly", self.javascript)
         self.assertNotIn("整机收藏", self.javascript)
         self.assertIn("server-navigator-favorite-kind", self.javascript)
         self.assertIn("收藏这张 GPU", self.javascript)
@@ -218,7 +218,7 @@ class WebUiContractTests(unittest.TestCase):
         for source in (
             "数据已过期",
             "服务器连接超时",
-            "旧快照仅供参考，不计入顶部实时汇总。",
+            "上次读取的数据仅供参考，不计入顶部当前统计。",
             "进程 / 任务",
             "GPU 明细",
             "显存合计",
@@ -297,7 +297,7 @@ class WebUiContractTests(unittest.TestCase):
             "其他用户",
             "正在运行与排队",
             "过去 ${number((server.tasks || {}).history_window_hours || 24)} 小时结果",
-            "仅显示 Slurm 对当前登录账号可见的 GPU 作业",
+            "仅显示 Slurm 对当前登录账号可见的 GPU 任务",
             "PID 进程列表",
         ):
             self.assertIn(text, self.javascript)
@@ -1143,7 +1143,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn('data-field="show_other_user_commands"', self.markup)
         self.assertIn("显示其他用户的任务与命令摘要", self.markup)
         self.assertIn("show_other_user_commands: true", self.javascript)
-        self.assertIn("Slurm：显示其他用户的作业名、状态与时间", self.javascript)
+        self.assertIn("Slurm：显示其他用户的任务名、状态与时间", self.javascript)
         self.assertIn("调度器视图不读取完整 shell 命令", self.javascript)
         self.assertNotIn("server-command-setting').hidden", self.javascript)
         self.assertIn("show_other_user_commands", self.javascript)
@@ -1390,7 +1390,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("空闲容量按未知处理", scheduler)
         self.assertIn("server.slurm_capabilities?.task_gpu_request_detail === false", scheduler)
         self.assertIn("server.slurm_capabilities?.queue_scope_limited === true", scheduler)
-        self.assertIn("已自动回退为当前账号任务", scheduler)
+        self.assertIn("已自动改为只显示当前账号的任务", scheduler)
         self.assertIn("尚未分配节点的 GPU 排队任务可能不可识别", scheduler)
         self.assertIn("server.slurm_capabilities?.node_allocation_detail === false", navigator)
         self.assertIn("空闲容量未知", navigator)
@@ -1501,8 +1501,8 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript.index("function directoryRequestKey")
         ]
         self.assertIn("server.connection?.state !== 'online'", directory_render)
-        self.assertIn("旧目录快照 · 当前服务器未监控就绪，仅供参考", directory_render)
-        self.assertIn("${stale ? '旧目录快照 · ' : ''}", directory_render)
+        self.assertIn("上次目录数据 · 当前服务器未监控就绪，仅供参考", directory_render)
+        self.assertIn("${stale ? '上次目录数据 · ' : ''}", directory_render)
 
     def test_large_fleet_and_local_actions_avoid_unrelated_full_repaints(self):
         navigator = self.javascript[
@@ -1735,6 +1735,24 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn(".update-download-progress", self.styles)
         self.assertIn("Confirming the official update", self.localization)
         self.assertIn("Downloading and verifying the update", self.localization)
+
+
+    def test_alias_choice_dialog_is_wired(self):
+        self.assertIn('id="alias-choice-dialog"', self.markup)
+        self.assertIn("发现可能重复的服务器", self.markup)
+        self.assertIn("稍后决定", self.markup)
+        self.assertNotIn("dialog-kicker", self.markup.split("alias-choice-dialog", 1)[1].split("</dialog>", 1)[0])
+        self.assertIn("function openAliasChoiceDialog", self.javascript)
+        self.assertIn("function confirmAliasChoices", self.javascript)
+        self.assertIn("function aliasChoiceReasonText", self.javascript)
+        self.assertIn("api.apply_alias_choice", self.javascript)
+        self.assertIn("pending_alias_choices", self.javascript)
+        self.assertIn("renderImportAliasChoices", self.javascript)
+        self.assertIn("#alias-choice-dialog .alias-choice-options > label", self.styles)
+        self.assertIn("accent-color: var(--cyan)", self.styles)
+        self.assertIn("这些 SSH 别名写在同一条 Host 设置中", self.localization)
+        self.assertIn("Keep all as separate servers", self.localization)
+        self.assertIn("Each connection route becomes its own server", self.localization)
 
 
 if __name__ == "__main__":

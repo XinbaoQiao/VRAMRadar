@@ -17,8 +17,18 @@ from threading import RLock
 import tomllib
 from typing import Any
 
-from .models import ConfigError, Profile, ServerProfile
-from .openssh_resolution import resolve_openssh_identity_files
+from .models import (
+    ConfigError,
+    Profile,
+    ServerProfile,
+    alias_choice_group_key,
+    normalize_pending_alias_choice,
+)
+from .openssh_resolution import (
+    format_openssh_connection_summary,
+    resolve_openssh_destination,
+    resolve_openssh_identity_files,
+)
 
 
 MAX_CATALOG_BYTES = 1_048_576
@@ -737,8 +747,14 @@ def _split_openssh_line(line: str) -> list[str]:
 def _read_openssh_aliases(
     source: Path,
     dependency_probe: _OpenSSHDependencyProbe | None = None,
-) -> tuple[list[str], int, list[str], str]:
-    aliases: list[str] = []
+) -> tuple[list[tuple[str, ...]], int, list[str], str]:
+    """Return concrete Host alias groups, Include count, warnings, and digest.
+
+    Each group is the ordered concrete aliases from one ``Host`` line. Callers
+    that only need a flat alias list can take the first entry of every group.
+    """
+
+    alias_groups: list[tuple[str, ...]] = []
     seen_aliases: set[str] = set()
     visited: set[str] = set()
     dependency_only: set[str] = set()
@@ -889,13 +905,20 @@ def _read_openssh_aliases(
             if keyword != "host":
                 continue
             include_active = len(fields) == 2 and fields[1] == "*"
+            group: list[str] = []
             for alias in fields[1:]:
-                alias_key = alias.casefold()
                 if not alias or any(character in alias for character in OPENSSH_PATTERN_CHARACTERS):
                     continue
-                if alias_key not in seen_aliases:
-                    seen_aliases.add(alias_key)
-                    aliases.append(alias)
+                group.append(alias)
+            if not group:
+                continue
+            # One Host line yields one import candidate (its first concrete
+            # alias) plus sibling aliases for existing-profile binding. Aliases
+            # already claimed by an earlier Host line stay in the group for
+            # binding but do not create an extra import row.
+            alias_groups.append(tuple(group))
+            for alias in group:
+                seen_aliases.add(alias.casefold())
         visiting.discard(key)
         exit_state_cache[state_key] = include_active
         return include_active
@@ -907,7 +930,7 @@ def _read_openssh_aliases(
             f"已跳过 {skipped_conditional_includes} 条条件 Host/Match 中的 Include；"
             "这类规则需由 OpenSSH 在实际连接时判断"
         )
-    return aliases, included_files, warnings, dependency_hash.hexdigest()
+    return alias_groups, included_files, warnings, dependency_hash.hexdigest()
 
 
 def openssh_config_dependency_fingerprint(path: str | Path) -> str:
@@ -963,17 +986,69 @@ def openssh_config_dependency_fingerprint(path: str | Path) -> str:
 def import_openssh_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], list[str]]:
     """Import concrete Host aliases, including bounded Include files."""
 
+    imported, warnings, _alias_groups, _pending = _import_openssh_config_detailed(path)
+    return imported, warnings
+
+
+def _import_openssh_config_detailed(
+    path: str | Path,
+) -> tuple[
+    tuple[ServerProfile, ...],
+    list[str],
+    tuple[tuple[str, ...], ...],
+    list[dict[str, object]],
+]:
+    """Import OpenSSH Host aliases and return same-line groups plus pending choices."""
+
     source = _resolved(path)
     if not source.is_file():
         raise ConfigError(f"OpenSSH 配置文件不存在：{source}")
-    aliases, included_files, parser_warnings, _dependency_digest = _read_openssh_aliases(source)
-    if not aliases:
+    alias_groups, included_files, parser_warnings, _dependency_digest = _read_openssh_aliases(
+        source
+    )
+    if not alias_groups:
         raise ConfigError("OpenSSH 配置及其 Include 文件中没有可导入的具体 Host 别名")
 
     used_ids: set[str] = set()
     imported_rows: list[ServerProfile] = []
     identity_paths_found = 0
-    for alias in aliases:
+    merged_same_line = False
+    skipped_same_destination = 0
+    seen_destinations: dict[tuple[object, ...], str] = {}
+    destination_aliases: dict[tuple[object, ...], list[str]] = {}
+    imported_alias_keys: set[str] = set()
+    pending_drafts: list[dict[str, object]] = []
+    config_path = str(source)
+    for group in alias_groups:
+        if len(group) > 1:
+            merged_same_line = True
+            pending_drafts.append(
+                {
+                    "reason": "same_host_line",
+                    "aliases": list(group),
+                    "default_alias": group[0],
+                    "config_path": config_path,
+                }
+            )
+        alias = group[0]
+        alias_key = alias.casefold()
+        # Same Host line: only the first concrete alias becomes a server row.
+        # Later aliases stay available via alias_groups for existing-profile
+        # binding and are never imported as extra servers.
+        if alias_key in imported_alias_keys:
+            continue
+        destination = resolve_openssh_destination(source, alias)
+        fingerprint = destination.fingerprint()
+        if fingerprint is not None:
+            prior = seen_destinations.get(fingerprint)
+            destination_aliases.setdefault(fingerprint, [])
+            if prior is not None:
+                skipped_same_destination += 1
+                if alias not in destination_aliases[fingerprint]:
+                    destination_aliases[fingerprint].append(alias)
+                continue
+            seen_destinations[fingerprint] = alias
+            destination_aliases[fingerprint].append(alias)
         identity_resolution = resolve_openssh_identity_files(source, alias)
         identity_file = ""
         if identity_resolution.status == "exact" and len(identity_resolution.identity_files) == 1:
@@ -985,6 +1060,7 @@ def import_openssh_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
                     "display_name": alias,
                     "backend": "direct_ssh",
                     "auto_detect_backend": True,
+                    "auto_imported": True,
                     "enabled": True,
                     "ssh_alias": alias,
                     "ssh_config_file": str(source),
@@ -996,8 +1072,26 @@ def import_openssh_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
                 }
             )
         )
+        imported_alias_keys.add(alias_key)
+    for aliases in destination_aliases.values():
+        if len(aliases) < 2:
+            continue
+        pending_drafts.append(
+            {
+                "reason": "same_destination",
+                "aliases": list(aliases),
+                "default_alias": aliases[0],
+                "config_path": config_path,
+            }
+        )
     imported = tuple(imported_rows)
     warnings = ["OpenSSH 静态配置无法判断直连或 Slurm；将在保存验证时自动识别，失败时可手动选择"]
+    if merged_same_line:
+        warnings.append("同一条 Host 设置中的其他别名已合并为一台服务器")
+    if skipped_same_destination:
+        warnings.append(
+            f"已跳过 {skipped_same_destination} 个与现有服务器连接设置相同的 SSH 别名"
+        )
     if identity_paths_found:
         warnings.append(
             f"已确认 {identity_paths_found} 台服务器由 OpenSSH 配置管理私钥；不会固化路径"
@@ -1005,7 +1099,22 @@ def import_openssh_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
     warnings.extend(parser_warnings)
     if included_files:
         warnings.append(f"已安全解析 {included_files} 个 OpenSSH Include 文件")
-    return imported, warnings
+    return imported, warnings, tuple(alias_groups), pending_drafts
+
+
+
+def _source_is_openssh_config(source: Path) -> bool:
+    if source.name.casefold() == "config" and source.parent.name.casefold() == ".ssh":
+        return True
+    if source.suffix.casefold() == ".toml":
+        return False
+    try:
+        if source.stat().st_size > MAX_CATALOG_BYTES:
+            return False
+        leading_text = source.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeError):
+        return False
+    return bool(re.search(r"(?im)^\s*(?:host|include)\s*(?:=\s*)?\S+", leading_text))
 
 
 def import_server_config(path: str | Path) -> tuple[tuple[ServerProfile, ...], list[str]]:
@@ -1055,10 +1164,33 @@ def profile_from_server_configs(
         alias.casefold() for alias in profile.ignored_ssh_aliases
     } - active_alias_keys
     ignored_imported_aliases: dict[str, str] = {}
+    skipped_same_destination = 0
+    accepted_destinations: dict[tuple[object, ...], str] = {}
+    pending_drafts: list[dict[str, object]] = []
+    for existing in profile.servers:
+        if not existing.ssh_alias:
+            continue
+        config_path = existing.ssh_config_file or (str(sources[0]) if len(sources) == 1 else "")
+        if not config_path:
+            continue
+        fingerprint = resolve_openssh_destination(config_path, existing.ssh_alias).fingerprint()
+        if fingerprint is not None:
+            accepted_destinations.setdefault(fingerprint, existing.ssh_alias)
+
     for source in sources:
         prefix = f"{source.name}: " if len(sources) > 1 else ""
+        alias_groups: tuple[tuple[str, ...], ...] = ()
         try:
-            servers, source_warnings = import_server_config(source)
+            source_pending_drafts: list[dict[str, object]] = []
+            if _source_is_openssh_config(source):
+                servers, source_warnings, alias_groups, source_pending_drafts = (
+                    _import_openssh_config_detailed(source)
+                )
+                openssh_source = True
+            else:
+                servers, source_warnings = import_server_config(source)
+                openssh_source = False
+            pending_drafts.extend(source_pending_drafts)
         except ConfigError as exc:
             if len(sources) == 1:
                 raise
@@ -1066,11 +1198,61 @@ def profile_from_server_configs(
             continue
         successful_sources += 1
         warnings.extend(f"{prefix}{warning}" for warning in source_warnings)
-        openssh_source = source.suffix.casefold() != ".toml"
+        group_keys_by_primary: dict[str, tuple[str, ...]] = {}
+        for group in alias_groups:
+            if not group:
+                continue
+            group_keys_by_primary[group[0].casefold()] = tuple(
+                alias.casefold() for alias in group
+            )
+
         for server in servers:
             alias_key = server.ssh_alias.casefold()
+            group_keys = group_keys_by_primary.get(alias_key, (alias_key,))
+            owning_existing = next(
+                (
+                    existing
+                    for existing in profile.servers
+                    if existing.ssh_alias and existing.ssh_alias.casefold() in group_keys
+                ),
+                None,
+            )
+            if owning_existing is not None:
+                # Same Host line already represented by a local row (possibly via
+                # a later alias). Keep that row and do not append the primary.
+                for group_alias_key in group_keys:
+                    alias_to_id.setdefault(group_alias_key, owning_existing.id)
+                if owning_existing.id not in imported_by_id:
+                    imported_by_id[owning_existing.id] = replace(
+                        owning_existing,
+                        ssh_config_file=server.ssh_config_file or owning_existing.ssh_config_file,
+                    )
+                    imported_is_openssh[owning_existing.id] = openssh_source
+                    imported_order.append(owning_existing.id)
+                elif server.ssh_config_file and not imported_by_id[owning_existing.id].ssh_config_file:
+                    imported_by_id[owning_existing.id] = replace(
+                        imported_by_id[owning_existing.id],
+                        ssh_config_file=server.ssh_config_file,
+                    )
+                continue
             if alias_key in ignored_alias_keys:
                 ignored_imported_aliases.setdefault(alias_key, server.ssh_alias)
+                continue
+            destination = resolve_openssh_destination(
+                server.ssh_config_file or source,
+                server.ssh_alias,
+            ).fingerprint()
+            if destination is not None and destination in accepted_destinations:
+                skipped_same_destination += 1
+                prior_alias = accepted_destinations[destination]
+                pending_drafts.append(
+                    {
+                        "reason": "same_destination",
+                        "aliases": [prior_alias, server.ssh_alias],
+                        "default_alias": prior_alias,
+                        "config_path": str(server.ssh_config_file or source),
+                    }
+                )
                 continue
             duplicate_alias = alias_to_id.get(alias_key)
             if duplicate_alias:
@@ -1102,8 +1284,16 @@ def profile_from_server_configs(
             imported_by_id[server.id] = server
             imported_is_openssh[server.id] = openssh_source
             alias_to_id[alias_key] = server.id
+            for group_alias_key in group_keys:
+                alias_to_id.setdefault(group_alias_key, server.id)
+            if destination is not None:
+                accepted_destinations.setdefault(destination, server.ssh_alias)
             imported_order.append(server.id)
 
+    if skipped_same_destination:
+        warnings.append(
+            f"已跳过 {skipped_same_destination} 个与现有服务器连接设置相同的 SSH 别名"
+        )
     if ignored_imported_aliases:
         warnings.append(
             f"已跳过 {len(ignored_imported_aliases)} 台你主动移除过的服务器；"
@@ -1116,10 +1306,16 @@ def profile_from_server_configs(
         # not a broken configuration.  Preserve local rows and synchronization
         # metadata without resurrecting anything the user removed.
         synchronized_path = str(sources[0]) if len(sources) == 1 else ""
+        pending_alias_choices = _finalize_pending_alias_choices(
+            profile,
+            profile.servers,
+            pending_drafts,
+        )
         return replace(
             profile,
             server_config_path=synchronized_path,
             auto_sync_servers=len(sources) == 1,
+            pending_alias_choices=pending_alias_choices,
         ), warnings
 
     # Profile IDs are case-insensitive. Normalize an imported spelling back to
@@ -1169,11 +1365,14 @@ def profile_from_server_configs(
         if imported_is_openssh[server_id]:
             # OpenSSH does not describe VRAMRadar semantics. Keep the user's
             # reviewed direct/Slurm choice and local display settings on sync.
+            # Sibling-alias binding seeds the imported row with the local alias
+            # already, so adopting imported.ssh_alias here stays correct for
+            # both ID matches and same-line Host groups.
             preserved.append(
                 replace(
                     existing,
-                    ssh_alias=imported.ssh_alias,
-                    ssh_config_file=imported.ssh_config_file,
+                    ssh_alias=imported.ssh_alias or existing.ssh_alias,
+                    ssh_config_file=imported.ssh_config_file or existing.ssh_config_file,
                 )
             )
         else:
@@ -1208,9 +1407,307 @@ def profile_from_server_configs(
         and server_id not in {server.id for server in unmatched_existing}
     ]
     synchronized_path = str(sources[0]) if len(sources) == 1 else ""
+    synchronized_servers = tuple([*preserved, *unmatched_existing, *appended])
+    pending_alias_choices = _finalize_pending_alias_choices(
+        profile,
+        synchronized_servers,
+        pending_drafts,
+    )
     return replace(
         profile,
-        servers=tuple([*preserved, *unmatched_existing, *appended]),
+        servers=synchronized_servers,
         server_config_path=synchronized_path,
         auto_sync_servers=len(sources) == 1,
+        pending_alias_choices=pending_alias_choices,
     ), warnings
+
+def _choice_summaries(config_path: str, aliases: list[str]) -> dict[str, str]:
+    summaries: dict[str, str] = {}
+    for alias in aliases:
+        summaries[alias] = format_openssh_connection_summary(config_path, alias)
+    return summaries
+
+
+def _union_find_parent():
+    parent: dict[str, str] = {}
+
+    def find(key: str) -> str:
+        while parent.setdefault(key, key) != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    def union(left: str, right: str) -> None:
+        root_left = find(left)
+        root_right = find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    return parent, find, union
+
+
+def _finalize_pending_alias_choices(
+    profile: Profile,
+    servers: tuple[ServerProfile, ...] | list[ServerProfile],
+    drafts: list[dict[str, object]],
+) -> tuple[dict, ...]:
+    """Merge overlapping duplicate detections into one choice per machine."""
+
+    from .models import MAX_PENDING_ALIAS_CHOICES, alias_choice_group_key
+
+    resolved_keys = set(profile.resolved_alias_choice_keys)
+    server_list = list(servers)
+    servers_by_alias = {
+        server.ssh_alias.casefold(): server
+        for server in server_list
+        if server.ssh_alias
+    }
+    servers_by_id = {server.id: server for server in server_list}
+    alias_configs = {
+        server.ssh_alias.casefold(): server.ssh_config_file
+        for server in server_list if server.ssh_alias and server.ssh_config_file
+    }
+    for choice in profile.pending_alias_choices:
+        for route in choice.get("routes") or []:
+            if route.get("ssh_config_file"):
+                for alias in route.get("aliases") or []:
+                    alias_configs.setdefault(alias.casefold(), route["ssh_config_file"])
+
+    # Host-line clusters: aliases that share one Host entry become one route.
+    host_line_clusters: list[list[str]] = []
+    link_groups: list[tuple[str, list[str], str]] = []  # reason, aliases, config_path
+    for draft in drafts:
+        reason = str(draft.get("reason") or "")
+        aliases = [str(alias) for alias in (draft.get("aliases") or []) if alias]
+        config_path = str(draft.get("config_path") or "")
+        if config_path:
+            for alias in aliases:
+                alias_configs.setdefault(alias.casefold(), config_path)
+        if reason == "same_host_line" and len(aliases) >= 2:
+            host_line_clusters.append(list(aliases))
+            link_groups.append((reason, list(aliases), config_path))
+        elif reason == "same_destination" and len(aliases) >= 2:
+            link_groups.append((reason, list(aliases), config_path))
+
+    # Preserve runtime GPU-UUID choices that still point at a live server.
+    for item in profile.pending_alias_choices:
+        item_reasons = list(item.get("reasons") or [])
+        if item.get("reason"):
+            item_reasons = list(dict.fromkeys([*item_reasons, item["reason"]]))
+        if "same_gpu_uuids" not in item_reasons:
+            continue
+        if item.get("kept_server_id") not in servers_by_id:
+            continue
+        aliases = [str(alias) for alias in item.get("aliases") or [] if alias]
+        if len(aliases) < 2:
+            continue
+        config_path = ""
+        kept = servers_by_id.get(str(item.get("kept_server_id")))
+        if kept is not None and kept.ssh_config_file:
+            config_path = kept.ssh_config_file
+        link_groups.append(("same_gpu_uuids", aliases, config_path))
+        for route in item.get("routes") or []:
+            route_aliases = [str(alias) for alias in route.get("aliases") or [] if alias]
+            if len(route_aliases) >= 2:
+                host_line_clusters.append(route_aliases)
+
+    if not link_groups:
+        return ()
+
+    _parent, find, union = _union_find_parent()
+    for _reason, aliases, _config in link_groups:
+        head = aliases[0].casefold()
+        for alias in aliases[1:]:
+            union(head, alias.casefold())
+    # Also union aliases that share a kept server id from existing pending.
+    for item in profile.pending_alias_choices:
+        kept_id = item.get("kept_server_id")
+        aliases = [str(alias) for alias in item.get("aliases") or [] if alias]
+        if not aliases:
+            continue
+        head = aliases[0].casefold()
+        for alias in aliases[1:]:
+            union(head, alias.casefold())
+        if kept_id and kept_id in servers_by_id:
+            server_alias = servers_by_id[kept_id].ssh_alias
+            if server_alias:
+                union(head, server_alias.casefold())
+
+    # Map each alias to its host-line cluster (primary = first on the Host line).
+    alias_to_cluster: dict[str, tuple[str, ...]] = {}
+    for cluster in host_line_clusters:
+        normalized = tuple(cluster)
+        for alias in cluster:
+            alias_to_cluster[alias.casefold()] = normalized
+
+    components: dict[str, list[str]] = {}
+    for _reason, aliases, _config in link_groups:
+        for alias in aliases:
+            root = find(alias.casefold())
+            bucket = components.setdefault(root, [])
+            if alias.casefold() not in {item.casefold() for item in bucket}:
+                bucket.append(alias)
+
+    # Reasons and config paths per component.
+    component_reasons: dict[str, list[str]] = {}
+    component_config: dict[str, str] = {}
+    for reason, aliases, config_path in link_groups:
+        root = find(aliases[0].casefold())
+        reasons = component_reasons.setdefault(root, [])
+        if reason not in reasons:
+            reasons.append(reason)
+        if config_path and not component_config.get(root):
+            component_config[root] = config_path
+
+    finalized: list[dict] = []
+    used_ids: set[str] = set()
+    for root, aliases in components.items():
+        if len(aliases) < 2:
+            continue
+        group_key = alias_choice_group_key("machine", aliases)
+        # Honour either the merged machine key or any previously resolved
+        # reason-specific key that covered the same alias set.
+        if group_key in resolved_keys:
+            continue
+        alias_keys = {alias.casefold() for alias in aliases}
+        if any(
+            key.startswith("same_")
+            and set(key.split(":", 1)[-1].split("|")) == alias_keys
+            for key in resolved_keys
+        ):
+            continue
+
+        # Build routes from host-line clusters; leftovers are solo routes.
+        route_map: dict[str, list[str]] = {}
+        for alias in aliases:
+            cluster = alias_to_cluster.get(alias.casefold())
+            if cluster is None:
+                route_map.setdefault(alias.casefold(), [alias])
+                continue
+            primary = cluster[0]
+            members = route_map.setdefault(primary.casefold(), [])
+            for member in cluster:
+                if member.casefold() not in {item.casefold() for item in members}:
+                    if member.casefold() in alias_keys or member.casefold() == alias.casefold():
+                        members.append(member)
+            # Ensure the current alias is present even if cluster had extras
+            # outside this component.
+            if alias.casefold() not in {item.casefold() for item in members}:
+                members.append(alias)
+        # Trim route members to aliases that belong to this component.
+        routes_aliases: list[list[str]] = []
+        for members in route_map.values():
+            trimmed = [alias for alias in members if alias.casefold() in alias_keys]
+            if trimmed:
+                routes_aliases.append(trimmed)
+        if len(routes_aliases) < 2:
+            # A single Host-line (or solo) cluster has nothing to choose between.
+            continue
+
+        kept_server = None
+        default_alias = routes_aliases[0][0]
+        for route_aliases in routes_aliases:
+            for alias in route_aliases:
+                match = servers_by_alias.get(alias.casefold())
+                if match is not None:
+                    kept_server = match
+                    default_alias = match.ssh_alias
+                    break
+            if kept_server is not None:
+                break
+        if kept_server is None:
+            continue
+        # Prefer the route whose members include the kept server alias as primary.
+        for route_aliases in routes_aliases:
+            if kept_server.ssh_alias.casefold() in {alias.casefold() for alias in route_aliases}:
+                default_alias = route_aliases[0]
+                if kept_server.ssh_alias.casefold() == route_aliases[0].casefold():
+                    default_alias = route_aliases[0]
+                else:
+                    # Keep the profile's alias as primary when it was a sibling.
+                    default_alias = kept_server.ssh_alias
+                    # Move kept alias to front of that route.
+                    route_aliases[:] = [kept_server.ssh_alias] + [
+                        alias
+                        for alias in route_aliases
+                        if alias.casefold() != kept_server.ssh_alias.casefold()
+                    ]
+                break
+
+        config_path = (
+            component_config.get(root)
+            or kept_server.ssh_config_file
+            or profile.server_config_path
+            or ""
+        )
+        summaries = {
+            alias: format_openssh_connection_summary(alias_configs.get(alias.casefold(), config_path), alias)
+            for alias in aliases if alias_configs.get(alias.casefold(), config_path)
+        }
+        routes = []
+        for route_aliases in routes_aliases:
+            primary = route_aliases[0]
+            routes.append(
+                {
+                    "primary_alias": primary,
+                    "aliases": list(route_aliases),
+                    "summary": summaries.get(primary, primary),
+                    "ssh_config_file": alias_configs.get(primary.casefold(), config_path),
+                }
+            )
+        # Stable order: default route first, then remaining by primary alias.
+        routes.sort(
+            key=lambda route: (
+                0 if route["primary_alias"].casefold() == default_alias.casefold() else 1,
+                route["primary_alias"].casefold(),
+            )
+        )
+
+        prior = next(
+            (
+                item
+                for item in profile.pending_alias_choices
+                if item.get("group_key") == group_key
+                or {str(alias).casefold() for alias in item.get("aliases") or []}
+                == alias_keys
+            ),
+            None,
+        )
+        if prior:
+            choice_id = prior["id"]
+        else:
+            digest = hashlib.sha256(group_key.encode("utf-8")).hexdigest()[:14]
+            choice_id = _server_id_from_alias(f"ac-{digest}", used_ids)
+        used_ids.add(choice_id.casefold())
+        reasons = component_reasons.get(root) or ["same_destination"]
+        finalized.append(
+            normalize_pending_alias_choice(
+                {
+                    "id": choice_id,
+                    "group_key": group_key,
+                    "reason": reasons[0],
+                    "reasons": reasons,
+                    "kept_server_id": kept_server.id,
+                    "display_name": kept_server.display_name,
+                    "default_alias": default_alias,
+                    "aliases": aliases,
+                    "routes": routes,
+                    "summaries": summaries,
+                }
+            )
+        )
+        if len(finalized) >= MAX_PENDING_ALIAS_CHOICES:
+            break
+    return tuple(finalized)
+
+def coalesce_pending_alias_choices(
+    profile: Profile,
+    servers: tuple[ServerProfile, ...] | list[ServerProfile],
+    choices: list[dict] | tuple[dict, ...],
+) -> tuple[dict, ...]:
+    """Merge overlapping pending choices that share an alias or kept server."""
+
+    if not choices:
+        return ()
+    probe = replace(profile, pending_alias_choices=tuple(choices))
+    return _finalize_pending_alias_choices(probe, servers, [])

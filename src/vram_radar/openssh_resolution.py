@@ -19,7 +19,16 @@ MAX_OPENSSH_FILE_VISITS = 64
 MAX_OPENSSH_INCLUDE_MATCHES = 256
 MAX_OPENSSH_LINES = 100_000
 _ENDPOINT_FIELDS = ("hostname", "user", "port")
+_PROXY_FIELDS = ("proxy_jump", "proxy_command")
+_DESTINATION_FIELDS = _ENDPOINT_FIELDS + _PROXY_FIELDS
+_AUTH_ROUTE_OPTIONS = frozenset({
+    "identityfile", "certificatefile", "identitiesonly", "identityagent",
+    "preferredauthentications", "pubkeyauthentication", "passwordauthentication",
+    "kbdinteractiveauthentication", "hostkeyalias", "userknownhostsfile",
+    "pkcs11provider", "securitykeyprovider",
+})
 _DYNAMIC_VALUE_RE = re.compile(r"[%$`]|\x00")
+_EXPANDABLE_PERCENT_RE = re.compile(r"%(?:%|[hpru])")
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,36 @@ class OpenSSHEndpointResolution:
     @property
     def exact(self) -> bool:
         return self.status == "exact"
+
+
+@dataclass(frozen=True)
+class OpenSSHDestinationResolution:
+    """Conservative HostName/User/Port/ProxyJump/ProxyCommand fingerprint."""
+
+    status: Literal["exact", "dynamic"]
+    hostname: str = ""
+    user: str = ""
+    port: int | None = None
+    proxy_jump: str = ""
+    proxy_command: str = ""
+    reason: str = ""
+    authentication: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def exact(self) -> bool:
+        return self.status == "exact"
+
+    def fingerprint(self) -> tuple[object, ...] | None:
+        if not self.exact or self.port is None:
+            return None
+        return (
+            self.hostname.casefold(),
+            self.port,
+            self.user,
+            self.proxy_jump,
+            self.proxy_command,
+            self.authentication,
+        )
 
 
 @dataclass(frozen=True)
@@ -61,6 +100,8 @@ class _ResolutionState:
     matched_host: bool = False
     identity_files: list[str] = field(default_factory=list)
     identity_uncertain: bool = False
+    authentication: dict[str, list[str]] = field(default_factory=dict)
+    authentication_uncertain: bool = False
 
     def mark_uncertain(self, fields: tuple[str, ...], reason: str) -> None:
         for name in fields:
@@ -245,6 +286,66 @@ def _expand_identity_file(value: str, include_root: Path) -> str | None:
         return None
 
 
+def _set_proxy_value(state: _ResolutionState, keyword: str, values: list[str]) -> None:
+    name = {"proxyjump": "proxy_jump", "proxycommand": "proxy_command"}[keyword]
+    if name in state.values or name in state.uncertain_fields:
+        return
+    if state.active is False:
+        return
+    if state.active is None:
+        state.mark_uncertain((name,), "conditional_match")
+        return
+    if not values:
+        state.mark_uncertain((name,), "dynamic_proxy_value")
+        return
+    # ProxyJump may list multiple hops; ProxyCommand is a single argv string.
+    raw = " ".join(values).strip()
+    if not raw:
+        state.mark_uncertain((name,), "dynamic_proxy_value")
+        return
+    if raw.casefold() == "none":
+        state.values[name] = ""
+        return
+    # Percent tokens other than the destination-local set cannot be expanded
+    # statically. Shell/command substitution also forces a dynamic result.
+    if "`" in raw or "$" in raw or "\x00" in raw or "\0" in raw:
+        state.mark_uncertain((name,), "dynamic_proxy_value")
+        return
+    leftover = _EXPANDABLE_PERCENT_RE.sub("", raw)
+    if "%" in leftover:
+        state.mark_uncertain((name,), "dynamic_proxy_value")
+        return
+    state.values[name] = raw
+
+
+def _expand_proxy_percents(value: str, *, hostname: str, user: str, port: int) -> str | None:
+    """Expand the static OpenSSH percent tokens used in ProxyJump/ProxyCommand."""
+
+    if "`" in value or "$" in value or "\x00" in value:
+        return None
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        if token == "%%":
+            return "%"
+        if token == "%h":
+            return hostname
+        if token == "%p":
+            return str(port)
+        if token == "%r":
+            return user
+        if token == "%u":
+            # Local account is environment-dependent; keep a stable sentinel so
+            # two aliases still compare equal when they share the same template.
+            return "%u"
+        return token
+
+    expanded = _EXPANDABLE_PERCENT_RE.sub(replace, value)
+    if re.search(r"%(?![%])", expanded):
+        return None
+    return expanded
+
+
 def _add_identity_files(state: _ResolutionState, values: list[str]) -> None:
     if state.active is False:
         return
@@ -359,11 +460,23 @@ def _visit_config(path: Path, state: _ResolutionState, *, root: bool = False) ->
                     for included_path in included:
                         _visit_config(included_path, state)
                 continue
+            if keyword in _AUTH_ROUTE_OPTIONS and state.active is not False:
+                # Authentication routes remain distinct even when a key is not
+                # currently on disk. Do not execute dynamic tokens or Match.
+                if state.active is None or not values or any(_DYNAMIC_VALUE_RE.search(value) for value in values):
+                    state.authentication_uncertain = True
+                elif keyword in {"identityfile", "certificatefile"}:
+                    state.authentication.setdefault(keyword, []).extend(values)
+                else:
+                    state.authentication.setdefault(keyword, list(values))
             if keyword == "identityfile":
                 _add_identity_files(state, values)
                 continue
             if keyword in {"hostname", "user", "port"}:
                 _set_endpoint_value(state, keyword, values)
+                continue
+            if keyword in {"proxyjump", "proxycommand"}:
+                _set_proxy_value(state, keyword, values)
                 continue
             if keyword == "canonicalizehostname" and state.active is not False:
                 if len(values) != 1 or values[0].casefold() not in {"no", "false"}:
@@ -419,6 +532,64 @@ def resolve_openssh_endpoint(
     )
 
 
+def resolve_openssh_destination(
+    config_path: str | Path,
+    alias: str,
+) -> OpenSSHDestinationResolution:
+    """Resolve the static connection destination used for safe alias dedupe.
+
+    Returns ``dynamic`` whenever HostName/User/Port or a proxy setting cannot be
+    determined without executing OpenSSH. Callers must fail open (keep both
+    aliases) on a non-exact result.
+    """
+
+    source = Path(config_path).expanduser()
+    state = _ResolutionState(alias=alias, include_root=_include_root(source))
+    _visit_config(source, state, root=True)
+    if not state.matched_host:
+        return OpenSSHDestinationResolution(status="dynamic", reason="host_alias_not_found")
+    relevant_uncertain = state.uncertain_fields & set(_DESTINATION_FIELDS)
+    if relevant_uncertain or state.authentication_uncertain or state.reasons:
+        return OpenSSHDestinationResolution(
+            status="dynamic",
+            reason=state.reasons[0] if state.reasons else "dynamic_config",
+        )
+    hostname = state.values.get("hostname", "")
+    user = state.values.get("user", "")
+    raw_port = state.values.get("port", "")
+    if not hostname or not user or not raw_port:
+        return OpenSSHDestinationResolution(
+            status="dynamic",
+            reason="endpoint_fields_unspecified",
+        )
+    port = int(raw_port)
+    proxy_jump = state.values.get("proxy_jump", "")
+    proxy_command = state.values.get("proxy_command", "")
+    if "proxy_jump" not in state.values:
+        proxy_jump = ""
+    if "proxy_command" not in state.values:
+        proxy_command = ""
+    if proxy_jump:
+        expanded = _expand_proxy_percents(proxy_jump, hostname=hostname, user=user, port=port)
+        if expanded is None:
+            return OpenSSHDestinationResolution(status="dynamic", reason="dynamic_proxy_value")
+        proxy_jump = expanded
+    if proxy_command:
+        expanded = _expand_proxy_percents(proxy_command, hostname=hostname, user=user, port=port)
+        if expanded is None:
+            return OpenSSHDestinationResolution(status="dynamic", reason="dynamic_proxy_value")
+        proxy_command = expanded
+    return OpenSSHDestinationResolution(
+        status="exact",
+        hostname=hostname,
+        user=user,
+        port=port,
+        proxy_jump=proxy_jump,
+        proxy_command=proxy_command,
+        authentication=tuple(sorted((key, tuple(values)) for key, values in state.authentication.items())),
+    )
+
+
 def resolve_openssh_identity_files(
     config_path: str | Path,
     alias: str,
@@ -440,3 +611,20 @@ def resolve_openssh_identity_files(
         status="exact",
         identity_files=tuple(state.identity_files),
     )
+
+def format_openssh_connection_summary(
+    config_path: str | Path,
+    alias: str,
+) -> str:
+    """Return a short non-secret connection label for UI choices."""
+
+    resolution = resolve_openssh_destination(config_path, alias)
+    if not resolution.exact or resolution.port is None:
+        return alias
+    endpoint = f"{resolution.user}@{resolution.hostname}:{resolution.port}"
+    if resolution.proxy_jump:
+        hop = resolution.proxy_jump.split(",", 1)[0].strip() or resolution.proxy_jump
+        return f"{endpoint} · 经跳板服务器 {hop}"
+    if resolution.proxy_command:
+        return f"{endpoint} · 经中转命令"
+    return endpoint

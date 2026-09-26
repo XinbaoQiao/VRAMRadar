@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from vram_radar.connectors import ConnectorFailure
 from vram_radar.models import Profile
+from vram_radar.service import DashboardService
 from vram_radar.ssh_keys import PreparedSshKey, SshKeySetupError
 from vram_radar.storage import NotificationStateStore, ProfileStore, SnapshotCache, storage_paths
 from vram_radar.window_state import WindowGeometry
@@ -2658,7 +2659,7 @@ class ShellApiTests(unittest.TestCase):
         api = AppApi(profile, store=Mock(), paths=Mock(), service=service)
         changed = ConnectorFailure(
             "host_key_changed",
-            "服务器 Host Key 已变化，请人工核对指纹",
+            "服务器的主机密钥（Host Key）与此前记录不一致，可能是服务器已重装，也可能存在安全风险；请核对指纹后再连接",
             retryable=False,
             state="security_blocked",
         )
@@ -4363,6 +4364,95 @@ class ShellApiTests(unittest.TestCase):
         payload = json.loads(print_value.call_args.args[0])
         self.assertEqual(payload["current_version"], "0.0.0")
         self.assertEqual(payload["latest_version"], "0.8.8")
+
+
+
+    def test_apply_alias_choice_switches_alias_and_updates_ignore_list(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            paths = storage_paths(home)
+            config = root / "config"
+            config.write_text(
+                "Host keep-me\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host other-me sibling\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            from vram_radar.server_catalog import profile_from_server_configs
+            profile = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "lab",
+                    "display_name": "Lab",
+                    "favorite_server_ids": ["keep-me"],
+                    "pinned_server_ids": ["keep-me"],
+                    "servers": [
+                        {
+                            "id": "keep-me",
+                            "display_name": "Keep Me",
+                            "backend": "direct_ssh",
+                            "ssh_alias": "keep-me",
+                            "ssh_config_file": str(config.resolve()),
+                            "auto_imported": True,
+                        }
+                    ],
+                }
+            )
+            synchronized, _ = profile_from_server_configs(profile, [config])
+            store = ProfileStore(paths)
+            store.save(synchronized)
+            service = DashboardService(synchronized, SnapshotCache(paths, "lab"))
+            api = AppApi(synchronized, store, paths, service)
+            choice = synchronized.pending_alias_choices[0]
+            other_primary = next(
+                route["primary_alias"]
+                for route in choice["routes"]
+                if route["primary_alias"].casefold() != "keep-me"
+            )
+            result = api.apply_alias_choice(choice["id"], other_primary)
+            self.assertTrue(result["ok"])
+            updated = api.profile.servers[0]
+            self.assertEqual(updated.id, "keep-me")
+            self.assertEqual(updated.display_name, "Keep Me")
+            self.assertEqual(updated.ssh_alias, other_primary)
+            self.assertFalse(updated.auto_imported)
+            self.assertEqual(api.profile.favorite_server_ids, ("keep-me",))
+            self.assertEqual(api.profile.pinned_server_ids, ("keep-me",))
+            ignored = {alias.casefold() for alias in api.profile.ignored_ssh_aliases}
+            self.assertIn("keep-me", ignored)
+            self.assertIn("sibling", ignored)
+            self.assertNotIn(other_primary.casefold(), ignored)
+            self.assertEqual(api.profile.pending_alias_choices, ())
+
+    def test_apply_alias_choice_keep_all_imports_one_server_per_route(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            paths = storage_paths(home)
+            config = root / "config"
+            config.write_text(
+                "Host keep-me\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host other-me sibling\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            from vram_radar.server_catalog import profile_from_server_configs
+            profile = Profile.empty("lab")
+            synchronized, _ = profile_from_server_configs(profile, [config])
+            store = ProfileStore(paths)
+            store.save(synchronized)
+            service = DashboardService(synchronized, SnapshotCache(paths, "lab"))
+            api = AppApi(synchronized, store, paths, service)
+            choice = synchronized.pending_alias_choices[0]
+            result = api.apply_alias_choice(choice["id"], "keep_all")
+            self.assertTrue(result["ok"])
+            aliases = {server.ssh_alias for server in api.profile.servers}
+            self.assertEqual(aliases, {"keep-me", "other-me"})
+            self.assertNotIn("sibling", aliases)
+            self.assertIn("sibling", {alias.casefold() for alias in api.profile.ignored_ssh_aliases})
+            self.assertTrue(all(not server.auto_imported for server in api.profile.servers))
+            self.assertEqual(api.profile.pending_alias_choices, ())
+            again, _ = profile_from_server_configs(api.profile, [config])
+            self.assertEqual(again.pending_alias_choices, ())
 
 
 if __name__ == "__main__":

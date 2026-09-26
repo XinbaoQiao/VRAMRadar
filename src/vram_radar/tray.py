@@ -399,7 +399,7 @@ def create_windows_tray_icon(
     def pause_label(_item: Any) -> str:
         if english():
             return "Resume automatic monitoring" if paused() else "Pause automatic monitoring"
-        return "继续自动监控" if paused() else "暂停自动监控"
+        return "恢复自动监控" if paused() else "暂停自动监控"
 
     def menu_label(chinese: str, english_text: str) -> Callable[[Any], str]:
         return lambda _item: english_text if english() else chinese

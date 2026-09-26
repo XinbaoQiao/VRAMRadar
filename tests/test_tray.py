@@ -196,7 +196,7 @@ class TrayControllerTests(unittest.TestCase):
         items[4].activate(icon)
         self.assertEqual(calls, ["show", "refresh"])
         self.assertTrue(paused["value"])
-        self.assertEqual(items[4].text, "继续自动监控")
+        self.assertEqual(items[4].text, "恢复自动监控")
         self.assertEqual(icon.menu_updates, 3)
         items[6].activate(icon)
         self.assertEqual(calls[-1], "exit")

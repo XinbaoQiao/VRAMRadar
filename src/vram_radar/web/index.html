@@ -186,8 +186,8 @@
           </div>
           <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
           <details class="local-tools">
-            <summary><span><strong>诊断与日志</strong><small>连接异常时使用，复制内容会自动脱敏</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
-            <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制脱敏诊断</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
+            <summary><span><strong>诊断与日志</strong><small>连接异常时使用；复制时会自动隐藏敏感信息</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
+            <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制诊断信息</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
           </details>
           </div>
         </details>
@@ -213,7 +213,7 @@
           <details class="import-help">
             <summary><span><strong>自动检测不到？</strong><small>按 Windows 或 macOS 教程找到 SSH 配置，命令可一键复制</small></span><span class="summary-action"><span class="when-closed">展开教程</span><span class="when-open">收起</span></span></summary>
             <div class="import-help-body">
-              <div class="guide-callout"><strong>先弄清楚要找什么</strong><p>SSH 配置通常是一个名为 <code>config</code>、没有扩展名的文本文件。终端命令中的 <code>ssh gpu-lab</code> 里，<code>gpu-lab</code> 就是显存雷达要导入的服务器别名。</p></div>
+              <div class="guide-callout"><strong>先确认要找的文件</strong><p>SSH 配置通常是一个名为 <code>config</code>、没有扩展名的文本文件。终端命令中的 <code>ssh gpu-lab</code> 里，<code>gpu-lab</code> 就是显存雷达要导入的服务器别名。</p></div>
 
               <details class="platform-guide" open data-default-open>
                 <summary><span><strong>Windows 教程</strong><small>PowerShell 是 Windows 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
@@ -273,6 +273,26 @@
     </form>
   </dialog>
 
+  <dialog id="alias-choice-dialog" aria-labelledby="alias-choice-title">
+    <form id="alias-choice-form" method="dialog">
+      <header class="dialog-header">
+        <div>
+          <h2 id="alias-choice-title">发现可能重复的服务器</h2>
+          <p id="alias-choice-description">以下 SSH 别名可能指向同一台服务器。请为每组选择要保留的连接；也可全部保留为独立服务器。</p>
+        </div>
+        <div class="dialog-header-actions">
+          <button id="alias-choice-close" class="button icon-button" type="button" aria-label="关闭"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12"></path><path d="m18 6-12 12"></path></svg></button>
+        </div>
+      </header>
+      <div id="alias-choice-content" class="dialog-content alias-choice-content"></div>
+      <footer class="dialog-footer">
+        <span class="footer-spacer"></span>
+        <button id="alias-choice-later" class="button" type="button">稍后决定</button>
+        <button id="alias-choice-confirm" class="button primary" type="button">确定</button>
+      </footer>
+    </form>
+  </dialog>
+
   <template id="server-editor-template">
     <details class="server-editor">
       <summary class="server-editor-head">
@@ -307,13 +327,13 @@
             <label class="check-label clear-password"><input data-field="clear_password" type="checkbox"><span>删除已保存的登录密码</span></label>
             <label data-slurm-environment hidden><span>Slurm 模块名（可选）</span><input data-field="slurm_module" maxlength="256" placeholder="slurm/23.11"><small>仅填写模块名；程序会安全调用 Environment Modules/Lmod。</small></label>
             <label data-slurm-environment hidden><span>Slurm bin 目录（可选）</span><input data-field="slurm_bin_directory" maxlength="4096" placeholder="/software/slurm/bin"><small>填写绝对目录，不需要修改服务器全局环境。</small></label>
-            <label data-slurm-environment hidden><span>环境初始化脚本（可选）</span><input data-field="slurm_init_script" maxlength="4096" placeholder="/etc/profile.d/site-slurm.sh"><small>填写远端绝对路径；仅在这台服务器的采集进程中读取。</small></label>
+            <label data-slurm-environment hidden><span>环境初始化脚本（可选）</span><input data-field="slurm_init_script" maxlength="4096" placeholder="/etc/profile.d/site-slurm.sh"><small>填写远端绝对路径；仅在这台服务器的监控连接中读取。</small></label>
           </div>
           <label class="server-command-setting">
             <input data-field="show_other_user_commands" type="checkbox">
             <span><strong>显示其他用户的任务与命令摘要</strong><small data-command-summary-help>SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。</small></span>
           </label>
-          <p class="editor-help">未配置免密引导时，已保存的密码用于认证；完成 SSH Key 引导后会优先使用私钥，密码只在密钥被拒绝时本地回退。首次连接前，请先在 OpenSSH 中核对并接受正确的主机密钥。</p>
+          <p class="editor-help">尚未完成 SSH 免密登录配置时，已保存的密码用于认证；完成 SSH Key 配置后会优先使用私钥，仅在密钥被拒绝时改用已保存的密码。首次连接前，请先在 OpenSSH 中核对并接受正确的主机密钥。</p>
         </div>
       </details>
       <details class="ssh-key-setup">

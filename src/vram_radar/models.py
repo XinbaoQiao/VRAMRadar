@@ -16,6 +16,9 @@ MAX_FAVORITE_SERVER_IDS = 512
 MAX_PINNED_SERVER_IDS = 512
 MAX_FAVORITE_GPUS = 512
 MAX_IGNORED_SSH_ALIASES = 4096
+MAX_PENDING_ALIAS_CHOICES = 64
+MAX_RESOLVED_ALIAS_CHOICE_KEYS = 256
+MAX_ALIAS_CHOICE_CANDIDATES = 32
 MAX_SAVED_VIEWS = 32
 MAX_SAVED_VIEW_QUERY_BYTES = 256
 MAX_SAVED_VIEW_TEXT_BYTES = 128
@@ -292,6 +295,7 @@ class ServerProfile:
     show_other_user_commands: bool = True
     prefer_identity_auth: bool = False
     auto_detect_backend: bool = False
+    auto_imported: bool = False
     gpu_memory_gib: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_MEMORY_MAP))
 
     @classmethod
@@ -391,6 +395,10 @@ class ServerProfile:
                 raw.get("auto_detect_backend", False),
                 f"server {server_id} auto_detect_backend",
             ),
+            auto_imported=require_bool(
+                raw.get("auto_imported", False),
+                f"server {server_id} auto_imported",
+            ),
             gpu_memory_gib=memory,
         )
 
@@ -408,6 +416,8 @@ class ServerProfile:
             result["prefer_identity_auth"] = True
         if self.auto_detect_backend:
             result["auto_detect_backend"] = True
+        if self.auto_imported:
+            result["auto_imported"] = True
         if self.port_override:
             result["port_override"] = True
         for key in (
@@ -461,6 +471,193 @@ def normalize_favorite_gpu(raw: Any) -> dict[str, Any]:
         raise ConfigError("favorite GPU index must be between 0 and 4095")
     return {"server_id": server_id, "gpu_index": int(gpu_index)}
 
+ALIAS_CHOICE_REASONS = frozenset({"same_host_line", "same_destination", "same_gpu_uuids"})
+
+
+def _normalize_alias_choice_route(raw: Any) -> dict[str, Any]:
+    """Validate one connection-route option inside a pending alias choice."""
+
+    if not isinstance(raw, dict):
+        raise ConfigError("pending alias choice route must be a table")
+    primary_alias = require_optional_ssh_token(
+        raw.get("primary_alias", ""),
+        "pending alias choice route primary_alias",
+    )
+    if not primary_alias:
+        raise ConfigError("pending alias choice route primary_alias must be a non-empty SSH token")
+    alias_rows = raw.get("aliases", [primary_alias])
+    if not isinstance(alias_rows, (list, tuple)):
+        raise ConfigError("pending alias choice route aliases must be an array")
+    if not 1 <= len(alias_rows) <= MAX_ALIAS_CHOICE_CANDIDATES:
+        raise ConfigError(
+            "pending alias choice route aliases must contain between 1 and "
+            f"{MAX_ALIAS_CHOICE_CANDIDATES} entries"
+        )
+    aliases: list[str] = []
+    for raw_alias in alias_rows:
+        alias = require_optional_ssh_token(raw_alias, "pending alias choice route alias")
+        if not alias:
+            raise ConfigError("pending alias choice route alias must be a non-empty SSH token")
+        aliases.append(alias)
+    if len(aliases) != len({alias.casefold() for alias in aliases}):
+        raise ConfigError("pending alias choice route aliases must be unique, ignoring case")
+    if primary_alias.casefold() not in {alias.casefold() for alias in aliases}:
+        raise ConfigError("pending alias choice route primary_alias must appear in aliases")
+    ordered = [primary_alias] + [
+        alias for alias in aliases if alias.casefold() != primary_alias.casefold()
+    ]
+    summary = require_bounded_text(
+        raw.get("summary", primary_alias),
+        "pending alias choice route summary",
+        maximum_bytes=256,
+    )
+    return {
+        "primary_alias": primary_alias,
+        "aliases": ordered,
+        "summary": summary,
+        "ssh_config_file": require_optional_local_path(
+            raw.get("ssh_config_file", ""), "pending alias choice route ssh_config_file"
+        ),
+    }
+
+
+def normalize_pending_alias_choice(raw: Any) -> dict[str, Any]:
+    """Validate one unresolved SSH-alias duplicate choice."""
+
+    if not isinstance(raw, dict):
+        raise ConfigError("pending alias choice must be a table")
+    choice_id = require_id(raw.get("id"), "pending alias choice id")
+    group_key = require_bounded_text(
+        raw.get("group_key", ""),
+        "pending alias choice group_key",
+        maximum_bytes=512,
+    )
+    if not group_key:
+        raise ConfigError("pending alias choice group_key must be a non-empty string")
+    reasons_raw = raw.get("reasons", None)
+    if reasons_raw is None:
+        reason = raw.get("reason")
+        if not isinstance(reason, str) or reason not in ALIAS_CHOICE_REASONS:
+            raise ConfigError(
+                "pending alias choice reason must be same_host_line, same_destination, or same_gpu_uuids"
+            )
+        reasons = [reason]
+    else:
+        if not isinstance(reasons_raw, (list, tuple)) or not reasons_raw:
+            raise ConfigError("pending alias choice reasons must be a non-empty array")
+        reasons = []
+        for item in reasons_raw:
+            if not isinstance(item, str) or item not in ALIAS_CHOICE_REASONS:
+                raise ConfigError(
+                    "pending alias choice reasons must be same_host_line, same_destination, or same_gpu_uuids"
+                )
+            if item not in reasons:
+                reasons.append(item)
+    reason = reasons[0]
+    kept_server_id = require_id(raw.get("kept_server_id"), "pending alias choice kept_server_id")
+    display_name = require_bounded_text(
+        raw.get("display_name", ""),
+        "pending alias choice display_name",
+        maximum_bytes=128,
+    )
+    default_alias = require_optional_ssh_token(
+        raw.get("default_alias", ""),
+        "pending alias choice default_alias",
+    )
+    if not default_alias:
+        raise ConfigError("pending alias choice default_alias must be a non-empty SSH token")
+    summaries_raw = raw.get("summaries", {})
+    if summaries_raw in ("", None):
+        summaries_raw = {}
+    if not isinstance(summaries_raw, dict):
+        raise ConfigError("pending alias choice summaries must be a table")
+    summaries: dict[str, str] = {}
+    for raw_alias, raw_summary in summaries_raw.items():
+        alias = require_optional_ssh_token(raw_alias, "pending alias choice summary alias")
+        if not alias:
+            raise ConfigError("pending alias choice summary alias must be a non-empty SSH token")
+        summaries[alias] = require_bounded_text(
+            raw_summary,
+            "pending alias choice summary",
+            maximum_bytes=256,
+        )
+    routes_raw = raw.get("routes", None)
+    if routes_raw is None:
+        alias_rows = raw.get("aliases", [])
+        if not isinstance(alias_rows, (list, tuple)):
+            raise ConfigError("pending alias choice aliases must be an array")
+        if not 2 <= len(alias_rows) <= MAX_ALIAS_CHOICE_CANDIDATES:
+            raise ConfigError(
+                "pending alias choice aliases must contain between 2 and "
+                f"{MAX_ALIAS_CHOICE_CANDIDATES} entries"
+            )
+        legacy_aliases: list[str] = []
+        for raw_alias in alias_rows:
+            alias = require_optional_ssh_token(raw_alias, "pending alias choice alias")
+            if not alias:
+                raise ConfigError("pending alias choice alias must be a non-empty SSH token")
+            legacy_aliases.append(alias)
+        if len(legacy_aliases) != len({alias.casefold() for alias in legacy_aliases}):
+            raise ConfigError("pending alias choice aliases must be unique, ignoring case")
+        routes = [
+            _normalize_alias_choice_route(
+                {
+                    "primary_alias": alias,
+                    "aliases": [alias],
+                    "summary": summaries.get(alias, alias),
+                }
+            )
+            for alias in legacy_aliases
+        ]
+    else:
+        if not isinstance(routes_raw, (list, tuple)):
+            raise ConfigError("pending alias choice routes must be an array")
+        if not 2 <= len(routes_raw) <= MAX_ALIAS_CHOICE_CANDIDATES:
+            raise ConfigError(
+                "pending alias choice routes must contain between 2 and "
+                f"{MAX_ALIAS_CHOICE_CANDIDATES} entries"
+            )
+        routes = [_normalize_alias_choice_route(item) for item in routes_raw]
+    aliases: list[str] = []
+    seen_aliases: set[str] = set()
+    for route in routes:
+        for alias in route["aliases"]:
+            key = alias.casefold()
+            if key in seen_aliases:
+                raise ConfigError("pending alias choice aliases must be unique across routes")
+            seen_aliases.add(key)
+            aliases.append(alias)
+            summaries.setdefault(alias, str(route["summary"]))
+    if len(aliases) < 2:
+        raise ConfigError("pending alias choice must cover at least two aliases")
+    primary_keys = {route["primary_alias"].casefold() for route in routes}
+    if default_alias.casefold() not in primary_keys:
+        raise ConfigError("pending alias choice default_alias must be a route primary_alias")
+    result = {
+        "id": choice_id,
+        "group_key": group_key,
+        "reason": reason,
+        "reasons": reasons,
+        "kept_server_id": kept_server_id,
+        "default_alias": default_alias,
+        "aliases": aliases,
+        "routes": routes,
+        "summaries": summaries,
+    }
+    if display_name:
+        result["display_name"] = display_name
+    return result
+
+
+def alias_choice_group_key(reason: str, aliases: list[str] | tuple[str, ...]) -> str:
+    """Stable key for a duplicate-alias group so resolved choices are not re-asked."""
+
+    normalized = sorted({alias.casefold() for alias in aliases if alias})
+    if reason == "machine":
+        return "machine:" + "|".join(normalized)
+    return f"{reason}:" + "|".join(normalized)
+
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -470,6 +667,8 @@ class Profile:
     server_config_path: str = ""
     auto_sync_servers: bool = False
     ignored_ssh_aliases: tuple[str, ...] = ()
+    pending_alias_choices: tuple[dict[str, Any], ...] = ()
+    resolved_alias_choice_keys: tuple[str, ...] = ()
     navigator_side: str = "right"
     close_behavior: str = "tray"
     ui_language: str = "zh-CN"
@@ -528,6 +727,47 @@ class Profile:
             ignored_ssh_aliases.append(alias)
         if len(ignored_ssh_aliases) != len({alias.casefold() for alias in ignored_ssh_aliases}):
             raise ConfigError("profile ignored_ssh_aliases must be unique, ignoring case")
+        pending_rows = raw.get("pending_alias_choices", [])
+        if pending_rows in ("", None):
+            pending_rows = []
+        if not isinstance(pending_rows, (list, tuple)):
+            raise ConfigError("profile pending_alias_choices must be an array")
+        if len(pending_rows) > MAX_PENDING_ALIAS_CHOICES:
+            raise ConfigError(
+                "profile pending_alias_choices cannot contain more than "
+                f"{MAX_PENDING_ALIAS_CHOICES} entries"
+            )
+        pending_alias_choices = tuple(
+            normalize_pending_alias_choice(item) for item in pending_rows
+        )
+        pending_ids = [item["id"] for item in pending_alias_choices]
+        if len(pending_ids) != len({item_id.casefold() for item_id in pending_ids}):
+            raise ConfigError("profile pending_alias_choices ids must be unique, ignoring case")
+        pending_group_keys = [item["group_key"] for item in pending_alias_choices]
+        if len(pending_group_keys) != len(set(pending_group_keys)):
+            raise ConfigError("profile pending_alias_choices group_key values must be unique")
+        resolved_rows = raw.get("resolved_alias_choice_keys", [])
+        if resolved_rows in ("", None):
+            resolved_rows = []
+        if not isinstance(resolved_rows, (list, tuple)):
+            raise ConfigError("profile resolved_alias_choice_keys must be an array")
+        if len(resolved_rows) > MAX_RESOLVED_ALIAS_CHOICE_KEYS:
+            raise ConfigError(
+                "profile resolved_alias_choice_keys cannot contain more than "
+                f"{MAX_RESOLVED_ALIAS_CHOICE_KEYS} entries"
+            )
+        resolved_alias_choice_keys: list[str] = []
+        for raw_key in resolved_rows:
+            key = require_bounded_text(
+                raw_key,
+                "resolved alias choice key",
+                maximum_bytes=512,
+            )
+            if not key:
+                raise ConfigError("resolved alias choice key must be a non-empty string")
+            resolved_alias_choice_keys.append(key)
+        if len(resolved_alias_choice_keys) != len(set(resolved_alias_choice_keys)):
+            raise ConfigError("profile resolved_alias_choice_keys must be unique")
         navigator_side = raw.get("navigator_side", "right")
         if not isinstance(navigator_side, str) or navigator_side.strip().lower() not in {"left", "right"}:
             raise ConfigError("profile navigator_side must be left or right")
@@ -641,6 +881,8 @@ class Profile:
             server_config_path=server_config_path,
             auto_sync_servers=auto_sync_servers,
             ignored_ssh_aliases=tuple(ignored_ssh_aliases),
+            pending_alias_choices=pending_alias_choices,
+            resolved_alias_choice_keys=tuple(resolved_alias_choice_keys),
             navigator_side=navigator_side.strip().lower(),
             close_behavior=close_behavior.strip().lower(),
             ui_language=ui_language.strip(),
@@ -655,7 +897,7 @@ class Profile:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "id": self.id,
             "display_name": self.display_name,
@@ -676,3 +918,8 @@ class Profile:
             "saved_views": [dict(view) for view in self.saved_views],
             "servers": [server.to_dict() for server in self.servers],
         }
+        if self.pending_alias_choices:
+            result["pending_alias_choices"] = [dict(item) for item in self.pending_alias_choices]
+        if self.resolved_alias_choice_keys:
+            result["resolved_alias_choice_keys"] = list(self.resolved_alias_choice_keys)
+        return result

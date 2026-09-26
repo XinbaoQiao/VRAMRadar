@@ -1319,7 +1319,9 @@ class ServiceTests(unittest.TestCase):
                 before = connection_fingerprint(server)
                 identity.write_text("private-key-b-longer", encoding="utf-8")
                 after_key_rotation = connection_fingerprint(server)
-                config.write_text("Host gpu\n  HostName two.example\n", encoding="utf-8")
+                # Length change keeps the dependency fingerprint cache honest on
+                # filesystems where same-size rewrites can share an mtime stamp.
+                config.write_text("Host gpu\n  HostName two.example.rotated\n", encoding="utf-8")
                 after_config_change = connection_fingerprint(server)
 
         self.assertNotEqual(before, after_key_rotation)
@@ -1969,6 +1971,271 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(by_id["online"]["connection"]["state"], "security_blocked")
             self.assertEqual(by_id["online"]["connection"]["data_origin"], "cache")
             self.assertFalse(by_id["online"]["connection"]["usable_for_summary"])
+
+
+    def test_runtime_gpu_uuid_dedupe_removes_auto_imported_duplicate(self):
+        shared_uuid = "GPU-UUID-AAA"
+        base = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "lab",
+                "display_name": "Lab",
+                "refresh_seconds": 15,
+                "servers": [
+                    {
+                        "id": "primary",
+                        "display_name": "Primary",
+                        "backend": "direct_ssh",
+                        "ssh_alias": "primary",
+                        "host": "primary.test",
+                    },
+                    {
+                        "id": "dup",
+                        "display_name": "dup",
+                        "backend": "direct_ssh",
+                        "ssh_alias": "dup",
+                        "host": "dup.test",
+                        "auto_imported": True,
+                    },
+                ],
+            }
+        )
+        persisted = []
+
+        def persist(profile):
+            persisted.append(profile)
+            return True
+
+        def query(server):
+            body = payload(server.id, 12)
+            body["gpus"] = [
+                {
+                    "gpu_index": "0",
+                    "gpu_uuid": shared_uuid,
+                    "memory_total_gib": 24,
+                    "memory_free_gib": 12,
+                }
+            ]
+            return body
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = DashboardService(
+                base,
+                SnapshotCache(storage_paths(Path(temporary)), "lab"),
+                query=query,
+                profile_persist=persist,
+            )
+            snapshot = service.refresh(force=True)
+
+        self.assertEqual([server.id for server in service.profile.servers], ["primary"])
+        self.assertEqual(service.profile.ignored_ssh_aliases, ("dup",))
+        self.assertEqual(len(persisted), 1)
+        self.assertTrue(
+            any("GPU 完全一致" in notice["message"] for notice in snapshot["notices"])
+        )
+        self.assertEqual([item["server_id"] for item in snapshot["servers"]], ["primary"])
+
+    def test_runtime_gpu_uuid_dedupe_skips_manual_and_edited_rows(self):
+        shared_uuid = "GPU-UUID-BBB"
+        base = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "lab",
+                "display_name": "Lab",
+                "refresh_seconds": 15,
+                "servers": [
+                    {
+                        "id": "primary",
+                        "display_name": "Primary",
+                        "backend": "direct_ssh",
+                        "host": "primary.test",
+                    },
+                    {
+                        "id": "manual",
+                        "display_name": "Manual Twin",
+                        "backend": "direct_ssh",
+                        "host": "manual.test",
+                    },
+                    {
+                        "id": "edited",
+                        "display_name": "Renamed Import",
+                        "backend": "direct_ssh",
+                        "ssh_alias": "edited",
+                        "host": "edited.test",
+                        "auto_imported": False,
+                    },
+                ],
+            }
+        )
+
+        def query(server):
+            body = payload(server.id, 8)
+            body["gpus"] = [
+                {
+                    "gpu_index": "0",
+                    "gpu_uuid": shared_uuid,
+                    "memory_total_gib": 24,
+                    "memory_free_gib": 8,
+                }
+            ]
+            return body
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = DashboardService(
+                base,
+                SnapshotCache(storage_paths(Path(temporary)), "lab"),
+                query=query,
+            )
+            service.refresh(force=True)
+
+        self.assertEqual(
+            [server.id for server in service.profile.servers],
+            ["primary", "manual", "edited"],
+        )
+        self.assertEqual(service.profile.ignored_ssh_aliases, ())
+
+    def test_runtime_gpu_uuid_dedupe_ignores_empty_uuids_and_slurm(self):
+        base = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "lab",
+                "display_name": "Lab",
+                "refresh_seconds": 15,
+                "servers": [
+                    {
+                        "id": "empty-a",
+                        "display_name": "empty-a",
+                        "backend": "direct_ssh",
+                        "host": "a.test",
+                        "auto_imported": True,
+                    },
+                    {
+                        "id": "empty-b",
+                        "display_name": "empty-b",
+                        "backend": "direct_ssh",
+                        "host": "b.test",
+                        "auto_imported": True,
+                    },
+                    {
+                        "id": "slurm-a",
+                        "display_name": "slurm-a",
+                        "backend": "slurm_ssh",
+                        "host": "s.test",
+                        "auto_imported": True,
+                    },
+                    {
+                        "id": "slurm-b",
+                        "display_name": "slurm-b",
+                        "backend": "slurm_ssh",
+                        "host": "t.test",
+                        "auto_imported": True,
+                    },
+                ],
+            }
+        )
+
+        def query(server):
+            if server.backend == "slurm_ssh":
+                return {
+                    "server_id": server.id,
+                    "display_name": server.display_name,
+                    "backend": "slurm_ssh",
+                    "view_kind": "scheduler",
+                    "host": f"{server.id}.test",
+                    "total_gpus": 1,
+                    "nodes": [{"name": "n0", "gpus": [{"gpu_uuid": "SLURM-UUID"}]}],
+                }
+            body = payload(server.id, 4)
+            body["gpus"] = [
+                {
+                    "gpu_index": "0",
+                    "gpu_uuid": None,
+                    "memory_total_gib": 24,
+                    "memory_free_gib": 4,
+                }
+            ]
+            return body
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = DashboardService(
+                base,
+                SnapshotCache(storage_paths(Path(temporary)), "lab"),
+                query=query,
+            )
+            service.refresh(force=True)
+
+        self.assertEqual(len(service.profile.servers), 4)
+        self.assertEqual(service.profile.ignored_ssh_aliases, ())
+
+
+    def test_runtime_gpu_uuid_dedupe_records_pending_alias_choice(self):
+        shared_uuid = "GPU-UUID-PENDING"
+        base = Profile.from_dict(
+            {
+                "schema_version": 1,
+                "id": "lab",
+                "display_name": "Lab",
+                "refresh_seconds": 15,
+                "servers": [
+                    {
+                        "id": "primary",
+                        "display_name": "Primary",
+                        "backend": "direct_ssh",
+                        "ssh_alias": "primary",
+                        "host": "primary.test",
+                    },
+                    {
+                        "id": "dup",
+                        "display_name": "dup",
+                        "backend": "direct_ssh",
+                        "ssh_alias": "dup",
+                        "host": "dup.test",
+                        "auto_imported": True,
+                    },
+                ],
+            }
+        )
+        persisted = []
+
+        def persist(profile):
+            persisted.append(profile)
+            return True
+
+        def query(server):
+            body = payload(server.id, 12)
+            body["gpus"] = [
+                {
+                    "gpu_index": "0",
+                    "gpu_uuid": shared_uuid,
+                    "memory_total_gib": 24,
+                    "memory_free_gib": 12,
+                }
+            ]
+            return body
+
+        with tempfile.TemporaryDirectory() as temporary:
+            service = DashboardService(
+                base,
+                SnapshotCache(storage_paths(Path(temporary)), "lab"),
+                query=query,
+                profile_persist=persist,
+            )
+            snapshot = service.refresh(force=True)
+
+        self.assertEqual([server.id for server in service.profile.servers], ["primary"])
+        self.assertEqual(len(service.profile.pending_alias_choices), 1)
+        choice = service.profile.pending_alias_choices[0]
+        self.assertEqual(choice["reason"], "same_gpu_uuids")
+        self.assertEqual(choice["reasons"], ["same_gpu_uuids"])
+        self.assertEqual(choice["kept_server_id"], "primary")
+        self.assertEqual(choice["default_alias"], "primary")
+        self.assertEqual(choice["display_name"], "Primary")
+        self.assertEqual(set(choice["aliases"]), {"primary", "dup"})
+        self.assertEqual(
+            [route["primary_alias"] for route in choice["routes"]],
+            ["primary", "dup"],
+        )
+        self.assertEqual(snapshot["pending_alias_choices"][0]["id"], choice["id"])
 
 
 if __name__ == "__main__":

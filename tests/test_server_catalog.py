@@ -258,11 +258,15 @@ Host !blocked *.example.com exact-host
             servers, warnings = import_openssh_config(path)
             aliases = [server.ssh_alias for server in servers]
 
-        self.assertEqual(aliases, ["gpu-mac", "gpu-backup", "exact-host"])
+        # Same Host line keeps only the first concrete alias; gpu-backup is a
+        # sibling of gpu-mac and must not become a second monitored server.
+        self.assertEqual(aliases, ["gpu-mac", "exact-host"])
         self.assertTrue(all(server.backend == "direct_ssh" for server in servers))
+        self.assertTrue(all(server.auto_imported for server in servers))
         self.assertTrue(all(not server.username and not server.identity_file for server in servers))
         self.assertTrue(all(server.ssh_config_file == str(path.resolve()) for server in servers))
         self.assertIn("无法判断直连或 Slurm", warnings[0])
+        self.assertTrue(any("同一条 Host 设置中的其他别名已合并" in warning for warning in warnings))
 
     def test_openssh_import_leaves_confirmed_identity_under_config_control(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -428,7 +432,9 @@ Host !blocked *.example.com exact-host
             )
             before = openssh_config_dependency_fingerprint(config)
 
-            fragment.write_text("IdentityFile ~/.ssh/id_b\n", encoding="utf-8")
+            # Change length as well as content so coarse mtime filesystems still
+            # invalidate the dependency fingerprint cache entry.
+            fragment.write_text("IdentityFile ~/.ssh/id_rotated_b\n", encoding="utf-8")
             after = openssh_config_dependency_fingerprint(config)
 
             self.assertNotEqual(before, after)
@@ -663,9 +669,11 @@ Host !blocked *.example.com exact-host
                 Profile.empty("local"), [catalog, ssh_config, later_config]
             )
 
+        # mac-only shares a Host line with direct-gpu-test, so it is merged away
+        # rather than imported as a third monitored server.
         self.assertEqual(
             [server.ssh_alias for server in synchronized.servers],
-            ["direct-gpu-test", "slurm-gpu-test", "mac-only"],
+            ["direct-gpu-test", "slurm-gpu-test"],
         )
         self.assertEqual(synchronized.servers[0].backend, "direct_ssh")
         self.assertEqual(synchronized.servers[0].ssh_config_file, str(ssh_config.resolve()))
@@ -884,6 +892,309 @@ enabled = "false"
         self.assertEqual(synchronized.servers[0].ssh_alias, "gpu-a")
         self.assertTrue(any("大小写不敏感 ID" in warning for warning in warnings))
         Profile.from_dict(synchronized.to_dict(), expected_id="local")
+
+
+    def test_same_host_line_aliases_import_once(self):
+        document = """\
+Host cloud-primary cloud-backup
+  HostName 127.0.0.1
+  User operator
+  Port 22090
+Host other-box
+  HostName 10.0.0.2
+  User operator
+  Port 22
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            servers, warnings = import_openssh_config(path)
+
+        self.assertEqual([server.ssh_alias for server in servers], ["cloud-primary", "other-box"])
+        self.assertTrue(any("同一条 Host 设置中的其他别名已合并" in warning for warning in warnings))
+
+    def test_existing_server_on_second_alias_blocks_primary_import(self):
+        document = """\
+Host cloud-primary cloud-backup
+  HostName 127.0.0.1
+  User operator
+  Port 22090
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            existing = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "local",
+                    "display_name": "Local",
+                    "servers": [
+                        {
+                            "id": "kept-backup",
+                            "display_name": "Kept Backup",
+                            "backend": "direct_ssh",
+                            "ssh_alias": "cloud-backup",
+                            "ssh_config_file": str(path.resolve()),
+                        }
+                    ],
+                }
+            )
+            synchronized, warnings = profile_from_server_configs(existing, [path])
+
+        self.assertEqual([server.ssh_alias for server in synchronized.servers], ["cloud-backup"])
+        self.assertEqual([server.id for server in synchronized.servers], ["kept-backup"])
+        self.assertEqual(synchronized.servers[0].display_name, "Kept Backup")
+        self.assertFalse(any(server.ssh_alias == "cloud-primary" for server in synchronized.servers))
+
+    def test_identical_effective_destination_is_deduped(self):
+        document = """\
+Host route-a
+  HostName 192.0.2.10
+  User researcher
+  Port 10022
+  ProxyJump bastion
+Host route-b
+  HostName 192.0.2.10
+  User researcher
+  Port 10022
+  ProxyJump bastion
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            servers, warnings = import_openssh_config(path)
+
+        self.assertEqual([server.ssh_alias for server in servers], ["route-a"])
+        self.assertTrue(any("连接设置相同的 SSH 别名" in warning for warning in warnings))
+
+    def test_different_user_or_proxy_is_not_deduped(self):
+        document = """\
+Host same-host-user-a
+  HostName 192.0.2.10
+  User alice
+  Port 10022
+Host same-host-user-b
+  HostName 192.0.2.10
+  User bob
+  Port 10022
+Host proxied-a
+  HostName 192.0.2.10
+  User alice
+  Port 10022
+  ProxyCommand ssh -W %h:%p jump-a
+Host proxied-b
+  HostName 192.0.2.10
+  User alice
+  Port 10022
+  ProxyCommand ssh -W %h:%p jump-b
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            servers, warnings = import_openssh_config(path)
+
+        self.assertEqual(
+            [server.ssh_alias for server in servers],
+            ["same-host-user-a", "same-host-user-b", "proxied-a", "proxied-b"],
+        )
+        self.assertFalse(any("连接设置相同的 SSH 别名" in warning for warning in warnings))
+
+    def test_unresolvable_destination_is_not_deduped(self):
+        document = """\
+Host unresolved-a
+  HostName 192.0.2.10
+  ProxyCommand ssh -W %h:%p jump
+Host unresolved-b
+  HostName 192.0.2.10
+  ProxyCommand ssh -W %h:%p jump
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            servers, warnings = import_openssh_config(path)
+
+        # User/Port are unspecified, so destination resolution fails open.
+        self.assertEqual(
+            [server.ssh_alias for server in servers],
+            ["unresolved-a", "unresolved-b"],
+        )
+        self.assertFalse(any("连接设置相同的 SSH 别名" in warning for warning in warnings))
+
+    def test_new_alias_matching_existing_destination_is_skipped(self):
+        document = """\
+Host existing-route
+  HostName 192.0.2.10
+  User researcher
+  Port 10022
+Host fresh-route
+  HostName 192.0.2.10
+  User researcher
+  Port 10022
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(document, encoding="utf-8")
+            existing = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "local",
+                    "display_name": "Local",
+                    "servers": [
+                        {
+                            "id": "existing-route",
+                            "display_name": "Existing",
+                            "backend": "direct_ssh",
+                            "ssh_alias": "existing-route",
+                            "ssh_config_file": str(path.resolve()),
+                        }
+                    ],
+                }
+            )
+            synchronized, warnings = profile_from_server_configs(existing, [path])
+
+        self.assertEqual([server.ssh_alias for server in synchronized.servers], ["existing-route"])
+        self.assertTrue(any("连接设置相同的 SSH 别名" in warning for warning in warnings))
+
+
+
+    def test_pending_alias_choice_not_created_for_single_host_line_route(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(
+                "Host primary secondary\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            synchronized, _warnings = profile_from_server_configs(Profile.empty("local"), [path])
+        self.assertEqual([server.ssh_alias for server in synchronized.servers], ["primary"])
+        self.assertEqual(synchronized.pending_alias_choices, ())
+
+    def test_pending_alias_choice_created_for_same_destination_routes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(
+                "Host route-a\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host route-b\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            synchronized, _warnings = profile_from_server_configs(Profile.empty("local"), [path])
+        self.assertEqual([server.ssh_alias for server in synchronized.servers], ["route-a"])
+        self.assertEqual(len(synchronized.pending_alias_choices), 1)
+        choice = synchronized.pending_alias_choices[0]
+        self.assertEqual(choice["reasons"], ["same_destination"])
+        self.assertEqual(
+            [route["primary_alias"] for route in choice["routes"]],
+            ["route-a", "route-b"],
+        )
+        self.assertEqual(choice["default_alias"], "route-a")
+
+    def test_pending_alias_choice_merges_host_line_and_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(
+                "Host gpu-auto 4090\n  HostName 192.0.2.10\n  User researcher\n  Port 10022\n"
+                "  ProxyCommand nc -X 5 -x 127.0.0.1:1080 %h %p\n"
+                "Host gpu-direct\n  HostName 192.0.2.10\n  User researcher\n  Port 10022\n"
+                "  ProxyCommand nc -X 5 -x 127.0.0.1:1080 %h %p\n",
+                encoding="utf-8",
+            )
+            existing = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "local",
+                    "display_name": "Local",
+                    "servers": [
+                        {
+                            "id": "gpu-workstation",
+                            "display_name": "GPU workstation",
+                            "backend": "direct_ssh",
+                            "ssh_alias": "gpu-auto",
+                            "ssh_config_file": str(path.resolve()),
+                        }
+                    ],
+                }
+            )
+            synchronized, _warnings = profile_from_server_configs(existing, [path])
+        self.assertEqual(len(synchronized.pending_alias_choices), 1)
+        choice = synchronized.pending_alias_choices[0]
+        self.assertEqual(choice["display_name"], "GPU workstation")
+        self.assertEqual(set(choice["reasons"]), {"same_host_line", "same_destination"})
+        routes = {route["primary_alias"]: route for route in choice["routes"]}
+        self.assertEqual(routes["gpu-auto"]["aliases"], ["gpu-auto", "4090"])
+        self.assertIn("经中转命令", routes["gpu-auto"]["summary"])
+        self.assertEqual(routes["gpu-direct"]["aliases"], ["gpu-direct"])
+        self.assertEqual(choice["default_alias"], "gpu-auto")
+
+    def test_pending_alias_choice_prefers_existing_server_alias_as_default(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(
+                "Host first\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host second\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            existing = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "local",
+                    "display_name": "Local",
+                    "servers": [
+                        {
+                            "id": "kept",
+                            "display_name": "Kept",
+                            "backend": "direct_ssh",
+                            "ssh_alias": "second",
+                            "ssh_config_file": str(path.resolve()),
+                        }
+                    ],
+                }
+            )
+            synchronized, _warnings = profile_from_server_configs(existing, [path])
+        choice = synchronized.pending_alias_choices[0]
+        self.assertEqual(choice["default_alias"], "second")
+        self.assertEqual(choice["kept_server_id"], "kept")
+        self.assertEqual(choice["display_name"], "Kept")
+        self.assertEqual([server.ssh_alias for server in synchronized.servers], ["second"])
+
+    def test_resolved_alias_choice_is_not_reasked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config"
+            path.write_text(
+                "Host route-a\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host route-b\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            from vram_radar.models import alias_choice_group_key
+            group_key = alias_choice_group_key("machine", ["route-a", "route-b"])
+            profile = Profile.from_dict(
+                {
+                    "schema_version": 1,
+                    "id": "local",
+                    "display_name": "Local",
+                    "resolved_alias_choice_keys": [group_key],
+                    "servers": [],
+                }
+            )
+            synchronized, _warnings = profile_from_server_configs(profile, [path])
+        self.assertEqual(synchronized.pending_alias_choices, ())
+
+    def test_stale_pending_alias_choice_dropped_when_aliases_leave_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "config"
+            config.write_text(
+                "Host alpha\n  HostName 10.0.0.1\n  User u\n  Port 22\n"
+                "Host beta\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            profile = Profile.empty("lab")
+            synchronized, _ = profile_from_server_configs(profile, [config])
+            self.assertEqual(len(synchronized.pending_alias_choices), 1)
+            config.write_text(
+                "Host alpha\n  HostName 10.0.0.1\n  User u\n  Port 22\n",
+                encoding="utf-8",
+            )
+            again, _ = profile_from_server_configs(synchronized, [config])
+            self.assertEqual(again.pending_alias_choices, ())
 
 
 if __name__ == "__main__":

@@ -191,13 +191,13 @@ def classify_process_error(
         if "command not found" in lower or remote_exit_code == 127:
             code = "slurm_command_missing"
             reason = "command_missing_or_path"
-            hint = "命令不存在，或 Slurm 只在交互式 module/.bashrc 环境中加入 PATH"
+            hint = "未找到该命令；Slurm 可能仅在交互式登录时（通过 module 或 .bashrc）加入 PATH"
             retryable = False
             state = "misconfigured"
         elif "permission denied" in lower or "access denied" in lower or "not authorized" in lower:
             code = "slurm_permission_denied"
             reason = "permission_denied"
-            hint = "当前账号被站点策略限制读取该类 Slurm 信息"
+            hint = "当前账号无权读取该类 Slurm 信息"
             retryable = False
             state = "misconfigured"
         elif any(
@@ -212,7 +212,7 @@ def classify_process_error(
         ):
             code = "slurm_command_incompatible"
             reason = "slurm_version_incompatible"
-            hint = "服务器 Slurm 版本或站点命令包装与当前查询参数不兼容"
+            hint = "服务器的 Slurm 版本或其自定义命令与当前查询参数不兼容"
             retryable = False
             state = "misconfigured"
         elif any(
@@ -232,7 +232,7 @@ def classify_process_error(
         else:
             code = f"slurm_{stage}_failed" if stage in stage_labels else "slurm_environment_failed"
             reason = "remote_stage_failed"
-            hint = "该阶段返回了非零状态；原始远端输出未写入脱敏诊断"
+            hint = "该步骤执行失败；为保护隐私，诊断信息中未保存服务器的原始输出"
             retryable = stage in {"sinfo", "squeue"}
             state = "offline" if retryable else "misconfigured"
         return ConnectorFailure(
@@ -348,7 +348,7 @@ def classify_process_error(
     if "too many authentication failures" in lower:
         return ConnectorFailure(
             "auth_failed",
-            "SSH 尝试了过多身份；请指定正确私钥或清理 ssh-agent 中无关密钥",
+            "SSH 尝试的密钥过多，已被服务器拒绝；请在配置中指定正确的私钥，或移除 ssh-agent 中无关的密钥",
             retryable=False,
             state="auth_required",
         )
@@ -361,26 +361,26 @@ def classify_process_error(
     if "connection timed out" in lower or "operation timed out" in lower:
         return ConnectorFailure("ssh_timeout", "服务器连接超时", retryable=True)
     if "connection refused" in lower:
-        return ConnectorFailure("ssh_refused", "服务器拒绝 SSH 连接", retryable=True)
+        return ConnectorFailure("ssh_refused", "服务器拒绝连接，SSH 端口可能未开放或 SSH 服务未运行", retryable=True)
     if "no route to host" in lower or "network is unreachable" in lower:
         return ConnectorFailure("network_unreachable", "当前网络无法到达服务器", retryable=True)
     if "connection reset" in lower or "connection aborted" in lower:
-        return ConnectorFailure("ssh_connection_reset", "SSH 连接被中途重置", retryable=True)
+        return ConnectorFailure("ssh_connection_reset", "SSH 连接被网络或服务器中途断开，请稍后重试", retryable=True)
     if "remote host identification has changed" in lower:
         return ConnectorFailure(
-            "host_key_changed", "服务器 Host Key 已变化，请人工核对指纹", retryable=False, state="security_blocked"
+            "host_key_changed", "服务器的主机密钥（Host Key）与此前记录不一致，可能是服务器已重装，也可能存在安全风险；请核对指纹后再连接", retryable=False, state="security_blocked"
         )
     if "host key verification failed" in lower:
         return ConnectorFailure(
             "host_key_untrusted",
-            "服务器 Host Key 无法自动保存或验证，请检查 known_hosts 权限与 SSH 配置",
+            "无法保存或验证服务器的主机密钥（Host Key），请检查 known_hosts 文件权限与 SSH 配置",
             retryable=False,
             state="security_blocked",
         )
     if "invalid -j argument" in lower or "jumphost loop via" in lower:
         return ConnectorFailure(
             "proxy_config_invalid",
-            "ProxyJump 配置无效，请检查跳板别名和循环引用",
+            "SSH 配置中的 ProxyJump 设置无效，请检查中转主机名称是否正确，以及是否存在循环引用",
             retryable=False,
             state="misconfigured",
         )
@@ -390,7 +390,7 @@ def classify_process_error(
         or "connection closed by unknown port 65535" in lower
     ):
         return ConnectorFailure(
-            "proxy_failed", "SSH 跳板或代理转发失败，请先单独验证跳板连接", retryable=True
+            "proxy_failed", "SSH 中转连接中断（ProxyJump 或 ProxyCommand）。可能是网络短暂波动或中转程序提前退出，不一定表示服务器故障，请稍后重试", retryable=True
         )
     auth_denied = bool(
         re.search(
@@ -413,13 +413,13 @@ def classify_process_error(
         if returncode == 255:
             return ConnectorFailure(
                 "proxy_command_missing",
-                "本机 SSH ProxyCommand 缺少所需命令，请检查跳板或代理配置",
+                "本机找不到 SSH 配置中 ProxyCommand 调用的程序，请确认该程序已安装且路径正确",
                 retryable=False,
                 state="misconfigured",
             )
         return ConnectorFailure(
             "command_missing",
-            "SSH 已连接并通过认证，但当前服务器类型缺少所需命令；集群登录节点请检查是否应选择 Slurm",
+            "SSH 已连接并通过认证，但服务器上缺少监控所需的命令；如果这是集群登录节点，请将服务器类型改为 Slurm",
             retryable=False,
             state="misconfigured",
         )
@@ -438,7 +438,7 @@ def classify_process_error(
     ):
         return ConnectorFailure(
             "interactive_gateway_required",
-            "SSH 已连接到交互式网关，但它不允许直接执行监控命令；请让 SSH Host/ProxyJump 最终落到 Slurm 登录节点",
+            "SSH 已连接，但对方要求交互式终端，无法直接执行监控命令。如果连接的是集群入口，请在 SSH 配置中通过 ProxyJump 直接连接到 Slurm 登录节点",
             retryable=False,
             state="misconfigured",
             stage="remote_shell",
@@ -459,7 +459,7 @@ def classify_process_error(
             retryable=False,
             state="misconfigured",
         )
-    return ConnectorFailure("ssh_failed", "SSH 查询失败", retryable=True)
+    return ConnectorFailure("ssh_failed", "SSH 连接失败，未能识别具体原因；请稍后重试，或在终端中手动连接排查", retryable=True)
 
 
 def _expand_profile_path(value: str, *, default_directory: Path) -> str:
@@ -1018,7 +1018,7 @@ def _decode_hex(value: str, label: str, *, limit: int = 4_000_000) -> str:
 def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]:
     lines = output.splitlines()
     if len(lines) < 2 or lines[0] != DIRECT_PROTOCOL_HEADER or lines[-1] != DIRECT_PROTOCOL_END:
-        raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 快照", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 数据", retryable=True)
     fields: dict[str, str] = {}
     metadata: dict[str, str] = {}
     allowed = {
@@ -1042,28 +1042,28 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         if raw.startswith("META|"):
             parts = raw.split("|", 3)
             if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in {"OK", "ERR"}:
-                raise ConnectorFailure("parse_failed", "服务器返回了无效的进程元数据", retryable=True)
+                raise ConnectorFailure("parse_failed", "服务器返回了无效的进程信息", retryable=True)
             if parts[1] in metadata:
-                raise ConnectorFailure("parse_failed", "服务器返回了重复的进程元数据", retryable=True)
-            metadata[parts[1]] = _decode_hex(parts[3], "进程元数据") if parts[2] == "OK" else ""
+                raise ConnectorFailure("parse_failed", "服务器返回了重复的进程信息", retryable=True)
+            metadata[parts[1]] = _decode_hex(parts[3], "进程信息") if parts[2] == "OK" else ""
             continue
         key, separator, value = raw.partition("=")
         if not separator or key not in allowed or key in fields:
-            raise ConnectorFailure("parse_failed", "服务器返回了无法识别的 GPU 快照字段", retryable=True)
+            raise ConnectorFailure("parse_failed", "服务器返回了无法识别的 GPU 数据项", retryable=True)
         fields[key] = value
     # HOME_HEX was added without changing the direct-GPU protocol version so
     # older cached fixtures remain readable. Fresh probes always include it.
     required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB"}
     if not required.issubset(fields):
-        raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 快照字段", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 数据项", retryable=True)
     if fields["CURRENT_UID"] and not fields["CURRENT_UID"].isdigit():
         raise ConnectorFailure("parse_failed", "服务器返回了无效的当前用户标识", retryable=True)
     if fields["PROCESS_A_SUPPORTED"] not in {"0", "1"} or fields["PROCESS_B_SUPPORTED"] not in {"0", "1"}:
         raise ConnectorFailure("parse_failed", "服务器返回了无效的进程可见性状态", retryable=True)
     if not fields["METADATA_LIMIT"].isdigit() or int(fields["METADATA_LIMIT"]) != DIRECT_METADATA_LIMIT:
-        raise ConnectorFailure("parse_failed", "服务器返回了不兼容的进程采集上限", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不兼容的进程读取上限", retryable=True)
     if len(metadata) > DIRECT_METADATA_LIMIT:
-        raise ConnectorFailure("parse_failed", "服务器返回了过多的进程元数据", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了过多的进程信息", retryable=True)
     return fields, metadata
 
 
@@ -1184,11 +1184,11 @@ def parse_directory_protocol(output: str) -> dict[str, Any]:
             continue
         key, separator, value = raw.partition("=")
         if not separator or key not in allowed or key in fields:
-            raise ConnectorFailure("parse_failed", "服务器返回了无法识别的文件夹字段", retryable=True)
+            raise ConnectorFailure("parse_failed", "服务器返回了无法识别的文件夹数据项", retryable=True)
         fields[key] = value
 
     if not (allowed - {"ROOT_VERSION_HEX"}).issubset(fields):
-        raise ConnectorFailure("parse_failed", "服务器返回了不完整的文件夹字段", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不完整的文件夹数据项", retryable=True)
     if fields["SUPPORTED"] not in {"0", "1"} or fields["TRUNCATED"] not in {"0", "1"}:
         raise ConnectorFailure("parse_failed", "服务器返回了无效的文件夹状态", retryable=True)
     if not fields["LIMIT"].isdigit() or int(fields["LIMIT"]) != DIRECTORY_ENTRY_LIMIT:
@@ -1292,7 +1292,7 @@ def parse_directory_protocol(output: str) -> dict[str, Any]:
     }
     if fields.get("ROOT_VERSION_HEX"):
         result["directory_tree"]["version_token"] = _decode_hex(
-            fields["ROOT_VERSION_HEX"], "目录版本", limit=4096
+            fields["ROOT_VERSION_HEX"], "目录状态标识", limit=4096
         )
     if not supported:
         result["directory_tree"]["warning"] = warning or "当前目录不可读取"
@@ -1553,17 +1553,17 @@ def parse_directory_version_protocol(output: str) -> dict[str, Any]:
         or lines[0] != DIRECTORY_VERSION_PROTOCOL_HEADER
         or lines[-1] != DIRECTORY_VERSION_PROTOCOL_END
     ):
-        raise ConnectorFailure("parse_failed", "服务器返回了不完整的目录版本", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不完整的目录状态标识", retryable=True)
     fields: dict[str, str] = {}
     for raw in lines[1:-1]:
         key, separator, value = raw.partition("=")
         if not separator or key not in {"ROOT_HEX", "VERSION_HEX", "SUPPORTED"} or key in fields:
-            raise ConnectorFailure("parse_failed", "服务器返回了无效的目录版本", retryable=True)
+            raise ConnectorFailure("parse_failed", "服务器返回了无效的目录状态标识", retryable=True)
         fields[key] = value
     if set(fields) != {"ROOT_HEX", "VERSION_HEX", "SUPPORTED"} or fields["SUPPORTED"] not in {"0", "1"}:
-        raise ConnectorFailure("parse_failed", "服务器返回了无效的目录版本状态", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了无效的目录状态", retryable=True)
     root = _decode_hex(fields["ROOT_HEX"], "展开目录", limit=65_536).strip()
-    token = _decode_hex(fields["VERSION_HEX"], "目录版本", limit=4096)
+    token = _decode_hex(fields["VERSION_HEX"], "目录状态标识", limit=4096)
     if (
         not root
         or not posixpath.isabs(root)
@@ -1572,7 +1572,7 @@ def parse_directory_version_protocol(output: str) -> dict[str, Any]:
         or (fields["SUPPORTED"] == "1" and not token)
         or (fields["SUPPORTED"] == "0" and token)
     ):
-        raise ConnectorFailure("parse_failed", "服务器返回了不安全的目录版本", retryable=True)
+        raise ConnectorFailure("parse_failed", "服务器返回了不安全的目录状态标识", retryable=True)
     return {"root": root, "version_token": token, "supported": fields["SUPPORTED"] == "1"}
 
 
@@ -2044,7 +2044,7 @@ printf '{DIRECT_PROTOCOL_END}\\n'
             "source": "nvidia-smi + ps",
             "current_user": current_user,
             "active": [],
-            "warning": "当前驱动未提供 GPU 进程快照；显存数据仍会正常刷新。",
+            "warning": "当前驱动未提供 GPU 进程信息；显存数据仍会正常刷新。",
         }
     result = {
         "server_id": server.id,
@@ -2161,7 +2161,7 @@ def _expand_slurm_nodelist(value: str, *, limit: int = SLURM_NODE_EXPANSION_LIMI
         if len(expanded) >= limit:
             raise ConnectorFailure(
                 "node_list_too_large",
-                "Slurm 节点列表超过安全解析上限",
+                "Slurm 节点列表过长，已停止解析",
                 retryable=False,
                 state="misconfigured",
             )
@@ -2171,7 +2171,7 @@ def _expand_slurm_nodelist(value: str, *, limit: int = SLURM_NODE_EXPANSION_LIMI
         if len(options) >= limit:
             raise ConnectorFailure(
                 "node_list_too_large",
-                "Slurm 节点列表超过安全解析上限",
+                "Slurm 节点列表过长，已停止解析",
                 retryable=False,
                 state="misconfigured",
             )
@@ -2181,7 +2181,7 @@ def _expand_slurm_nodelist(value: str, *, limit: int = SLURM_NODE_EXPANSION_LIMI
         match = re.search(r"\[([^\]]+)\]", part)
         if not match:
             if "[" in part or "]" in part:
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的压缩节点列表", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点列表数据", retryable=True)
             add_node(part)
             return
         options: list[str] = []
@@ -2194,7 +2194,7 @@ def _expand_slurm_nodelist(value: str, *, limit: int = SLURM_NODE_EXPANSION_LIMI
             start_number, end_number = int(start_text), int(end_text)
             stride = int(step_text or "1")
             if stride < 1:
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的压缩节点步长", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点列表参数", retryable=True)
             step = stride if end_number >= start_number else -stride
             stop = end_number + 1 if step > 0 else end_number - 1
             width = max(len(start_text), len(end_text))
@@ -2755,7 +2755,7 @@ fi
     if header_index < 0:
         raise ConnectorFailure(
             "remote_shell_incompatible",
-            "SSH 已连接，但远端没有启动 Slurm 采集协议；常见原因是公共平台/ForceCommand 交互菜单、必须二次跳转，或账号禁止直接执行远程命令",
+            "SSH 已连接，但服务器未能开始读取 Slurm 数据。常见原因包括：登录后进入交互菜单（如 ForceCommand）、需要再经一台主机中转，或账号不允许直接执行远程命令",
             retryable=False,
             state="misconfigured",
             stage="remote_shell",
@@ -2768,7 +2768,7 @@ fi
     allocation_text, live_marker, rest = rest.partition(LIVE_TASK_MARKER)
     live_text, history_marker, history_text = rest.partition(HISTORY_MARKER)
     if not allocation_marker or not live_marker or not history_marker:
-        raise ConnectorFailure("parse_failed", "Slurm 返回了不完整的调度快照", retryable=True)
+        raise ConnectorFailure("parse_failed", "Slurm 返回了不完整的调度数据", retryable=True)
     current_user = ""
     home_directory = ""
     environment_mode = "login"
@@ -2781,7 +2781,7 @@ fi
         elif stripped.startswith(SLURM_ENVIRONMENT_MODE_MARKER):
             candidate_mode = stripped.removeprefix(SLURM_ENVIRONMENT_MODE_MARKER).strip()
             if candidate_mode not in {"login", "interactive_bash"}:
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的环境探测模式", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的环境检测方式", retryable=True)
             environment_mode = candidate_mode
         elif stripped.startswith(HOME_DIRECTORY_MARKER):
             home_directory = _decode_hex(
@@ -2790,7 +2790,7 @@ fi
         elif stripped.startswith(SLURM_INVENTORY_MODE_MARKER):
             candidate_mode = stripped.removeprefix(SLURM_INVENTORY_MODE_MARKER).strip()
             if candidate_mode not in {"sinfo", "scontrol"}:
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点清单探测模式", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点列表读取方式", retryable=True)
             inventory_mode = candidate_mode
         elif stripped:
             node_lines.append(raw)
@@ -2810,7 +2810,7 @@ fi
         if stripped.startswith(SLURM_QUEUE_DETAIL_MARKER):
             support = stripped.removeprefix(SLURM_QUEUE_DETAIL_MARKER)
             if support not in {"0", "1"}:
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的任务详情能力状态", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的任务详情支持情况", retryable=True)
             queue_detail_supported = support == "1"
         elif stripped.startswith(SLURM_QUEUE_SCOPE_MARKER):
             candidate_scope = stripped.removeprefix(SLURM_QUEUE_SCOPE_MARKER).strip()
@@ -2833,7 +2833,7 @@ fi
         if stripped.startswith(SLURM_ALLOCATION_SUPPORT_MARKER):
             support, separator, status = stripped.removeprefix(SLURM_ALLOCATION_SUPPORT_MARKER).partition("|")
             if not separator or support not in {"0", "1"} or not status.isdigit():
-                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点分配能力状态", retryable=True)
+                raise ConnectorFailure("parse_failed", "Slurm 返回了无效的节点分配支持情况", retryable=True)
             allocation_detail_supported = support == "1"
             allocation_detail_exit_code = int(status)
         elif stripped:

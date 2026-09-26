@@ -100,7 +100,7 @@ def download_verified_asset(
         or isinstance(expected_size, bool)
         or not 1 <= expected_size <= MAX_UPDATE_BYTES
     ):
-        raise ValueError("更新文件元数据不完整")
+        raise ValueError("更新文件信息不完整")
 
     stage = staging_root / uuid.uuid4().hex
     stage.mkdir(parents=True, exist_ok=False)
@@ -128,7 +128,7 @@ def download_verified_asset(
                     break
                 total += len(chunk)
                 if total > expected_size or total > MAX_UPDATE_BYTES:
-                    raise ValueError("更新文件大小与 Release 元数据不一致")
+                    raise ValueError("更新文件大小与 Release 信息不一致")
                 digest.update(chunk)
                 handle.write(chunk)
                 if progress_callback is not None:

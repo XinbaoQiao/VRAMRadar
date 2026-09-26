@@ -9,6 +9,17 @@ from vram_radar.window_state import WindowGeometry, WindowStateController
 
 
 class SnapshotCacheReliabilityTests(unittest.TestCase):
+    def test_non_utf8_cache_is_ignored_and_can_be_replaced(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = SnapshotCache(storage_paths(Path(temporary)), "lab")
+            path = cache.path_for("gpu")
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"\xff\xfe\x00broken")
+
+            self.assertIsNone(cache.load("gpu", connection_fingerprint="endpoint"))
+            cache.save("gpu", "2026-09-26T00:00:00Z", {}, connection_fingerprint="endpoint")
+            self.assertEqual(cache.load("gpu", connection_fingerprint="endpoint")["payload"], {})
+
     def test_schema_v2_cache_is_bound_to_the_exact_connection_fingerprint(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = SnapshotCache(storage_paths(Path(temporary)), "lab")
@@ -43,6 +54,16 @@ class SnapshotCacheReliabilityTests(unittest.TestCase):
 
 
 class WindowStatePersistenceTests(unittest.TestCase):
+    def test_non_utf8_geometry_uses_default_and_can_be_saved_again(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = WindowStateStore(storage_paths(Path(temporary)))
+            store.path.parent.mkdir(parents=True)
+            store.path.write_bytes(b"\xff\xfe\x00broken")
+
+            self.assertEqual(store.load(), WindowGeometry())
+            store.save(WindowGeometry(1260, 820))
+            self.assertEqual(store.load(), WindowGeometry(1260, 820))
+
     def test_geometry_round_trip_uses_a_machine_local_json_document(self):
         with tempfile.TemporaryDirectory() as temporary:
             store = WindowStateStore(storage_paths(Path(temporary)))

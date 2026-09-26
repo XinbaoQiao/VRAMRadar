@@ -26,8 +26,16 @@ from .connectors import (
     resolve_identity_path,
     resolve_ssh_config_path,
 )
-from .models import Profile, ServerProfile
-from .server_catalog import openssh_config_dependency_fingerprint
+from .models import (
+    Profile,
+    ServerProfile,
+    alias_choice_group_key,
+    normalize_pending_alias_choice,
+)
+from .server_catalog import (
+    coalesce_pending_alias_choices,
+    openssh_config_dependency_fingerprint,
+)
 from .storage import SnapshotCache
 
 
@@ -557,7 +565,7 @@ def connection_fingerprint(server: ServerProfile) -> str:
     """Return a non-secret hash of every setting that changes collected data."""
 
     payload = server.to_dict()
-    for local_only in ("display_name", "enabled", "auth_ref", "default_work_directory"):
+    for local_only in ("display_name", "enabled", "auth_ref", "default_work_directory", "auto_imported"):
         payload.pop(local_only, None)
     config_path = (
         resolve_ssh_config_path(server)
@@ -573,6 +581,29 @@ def connection_fingerprint(server: ServerProfile) -> str:
             payload["identity_file_stamp"] = "missing"
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def gpu_uuid_set(payload: dict[str, Any] | None) -> frozenset[str] | None:
+    """Return the non-empty GPU UUID set for a direct live-memory payload.
+
+    Scheduler (Slurm) views and empty UUID sets return ``None`` so callers fail
+    open and keep both servers.
+    """
+
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("view_kind") != "live-memory":
+        return None
+    gpus = payload.get("gpus")
+    if not isinstance(gpus, list) or not gpus:
+        return None
+    uuids = {
+        str(item.get("gpu_uuid") or "").strip()
+        for item in gpus
+        if isinstance(item, dict)
+    }
+    uuids.discard("")
+    return frozenset(uuids) if uuids else None
 
 
 def _accepts_keyword(operation: Callable[..., Any], keyword: str) -> bool:
@@ -639,6 +670,7 @@ class DashboardService:
         clock: Callable[[], float] = time.monotonic,
         logger: logging.Logger | None = None,
         startup_notices: list[dict[str, str]] | None = None,
+        profile_persist: Callable[[Profile], bool] | None = None,
     ) -> None:
         self.profile = profile
         self.cache = cache
@@ -648,6 +680,8 @@ class DashboardService:
         self.secret_store = secret_store
         self.clock = clock
         self.logger = logger or logging.getLogger("vram_radar")
+        self.profile_persist = profile_persist
+        self.profile_mutation_lock = threading.RLock()
         self._notices = [
             {
                 "code": str(notice.get("code") or "startup_warning")[:64],
@@ -718,6 +752,26 @@ class DashboardService:
             if retained != self._notices:
                 self._notices = retained
                 self._touch_locked(data_changed=False)
+
+    def add_notice(self, code: str, message: str, *, severity: str = "warning") -> None:
+        """Publish a user-visible notice in the dashboard snapshot."""
+
+        normalized_code = str(code or "notice")[:64]
+        normalized_severity = severity if severity in {"warning", "error"} else "warning"
+        normalized_message = str(message or "").strip()[:1000]
+        if not normalized_message:
+            return
+        with self.lock:
+            retained = [notice for notice in self._notices if notice.get("code") != normalized_code]
+            retained.append(
+                {
+                    "code": normalized_code,
+                    "severity": normalized_severity,
+                    "message": normalized_message,
+                }
+            )
+            self._notices = retained
+            self._touch_locked(data_changed=False)
 
     def _load_initial_state(self, server: ServerProfile) -> RuntimeState:
         runtime = RuntimeState(server=server)
@@ -855,6 +909,203 @@ class DashboardService:
                     current = self.states.get(server_id)
                     if current is runtime:
                         runtime.cache_dirty = False
+    def _dedupe_auto_imported_by_gpu_uuids(self, server_id: str) -> None:
+        # Refresh holds refresh_lock; editor commits acquire the profile lock
+        # before refresh_lock. Never wait here and invert that ordering. A busy
+        # editor defers optional dedupe to the next successful refresh.
+        if not self.profile_mutation_lock.acquire(blocking=False):
+            return
+        try:
+            self._dedupe_auto_imported_by_gpu_uuids_locked(server_id)
+        finally:
+            self.profile_mutation_lock.release()
+
+    def _dedupe_auto_imported_by_gpu_uuids_locked(self, server_id: str) -> None:
+        """Remove untouched auto-imported duplicates that share GPU UUIDs.
+
+        Runs after every successful read so a later auto-imported row is still
+        collapsed when an earlier row finishes first (refresh is concurrent).
+        Default keeps the earlier server and records a pending alias choice so
+        the user can confirm or keep both entries.
+        """
+
+        notices: list[tuple[str, str]] = []
+        persist_profile: Profile | None = None
+        with self.lock:
+            servers = list(self.profile.servers)
+            removed_ids: list[str] = []
+            removal_pairs: list[tuple[ServerProfile, ServerProfile]] = []
+            ignored = list(self.profile.ignored_ssh_aliases)
+            ignored_keys = {alias.casefold() for alias in ignored}
+            authentication_routes: dict[str, object] = {}
+
+            def authentication_route(server: ServerProfile):
+                if server.id not in authentication_routes:
+                    explicit = (server.username, server.identity_file, server.prefer_identity_auth)
+                    if server.ssh_config_file:
+                        from .openssh_resolution import resolve_openssh_destination
+
+                        resolved = resolve_openssh_destination(server.ssh_config_file, server.ssh_alias)
+                        authentication_routes[server.id] = (
+                            (explicit, resolved.user, resolved.authentication) if resolved.exact else None
+                        )
+                    else:
+                        authentication_routes[server.id] = (explicit,)
+                return authentication_routes[server.id]
+
+            for index, server in enumerate(servers):
+                if server.id in removed_ids:
+                    continue
+                if not server.auto_imported or server.auth_ref or server.backend != "direct_ssh":
+                    continue
+                runtime = self.states.get(server.id)
+                if runtime is None or runtime.state != "online" or runtime.data_origin != "live":
+                    continue
+                uuids = gpu_uuid_set(runtime.payload if runtime is not None else None)
+                if uuids is None:
+                    continue
+                earlier_match: ServerProfile | None = None
+                for earlier in servers[:index]:
+                    if earlier.id in removed_ids:
+                        continue
+                    earlier_runtime = self.states.get(earlier.id)
+                    if earlier_runtime is None or earlier_runtime.state != "online" or earlier_runtime.data_origin != "live":
+                        continue
+                    route = authentication_route(server)
+                    if route is None or route != authentication_route(earlier):
+                        continue
+                    earlier_uuids = gpu_uuid_set(
+                        earlier_runtime.payload if earlier_runtime is not None else None
+                    )
+                    if earlier_uuids is not None and earlier_uuids == uuids:
+                        earlier_match = earlier
+                        break
+                if earlier_match is None:
+                    continue
+                removed_ids.append(server.id)
+                removal_pairs.append((server, earlier_match))
+                if server.ssh_alias and server.ssh_alias.casefold() not in ignored_keys:
+                    ignored.append(server.ssh_alias)
+                    ignored_keys.add(server.ssh_alias.casefold())
+                notices.append(
+                    (
+                        f"auto_import_dedupe:{server.id}"[:64],
+                        (
+                            f"{server.display_name} 与 {earlier_match.display_name} 的 GPU 完全一致，"
+                            "判断为同一台服务器，已移除重复条目"
+                        ),
+                    )
+                )
+            if not removed_ids:
+                return
+            removed_set = set(removed_ids)
+            pending = list(self.profile.pending_alias_choices)
+            pending_keys = {item.get("group_key") for item in pending}
+            resolved_keys = set(self.profile.resolved_alias_choice_keys)
+            used_choice_ids = {item["id"].casefold() for item in pending}
+            for removed, kept in removal_pairs:
+                aliases = [alias for alias in (kept.ssh_alias, removed.ssh_alias) if alias]
+                if len({alias.casefold() for alias in aliases}) < 2:
+                    continue
+                # Preserve order while deduplicating case-insensitively.
+                ordered: list[str] = []
+                seen_alias: set[str] = set()
+                for alias in aliases:
+                    key = alias.casefold()
+                    if key in seen_alias:
+                        continue
+                    seen_alias.add(key)
+                    ordered.append(alias)
+                group_key = alias_choice_group_key("machine", ordered)
+                if group_key in resolved_keys or group_key in pending_keys:
+                    continue
+                digest = hashlib.sha256(group_key.encode("utf-8")).hexdigest()[:14]
+                choice_id = f"ac-{digest}"
+                suffix = 2
+                while choice_id.casefold() in used_choice_ids:
+                    choice_id = f"ac-{digest}-{suffix}"
+                    suffix += 1
+                used_choice_ids.add(choice_id.casefold())
+                config_path = kept.ssh_config_file or removed.ssh_config_file
+                summaries: dict[str, str] = {}
+                if config_path:
+                    from .openssh_resolution import format_openssh_connection_summary
+
+                    for alias in ordered:
+                        summaries[alias] = format_openssh_connection_summary(config_path, alias)
+                default_alias = kept.ssh_alias or ordered[0]
+                routes = [
+                    {
+                        "primary_alias": alias,
+                        "aliases": [alias],
+                        "summary": summaries.get(alias, alias),
+                        "ssh_config_file": (
+                            kept.ssh_config_file if alias.casefold() == kept.ssh_alias.casefold()
+                            else removed.ssh_config_file
+                        ),
+                    }
+                    for alias in ordered
+                ]
+                # Prefer the kept server's alias as the default route.
+                routes.sort(
+                    key=lambda route: (
+                        0
+                        if route["primary_alias"].casefold() == default_alias.casefold()
+                        else 1
+                    )
+                )
+                pending.append(
+                    normalize_pending_alias_choice(
+                        {
+                            "id": choice_id,
+                            "group_key": group_key,
+                            "reason": "same_gpu_uuids",
+                            "reasons": ["same_gpu_uuids"],
+                            "kept_server_id": kept.id,
+                            "display_name": kept.display_name,
+                            "default_alias": default_alias,
+                            "aliases": ordered,
+                            "routes": routes,
+                            "summaries": summaries,
+                        }
+                    )
+                )
+                pending_keys.add(group_key)
+            remaining_servers = tuple(item for item in servers if item.id not in removed_set)
+            coalesced = coalesce_pending_alias_choices(
+                replace(
+                    self.profile,
+                    servers=remaining_servers,
+                    ignored_ssh_aliases=tuple(ignored),
+                ),
+                remaining_servers,
+                pending,
+            )
+            updated_profile = replace(
+                self.profile,
+                servers=remaining_servers,
+                ignored_ssh_aliases=tuple(ignored),
+                pending_alias_choices=coalesced,
+            )
+            self.profile = updated_profile
+            for removed_id in removed_ids:
+                self.states.pop(removed_id, None)
+            persist_profile = updated_profile
+            self._touch_locked()
+        for code, message in notices:
+            self.add_notice(code, message, severity="warning")
+        if persist_profile is not None and self.profile_persist is not None:
+            try:
+                if not self.profile_persist(persist_profile):
+                    self.logger.warning(
+                        "could not persist GPU-UUID auto-import dedupe after %s",
+                        server_id,
+                    )
+            except Exception:
+                self.logger.exception(
+                    "could not persist GPU-UUID auto-import dedupe after %s",
+                    server_id,
+                )
 
     def _record_failure(self, server_id: str, failure: ConnectorFailure) -> None:
         occurred = utc_now()
@@ -909,6 +1160,7 @@ class DashboardService:
                         runtime.last_attempt_at = attempt_at
                 else:
                     candidates = []
+            successful_ids = []
             try:
                 if candidates:
                     worker_count = min(MAX_REFRESH_WORKERS, len(candidates))
@@ -923,6 +1175,7 @@ class DashboardService:
                             candidate_id = futures.pop(future)
                             try:
                                 self._record_success(candidate_id, future.result())
+                                successful_ids.append(candidate_id)
                             except ConnectorFailure as exc:
                                 self._record_failure(candidate_id, exc)
                             except Exception as exc:  # Defensive boundary around third-party SSH/process behavior.
@@ -937,6 +1190,9 @@ class DashboardService:
                 if _manage_in_flight:
                     with self.lock:
                         self._set_in_flight_locked(False)
+            # All pending results must be consumed before removing a runtime.
+            if successful_ids:
+                self._dedupe_auto_imported_by_gpu_uuids(successful_ids[-1])
         return self.snapshot()
 
     def request_refresh(self, *, force: bool = False, server_id: str | None = None) -> dict[str, Any]:
@@ -1058,7 +1314,7 @@ class DashboardService:
                     )
                 if not runtime.server.enabled:
                     raise ConnectorFailure(
-                        "server_disabled", "这台服务器已停用", retryable=False, state="disabled"
+                        "server_disabled", "这台服务器已暂停监控", retryable=False, state="disabled"
                     )
                 server = runtime.server
                 runtime.last_attempt_at = utc_now()
@@ -1066,6 +1322,7 @@ class DashboardService:
             try:
                 payload = self._query(server)
                 self._record_success(server_id, payload)
+                self._dedupe_auto_imported_by_gpu_uuids(server_id)
                 return payload
             except ConnectorFailure as exc:
                 self._record_failure(server_id, exc)
@@ -1088,7 +1345,7 @@ class DashboardService:
                     )
                 if not runtime.server.enabled:
                     raise ConnectorFailure(
-                        "server_disabled", "这台服务器已停用", retryable=False, state="disabled"
+                        "server_disabled", "这台服务器已暂停监控", retryable=False, state="disabled"
                     )
                 candidate = replace(runtime.server, backend=backend)
             return self._authenticated_call(candidate, self.query)
@@ -1140,7 +1397,7 @@ class DashboardService:
             if runtime is None:
                 return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
             if not runtime.server.enabled:
-                return {"ok": False, "error": "这台服务器已停用", "code": "server_disabled"}
+                return {"ok": False, "error": "这台服务器已暂停监控", "code": "server_disabled"}
             server = runtime.server
             selected_root = root_path if root_path is not None else (server.default_work_directory or None)
             root_source = "requested" if root_path is not None else (
@@ -1498,6 +1755,9 @@ class DashboardService:
                     "free_vram_gib": free_vram_gib,
                 },
                 "notices": [dict(notice) for notice in self._notices],
+                "pending_alias_choices": [
+                    dict(item) for item in self.profile.pending_alias_choices
+                ],
                 "servers": servers,
             }
 
@@ -1535,7 +1795,7 @@ class DashboardService:
         try:
             page_cursor = max(0, int(cursor))
         except (TypeError, ValueError) as exc:
-            raise ValueError("分页位置必须是整数") from exc
+            raise ValueError("页码位置必须是整数") from exc
         try:
             page_limit = int(limit)
         except (TypeError, ValueError) as exc:
@@ -1568,12 +1828,12 @@ class DashboardService:
                 try:
                     requested_revision = int(revision)
                 except (TypeError, ValueError) as exc:
-                    raise ValueError("节点快照版本必须是整数") from exc
+                    raise ValueError("节点列表版本号必须是整数") from exc
                 if requested_revision != current_revision:
                     return {
                         "ok": False,
                         "code": "snapshot_changed",
-                        "error": "节点快照已经更新，请从第一页重新加载",
+                        "error": "节点列表已更新，请从第一页重新加载",
                         "server_id": str(server_id),
                         "revision": current_revision,
                         "nodes": [],
@@ -1615,7 +1875,7 @@ class DashboardService:
                 return {
                     "ok": False,
                     "code": "snapshot_changed",
-                    "error": "节点快照已经更新，请从第一页重新加载",
+                    "error": "节点列表已更新，请从第一页重新加载",
                     "server_id": str(server_id),
                     "revision": latest.payload_revision if latest is not None else None,
                     "nodes": [],

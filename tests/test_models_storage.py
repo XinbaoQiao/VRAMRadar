@@ -26,6 +26,18 @@ PROFILE = {
 
 
 class ModelStorageTests(unittest.TestCase):
+    def test_non_utf8_profile_reports_configuration_error_without_overwriting_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = ProfileStore(storage_paths(Path(temporary)))
+            path = store.profile_path("lab")
+            path.parent.mkdir(parents=True)
+            damaged = b"\xff\xfe\x00broken"
+            path.write_bytes(damaged)
+
+            with self.assertRaises(ConfigError):
+                store.load("lab")
+            self.assertEqual(path.read_bytes(), damaged)
+
     def test_notification_state_round_trip_is_profile_local_and_bounded_on_load(self):
         with tempfile.TemporaryDirectory() as temporary:
             paths = storage_paths(Path(temporary))

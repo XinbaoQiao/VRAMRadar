@@ -17,6 +17,11 @@ const ui = {
   clearNotifications: document.getElementById('clear-notifications'),
   settings: document.getElementById('settings-button'),
   dialog: document.getElementById('settings-dialog'),
+  aliasChoiceDialog: document.getElementById('alias-choice-dialog'),
+  aliasChoiceContent: document.getElementById('alias-choice-content'),
+  aliasChoiceConfirm: document.getElementById('alias-choice-confirm'),
+  aliasChoiceLater: document.getElementById('alias-choice-later'),
+  aliasChoiceClose: document.getElementById('alias-choice-close'),
   form: document.getElementById('settings-form'),
   editorList: document.getElementById('server-editor-list'),
   editorTemplate: document.getElementById('server-editor-template'),
@@ -91,6 +96,10 @@ const ui = {
 };
 
 let currentProfile = null;
+let pendingAliasChoices = [];
+let aliasChoiceDeferredThisSession = false;
+let aliasChoicePromptedSignature = '';
+let importAliasChoiceDrafts = [];
 let currentSnapshot = null;
 let refreshTimer = null;
 let refreshPollTimer = null;
@@ -240,12 +249,12 @@ const ICONS = Object.freeze({
 const icon = (name, className = 'ui-icon') => `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
 const stateLabel = state => ({
   connecting: '正在配置中', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
-  security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '已停用'
+  security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '监控已暂停'
 })[state] || state;
 const backendLabel = backend => backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
 const taskStateLabel = state => ({
   PENDING: '排队中', RUNNING: '运行中', COMPLETING: '收尾中', CONFIGURING: '准备中', SUSPENDED: '已暂停',
-  COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消', TIMEOUT: '超时', OUT_OF_MEMORY: '作业内存不足'
+  COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消', TIMEOUT: '超时', OUT_OF_MEMORY: '任务内存不足'
 })[state] || state;
 const taskStateClass = state => ({
   PENDING: 'pending', RUNNING: 'running', COMPLETING: 'running', CONFIGURING: 'pending', SUSPENDED: 'warning',
@@ -447,7 +456,7 @@ function capacityTape(summary) {
 }
 
 function renderSummary(summary) {
-  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">SSH 已认证 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span>块</span></div><div class="metric-detail">仅统计当前有效快照</div></article></div>`;
+  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">SSH 已认证 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span>块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
 }
 
 function setRefreshClock(text, active = false) {
@@ -511,7 +520,7 @@ function renderCpuOverview(server) {
     localizedText("系统负载：1、5、15 分钟数值分别表示对应时间窗口内，正在运行、等待 CPU 调度或处于不可中断等待状态的平均任务数量。负载是任务数量而非百分比；较高负载可能来自计算需求，也可能来自 I/O 等待。"),
     localizedText("核心数量与负载判断：物理核心表示处理器的实际计算核心，逻辑核心表示操作系统可调度的执行单元，启用 SMT 或超线程后两者可能不同。可将负载与逻辑核心数结合观察，例如 16 个逻辑核心对应负载 16，表示平均任务数量与可调度单元数相当；是否存在瓶颈仍需结合 CPU 使用率、I/O 和持续时间判断。"),
     localizedText("主机内存：此处统计系统 RAM，不包含 GPU 显存。可用内存优先采用内核提供的 MemAvailable，包含预计可回收的部分缓存；因此，可用内存不等于完全未使用的内存。容量以 GiB 为单位，1 GiB 等于 2³⁰ 字节。"),
-    localizedText("数据时效与缺失值：各项指标来自最近一次服务器采样，不能视为连续实时测量。连接中断或数据过期时，请结合卡片上的最后成功时间判断；旧快照仅供参考。未采集到的指标不应按零值理解。"),
+    localizedText("数据时效与缺失值：各项指标来自最近一次服务器采样，不能视为连续实时测量。连接中断或数据过期时，请结合卡片上的最后成功时间判断；上次读取的数据仅供参考。未获取到的指标不应按零值理解。"),
 ];
   const explanationTitle = localizedText("CPU 指标说明");
   const explanationHtml = tipBits.map(text => `<p>${escapeHtml(text)}</p>`).join('');
@@ -771,7 +780,7 @@ function renderDirectProcessModule(server) {
     `${escapeHtml(visibilityText)}${processState?.metadata_limited ? ' 进程较多，部分用户与时间详情将在后续刷新中补齐。' : ''}`,
   );
   if (!processState?.supported) {
-    const warning = processState?.warning || (stale ? '这份旧快照尚未包含 GPU 进程；下一次成功刷新后会自动补充。' : '等待下一次刷新获取 GPU 进程。');
+    const warning = processState?.warning || (stale ? '这份上次读取的数据尚未包含 GPU 进程；下一次成功刷新后会自动补充。' : '等待下一次刷新获取 GPU 进程。');
     return `<details class="cluster-module process-module" data-module="gpu-processes" data-server-id="${escapeHtml(server.server_id)}"${moduleOpen(server.server_id, 'gpu-processes', false)}>${moduleHead}<div class="cluster-content"><div class="module-empty process-unavailable">${escapeHtml(warning)}</div>${context}</div></details>`;
   }
   const currentUser = String(processState.current_user || '').trim();
@@ -832,7 +841,7 @@ function renderClusterModule(server) {
     ? summaryItems.map(([state, count, label]) => taskBadge(state, count, label)).join('')
     : '<span class="task-summary-empty">暂无 GPU 任务</span>';
   const clusterOpen = moduleOpen(server.server_id, 'cluster-tasks', false);
-  const scopeText = `仅显示 Slurm 对当前登录账号可见的 GPU 作业；集群权限策略可能隐藏其他用户任务。任务名称来自提交者设置的 Slurm JobName；这里不是计算节点内的 PID 进程列表。${currentUser ? '' : ' 正在识别当前账号。'}`;
+  const scopeText = `仅显示 Slurm 对当前登录账号可见的 GPU 任务；集群权限策略可能隐藏其他用户任务。任务名称来自提交者设置的 Slurm JobName；这里不是计算节点内的 PID 进程列表。${currentUser ? '' : ' 正在识别当前账号。'}`;
   const context = renderModuleContext(server.server_id, 'task-scope', escapeHtml(scopeText));
   const ownerGroups = currentUser
     ? renderTaskOwnerGroup(server, {
@@ -984,10 +993,10 @@ function renderSchedulerTable(server) {
     ? '<div class="module-empty scheduler-capability-warning">当前账号无法读取 Slurm 全局节点分配明细。节点和可见任务仍会显示；为避免把其他用户占用误报为空闲，空闲容量按未知处理。</div>'
     : '';
   const queueWarning = server.slurm_capabilities?.task_gpu_request_detail === false
-    ? '<div class="module-empty scheduler-capability-warning">当前 Slurm 不支持完整任务字段，已使用兼容查询；运行中节点任务仍会显示，尚未分配节点的 GPU 排队任务可能不可识别。</div>'
+    ? '<div class="module-empty scheduler-capability-warning">当前 Slurm 不支持完整任务信息，已改用兼容读取方式；运行中节点上的任务仍会显示，尚未分配节点的 GPU 排队任务可能不可识别。</div>'
     : '';
   const scopeWarning = server.slurm_capabilities?.queue_scope_limited === true
-    ? '<div class="module-empty scheduler-capability-warning">当前账号不能读取全局 Slurm 队列，已自动回退为当前账号任务；GPU 节点仍会继续显示。</div>'
+    ? '<div class="module-empty scheduler-capability-warning">当前账号不能读取全局 Slurm 队列，已自动改为只显示当前账号的任务；GPU 节点仍会继续显示。</div>'
     : '';
   return allocationWarning + queueWarning + scopeWarning + capacity + renderClusterModule(server);
 }
@@ -1769,10 +1778,10 @@ function renderDirectoryRootBar(serverId, state) {
     ? '已固定'
     : state.rootSource === 'auto' ? '自动定位' : '账号主目录';
   const cacheLabel = state.cache?.state === 'hit'
-    ? '已复用缓存'
+    ? '使用近期读取结果'
     : state.cache?.state === 'validated'
-      ? '缓存已校验'
-      : state.cache?.state === 'stale_hit' ? '缓存待深校验' : '已读取';
+      ? '已确认为最新'
+      : state.cache?.state === 'stale_hit' ? '显示上次结果，正在核对' : '已读取';
   return `<div class="directory-rootbar"><div class="directory-root"><span class="directory-source">${escapeHtml(sourceLabel)}</span><strong class="mono" title="${escapeHtml(state.root)}">${escapeHtml(state.root)}</strong>${contextCopyButton(state.root, '工作目录路径')}<small>${escapeHtml(cacheLabel)}</small></div><div class="directory-root-actions"><button class="button compact-button refresh-directory" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${escapeHtml(state.root)}"${state.refreshing ? ' disabled' : ''}>${state.refreshing ? '正在刷新' : '刷新目录'}</button><button class="button compact-button pin-directory" type="button" data-server-id="${escapeHtml(serverId)}" data-directory-path="${escapeHtml(state.root)}"${isPinnedRoot ? ' disabled' : ''}>${isPinnedRoot ? '当前默认' : '固定当前目录'}</button><button class="button compact-button expand-loaded-directories" type="button" data-server-id="${escapeHtml(serverId)}">展开已加载</button>${pinned ? `<button class="button compact-button reset-directory-default" type="button" data-server-id="${escapeHtml(serverId)}">恢复自动定位</button>` : ''}</div></div>`;
 }
 
@@ -1791,8 +1800,8 @@ function renderDirectoryModule(server) {
     body = `<div class="directory-error"><span>${escapeHtml(state.error)}</span><button class="button retry-directory" type="button" data-server-id="${escapeHtml(server.server_id)}">重试</button></div>`;
   } else if (state?.status === 'loaded') {
     const tree = state.account?.directory_tree || {supported: true};
-    summary = `${state.refreshing ? '正在刷新 · ' : ''}${stale ? '旧目录快照 · ' : ''}${number((state.entries || []).length)} 项${state.truncated ? ' · 已截断' : ''}`;
-    const staleBanner = stale ? '<div class="directory-stale-banner">旧目录快照 · 当前服务器未监控就绪，仅供参考</div>' : '';
+    summary = `${state.refreshing ? '正在刷新 · ' : ''}${stale ? '上次目录数据 · ' : ''}${number((state.entries || []).length)} 项${state.truncated ? ' · 已截断' : ''}`;
+    const staleBanner = stale ? '<div class="directory-stale-banner">上次目录数据 · 当前服务器未监控就绪，仅供参考</div>' : '';
     body = staleBanner + (tree.supported
       ? `${renderDirectoryRootBar(server.server_id, state)}${state.pathError && !state.pathError.path ? `<div class="directory-inline-error">${escapeHtml(state.pathError.message)}</div>` : ''}${renderDirectoryEntries(server.server_id, state)}`
       : `<div class="module-empty directory-unavailable"><span>${escapeHtml(tree.warning || '当前目录不可读取')}</span>${configuredDefaultDirectory(server.server_id) ? `<button class="button compact-button reset-directory-default" type="button" data-server-id="${escapeHtml(server.server_id)}">恢复自动定位</button>` : ''}</div>`);
@@ -1961,7 +1970,7 @@ async function loadDirectoryTree(serverId, force = false, rootPath = null) {
           pathError: null,
         });
       } else if (result.unchanged) {
-        throw new Error('目录缓存状态已失效，请重新展开');
+        throw new Error('目录读取状态已失效，请重新展开');
       } else if (rootPath && !result.account?.directory_tree?.supported) {
         throw new Error(result.account?.directory_tree?.warning || '无法读取这个目录');
       } else {
@@ -2042,12 +2051,12 @@ function renderError(server) {
   const cached = connection.data_origin === 'cache';
   const securityBlocked = error.code === 'host_key_changed';
   const revalidate = disabled || securityBlocked ? '' : `<button class="button primary retry-server" type="button" data-server-id="${escapeHtml(server.server_id)}">重新验证</button>`;
-  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。旧快照仅供参考，不计入顶部实时汇总。' : '。当前没有可显示的 GPU 快照。'}</div></div><div class="error-actions">${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
+  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。上次读取的数据仅供参考，不计入顶部当前统计。' : '。当前没有可显示的 GPU 数据。'}</div></div><div class="error-actions">${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
 }
 
 function renderConfiguring(server) {
-  const backend = server.backend === 'slurm_ssh' ? 'Slurm 调度器' : 'GPU 采集器';
-  return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在配置并验证服务器</div><div class="configuring-copy">正在连接 SSH、检查${escapeHtml(backend)}并读取第一份 GPU 数据；完成前不会显示为错误。</div></div></div>`;
+  const backend = server.backend === 'slurm_ssh' ? 'Slurm 调度器' : 'GPU 监控组件';
+  return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在配置并验证服务器</div><div class="configuring-copy">正在连接 SSH、检查 ${escapeHtml(backend)}并读取第一份 GPU 数据；完成前不会显示为错误。</div></div></div>`;
 }
 
 function serverGlyph(backend) {
@@ -2255,6 +2264,7 @@ function acceptProfile(candidate) {
   currentProfile = candidate;
   window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN');
   syncProfileConvenienceState(currentProfile);
+  syncPendingAliasChoices(currentProfile);
   return true;
 }
 
@@ -2499,7 +2509,7 @@ async function setServerEnabled(serverId, enabled) {
     const result = await api.set_server_enabled(serverId, enabled);
     if (!result?.ok) throw new Error(result?.error || '无法更新服务器状态');
     if (result.profile) acceptProfile(result.profile);
-    showToast(enabled ? '已恢复监控' : '已暂停这台服务器');
+    showToast(enabled ? '已恢复监控' : '已暂停监控这台服务器');
     await refresh(true, serverId);
     if (enabled) {
       // Unpause moves the card out of the paused tail into normal/pinned order.
@@ -2824,10 +2834,9 @@ function renderServerNavigatorItem(server, index) {
     .filter(Boolean)
     .join('，');
   const favorite = favoriteServerIds.has(server.server_id);
-  const gpuFavoriteOnly = !favorite && favoriteGpuServerIds.has(server.server_id);
-  const favoriteKind = favorite ? localizedText('整台') : (gpuFavoriteOnly ? localizedText('仅 GPU') : '');
+  const favoriteKind = favorite ? localizedText('整台') : '';
   const favoriteKindMarkup = favoriteKind
-    ? `<span class="server-navigator-favorite-kind${gpuFavoriteOnly ? ' gpu-only' : ''}">${escapeHtml(favoriteKind)}</span>`
+    ? `<span class="server-navigator-favorite-kind">${escapeHtml(favoriteKind)}</span>`
     : '';
   const activeModuleTitle = server.server_id === activeServerId
     ? (lastOpenedModuleTitleByServer.get(server.server_id) || '')
@@ -3075,7 +3084,7 @@ function navigateRelativeServer(offset) {
 function renderServer(server, index = 0) {
   const state = server.connection.state;
   const hasData = Boolean(server.view_kind);
-  const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : state === 'connecting' ? '正在建立首次有效快照' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
+  const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : state === 'connecting' ? '正在首次读取数据' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
   const data = hasData ? (server.view_kind === 'live-memory' ? renderLiveTable(server) : renderSchedulerTable(server)) : '';
   const body = state === 'online'
     ? data
@@ -3262,7 +3271,7 @@ function render(snapshot) {
   }
   renderFavoritesSummaryStrip(snapshot);
   ui.serverListMeta.textContent = summary.total_servers
-    ? `${summary.online_servers}/${summary.total_servers} 台监控就绪 · ${number(summary.total_gpus)} 块 GPU`
+    ? `${summary.online_servers}/${summary.total_servers} 台监控就绪 · ${number(summary.total_gpus)} 张 GPU`
     : '等待配置';
   const disabledCount = snapshot.servers.filter(server => server.connection?.state === 'disabled').length;
   const monitoredCount = Math.max(0, summary.total_servers - disabledCount);
@@ -3277,7 +3286,7 @@ function render(snapshot) {
     ui.notice.innerHTML = `<div><div class="notice-title">${escapeHtml(String(startupNotice.message).trim())}</div></div><button class="button dismiss-notice" type="button" data-notice-code="${escapeHtml(String(startupNotice.code || ''))}">关闭</button>`;
   } else if (unavailable > 0 && monitoredCount > 0 && !inFlight) {
     ui.notice.hidden = false;
-    ui.notice.innerHTML = `<div><div class="notice-title">${unavailable === summary.total_servers ? '所有服务器尚未监控就绪' : `${unavailable} 台服务器尚未监控就绪`}</div><div class="notice-copy">每台卡片会区分网络、认证、配置和资源读取错误；旧快照不会计入实时容量。</div></div><button class="button retry-all" type="button">全部重新验证</button>`;
+    ui.notice.innerHTML = `<div><div class="notice-title">${unavailable === summary.total_servers ? '所有服务器尚未监控就绪' : `${unavailable} 台服务器尚未监控就绪`}</div><div class="notice-copy">每台卡片会区分网络、认证、配置和资源读取错误；上次读取的数据不会计入当前可用容量。</div></div><button class="button retry-all" type="button">全部重新验证</button>`;
   } else {
     ui.notice.hidden = true;
     ui.notice.replaceChildren();
@@ -3311,7 +3320,182 @@ function render(snapshot) {
   syncStickyLayoutOffsets();
   observeStickyLayoutTargets();
   updateStuckChrome();
+  if (Array.isArray(snapshot.pending_alias_choices)) {
+    syncPendingAliasChoices(snapshot);
+  } else if (currentProfile) {
+    syncPendingAliasChoices(currentProfile);
+  }
+  if (pendingAliasChoices.length && !aliasChoiceDeferredThisSession) {
+    const signature = pendingAliasChoices.map(item => item.id).join('|');
+    if (signature !== aliasChoicePromptedSignature) {
+      if (openAliasChoiceDialog()) aliasChoicePromptedSignature = signature;
+    }
+  }
 }
+
+
+const ALIAS_CHOICE_REASON_TEXT = {
+  same_host_line: '这些 SSH 别名写在同一条 Host 设置中',
+  same_destination: '这些 SSH 别名的连接设置相同',
+  same_gpu_uuids: '这些服务器读取到的 GPU 完全一致',
+};
+
+const ALIAS_CHOICE_REASON_FRAGMENT = {
+  same_host_line: '部分别名写在同一条 Host 设置中',
+  same_destination: '部分别名的连接设置相同',
+  same_gpu_uuids: '部分读取到的 GPU 完全一致',
+};
+
+function normalizeAliasChoiceRoutes(choice) {
+  if (Array.isArray(choice?.routes) && choice.routes.length) {
+    return choice.routes.filter(route => route && route.primary_alias);
+  }
+  const summaries = choice?.summaries && typeof choice.summaries === 'object' ? choice.summaries : {};
+  return (Array.isArray(choice?.aliases) ? choice.aliases : []).map(alias => ({
+    primary_alias: alias,
+    aliases: [alias],
+    summary: summaries[alias] || alias,
+  }));
+}
+
+function normalizeAliasChoices(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(item => {
+    if (!item?.id) return false;
+    const routes = normalizeAliasChoiceRoutes(item);
+    return routes.length >= 2;
+  });
+}
+
+function syncPendingAliasChoices(source) {
+  pendingAliasChoices = normalizeAliasChoices(source?.pending_alias_choices);
+}
+
+function aliasChoiceReasonText(choice) {
+  const reasons = Array.isArray(choice.reasons) && choice.reasons.length
+    ? choice.reasons
+    : (choice.reason ? [choice.reason] : []);
+  if (reasons.length <= 1) {
+    return ALIAS_CHOICE_REASON_TEXT[reasons[0]] || '这些 SSH 别名可能指向同一台服务器';
+  }
+  const parts = reasons
+    .map(reason => ALIAS_CHOICE_REASON_FRAGMENT[reason])
+    .filter(Boolean);
+  if (!parts.length) return '这些 SSH 别名可能指向同一台服务器';
+  if ((window.VRAMRadarI18n?.language || 'zh-CN') === 'en') {
+    return `${localizedText('这些 SSH 别名可能指向同一台服务器')}: ${parts.map(part => localizedText(part)).join(', ')}.`;
+  }
+  return `这些 SSH 别名可能指向同一台服务器：${parts.join('，')}。`;
+}
+
+function renderAliasChoiceOptions(choice, name) {
+  const routes = normalizeAliasChoiceRoutes(choice);
+  const defaultAlias = String(choice.default_alias || routes[0]?.primary_alias || '');
+  const options = routes.map(route => {
+    const primary = String(route.primary_alias || '');
+    const aliases = Array.isArray(route.aliases) ? route.aliases.map(String) : [primary];
+    const extras = aliases.filter(alias => alias.toLowerCase() !== primary.toLowerCase());
+    const summary = String(route.summary || choice.summaries?.[primary] || primary);
+    const mutedParts = [];
+    if (extras.length) mutedParts.push(`另有别名：${extras.join('、')}`);
+    if (summary) mutedParts.push(summary);
+    const muted = mutedParts.join(' · ');
+    const isDefault = primary.toLowerCase() === defaultAlias.toLowerCase();
+    const checked = isDefault ? ' checked' : '';
+    const defaultMark = isDefault ? ' <span class="alias-choice-default">（默认）</span>' : '';
+    return `<label><input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(primary)}"${checked}><span class="alias-choice-option-copy"><strong>${escapeHtml(primary)}${defaultMark}</strong><small>${escapeHtml(muted)}</small></span></label>`;
+  }).join('');
+  return `${options}<label class="alias-choice-option-keep-all"><input type="radio" name="${escapeHtml(name)}" value="keep_all"><span class="alias-choice-option-copy"><strong>全部保留，作为独立服务器</strong><small>每条连接路径各对应一台服务器</small></span></label>`;
+}
+
+function renderAliasChoiceGroups(choices, namePrefix) {
+  return choices.map((choice, index) => {
+    const reason = aliasChoiceReasonText(choice);
+    const title = String(choice.display_name || choice.kept_server_id || `服务器 ${index + 1}`);
+    const name = `${namePrefix}-${choice.id || index}`;
+    return `<section class="alias-choice-group" data-choice-id="${escapeHtml(choice.id)}"><h3>${escapeHtml(title)}</h3><p class="alias-choice-reason">${escapeHtml(reason)}</p><div class="alias-choice-options" role="radiogroup" aria-label="${escapeHtml(title)}">${renderAliasChoiceOptions(choice, name)}</div></section>`;
+  }).join('');
+}
+
+function openAliasChoiceDialog(choices = pendingAliasChoices) {
+  const items = normalizeAliasChoices(choices);
+  if (!items.length || !ui.aliasChoiceDialog || aliasChoiceDeferredThisSession) return false;
+  if (ui.dialog?.open) return false;
+  ui.aliasChoiceContent.innerHTML = renderAliasChoiceGroups(items, 'alias-choice');
+  if (!ui.aliasChoiceDialog.open) ui.aliasChoiceDialog.showModal();
+  return true;
+}
+
+function closeAliasChoiceDialog() {
+  if (ui.aliasChoiceDialog?.open) ui.aliasChoiceDialog.close();
+}
+
+function collectAliasChoiceSelections(container, choices, namePrefix = 'alias-choice') {
+  const selections = [];
+  for (const choice of choices) {
+    const expected = `${namePrefix}-${choice.id}`;
+    const selected = [...container.querySelectorAll('input[type="radio"]:checked')]
+      .find(input => input.name === expected);
+    if (!selected) {
+      return {ok: false, error: '请为每一组选择一项'};
+    }
+    selections.push({choice_id: choice.id, selection: selected.value});
+  }
+  return {ok: true, selections};
+}
+
+async function confirmAliasChoices() {
+  const choices = normalizeAliasChoices(pendingAliasChoices);
+  if (!choices.length) {
+    closeAliasChoiceDialog();
+    return;
+  }
+  const collected = collectAliasChoiceSelections(ui.aliasChoiceContent, choices);
+  if (!collected.ok) {
+    showToast(collected.error);
+    return;
+  }
+  ui.aliasChoiceConfirm.disabled = true;
+  try {
+    for (const item of collected.selections) {
+      const result = await api.apply_alias_choice(item.choice_id, item.selection);
+      if (!result?.ok) throw new Error(result?.error || '无法保存别名选择');
+      if (result.profile) acceptProfile(result.profile);
+    }
+    pendingAliasChoices = normalizeAliasChoices(currentProfile?.pending_alias_choices);
+    aliasChoicePromptedSignature = pendingAliasChoices.map(item => item.id).join('|');
+    closeAliasChoiceDialog();
+    showToast('已保存服务器别名选择');
+    if (api?.get_snapshot) render(await api.get_snapshot());
+  } catch (error) {
+    showToast(error.message || String(error));
+  } finally {
+    ui.aliasChoiceConfirm.disabled = false;
+  }
+}
+
+function deferAliasChoices() {
+  aliasChoiceDeferredThisSession = true;
+  closeAliasChoiceDialog();
+  showToast('已按默认项保留一台服务器；可稍后在设置中再次确认');
+}
+
+function renderImportAliasChoices(choices) {
+  importAliasChoiceDrafts = normalizeAliasChoices(choices);
+  let panel = document.getElementById('import-alias-choices');
+  if (!importAliasChoiceDrafts.length) {
+    if (panel) panel.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'import-alias-choices';
+    panel.className = 'alias-choice-import';
+    ui.importStatus?.after?.(panel);
+  }
+  panel.innerHTML = `<div class="eyebrow">可能重复的服务器</div>${renderAliasChoiceGroups(importAliasChoiceDrafts, 'import-alias-choice')}<p class="editor-help">保存配置前可先选择；不选择则按默认项保留一台服务器。</p>`;
+}
+
 
 function showToast(message) {
   ui.toast.textContent = localizedText(message);
@@ -3913,7 +4097,7 @@ async function configureServerSshKey(editor) {
       }
       syncServerDraftFromEditor(editor);
       editor.refreshPasswordState?.();
-      editor.querySelector('[data-key-setup-overview]').textContent = '已验证；SSH Key 优先，保存的密码仅作回退';
+      editor.querySelector('[data-key-setup-overview]').textContent = '已验证；SSH Key 优先，保存的密码仅在密钥不可用时使用';
       showToast('SSH 免密登录已配置并验证');
     }
   } catch (error) {
@@ -4025,13 +4209,13 @@ function addServerEditor(server = {}, options = {}) {
     clearControl.disabled = replacing || editor.dataset.hasPassword !== 'true';
     if (replacing) {
       passwordStatus.textContent = '保存后将更新系统凭据';
-      authOverview.textContent = keyPreferred ? 'SSH Key 优先，新密码仅作本地回退' : '将使用系统凭据中保存的新密码';
+      authOverview.textContent = keyPreferred ? 'SSH Key 优先；新密码仅在密钥不可用时使用' : '将使用系统凭据中保存的新密码';
     } else if (clearControl.checked) {
       passwordStatus.textContent = '保存后将删除系统凭据';
       authOverview.textContent = '保存后恢复 ssh-agent 或私钥登录';
     } else if (editor.dataset.hasPassword === 'true') {
       passwordStatus.textContent = '系统凭据中已有密码';
-      authOverview.textContent = keyPreferred ? 'SSH Key 优先，密码仅在认证失败时回退' : '登录密码已安全保存在系统凭据库';
+      authOverview.textContent = keyPreferred ? 'SSH Key 优先；仅在认证失败时改用密码' : '登录密码已安全保存在系统凭据库';
     } else {
       passwordStatus.textContent = '未保存密码';
       authOverview.textContent = '默认使用 OpenSSH、ssh-agent 或私钥';
@@ -4072,7 +4256,7 @@ function addServerEditor(server = {}, options = {}) {
     const slurm = backend === 'slurm_ssh' || (backend === 'auto' && values._detected_backend === 'slurm_ssh');
     editor.querySelectorAll('[data-slurm-environment]').forEach(field => { field.hidden = !slurm; });
     editor.querySelector('[data-command-summary-help]').textContent = slurm
-      ? 'Slurm：显示其他用户的作业名、状态与时间；调度器视图不读取完整 shell 命令。'
+      ? 'Slurm：显示其他用户的任务名、状态与时间；调度器视图不读取完整 shell 命令。'
       : 'SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。';
   };
   editor.querySelector('[data-field="backend"]').addEventListener('change', refreshCapabilities);
@@ -4309,6 +4493,7 @@ function setSettingsMode(mode) {
 }
 
 function openSettings(options = {}) {
+  renderImportAliasChoices([]);
   const onboarding = options?.onboarding === true || (!currentProfile?.servers?.length && options?.forceNormal !== true);
   ui.settingsError.hidden = true;
   ui.profileName.value = currentProfile?.display_name || '我的 GPU';
@@ -4370,6 +4555,7 @@ function applyImportedServerConfig(result) {
   const syncSummary = paths.length > 1 ? '；多来源导入不会绑定单一文件自动同步' : '';
   const removalSummary = pendingRemovalCount ? `；已保留 ${pendingRemovalCount} 台本次移除项` : '';
   ui.importStatus.textContent = `已解析 ${visibleCandidates.length} 台服务器候选${sourceSummary}；尚未保存，尚未连接验证${removalSummary}${syncSummary}${warning}`;
+  renderImportAliasChoices(result.pending_alias_choices || []);
   if (settingsMode === 'onboarding' && visibleCandidates.length) setOnboardingStep(3);
 }
 
@@ -4416,6 +4602,9 @@ function collectProfile() {
   const activeAliasKeys = new Set(servers.map(server => sshAliasKey(server.ssh_alias)).filter(Boolean));
   const ignoredSshAliases = [...pendingIgnoredSshAliases]
     .filter(alias => !activeAliasKeys.has(sshAliasKey(alias)));
+  const aliasChoices = new Map((currentProfile.pending_alias_choices || [])
+    .map(choice => [choice.group_key, choice]));
+  importAliasChoiceDrafts.forEach(choice => aliasChoices.set(choice.group_key, choice));
   return {
     schema_version: 1,
     profile_revision: currentProfile.profile_revision,
@@ -4425,6 +4614,8 @@ function collectProfile() {
     server_config_path: ui.serverConfigPath.value.trim(),
     auto_sync_servers: ui.autoSyncServers.checked,
     ignored_ssh_aliases: ignoredSshAliases,
+    pending_alias_choices: [...aliasChoices.values()]
+      .filter(choice => servers.some(server => server.id === choice.kept_server_id)),
     navigator_side: serverNavigatorSide,
     close_behavior: ui.closeBehavior.value,
     ui_language: ui.language.value,
@@ -4528,6 +4719,19 @@ async function saveSettings(event) {
     }
     invalidateChangedServerCaches(previousProfile, result.profile);
     acceptProfile(result.profile);
+    const importPanel = document.getElementById('import-alias-choices');
+    if (importPanel && importAliasChoiceDrafts.length && api?.apply_alias_choice) {
+      const collected = collectAliasChoiceSelections(importPanel, importAliasChoiceDrafts, 'import-alias-choice');
+      if (collected.ok) {
+        for (const item of collected.selections) {
+          const applied = await api.apply_alias_choice(item.choice_id, item.selection);
+          if (!applied?.ok) throw new Error(applied?.error || '无法保存别名选择');
+          if (applied.profile) acceptProfile(applied.profile);
+        }
+      }
+      importAliasChoiceDrafts = [];
+      importPanel.remove();
+    }
     renderSavedViews();
     ui.dialog.close();
     const syncWarning = (result.warnings || [])[0];
@@ -5212,6 +5416,9 @@ ui.onboardingNext.addEventListener('click', () => setOnboardingStep(onboardingSt
 document.getElementById('add-server').addEventListener('click', addAndFocusServerEditor);
 ui.discoverServerConfig.addEventListener('click', discoverServerConfig);
 ui.importServerConfig.addEventListener('click', importServerConfig);
+ui.aliasChoiceConfirm?.addEventListener('click', () => { void confirmAliasChoices(); });
+ui.aliasChoiceLater?.addEventListener('click', deferAliasChoices);
+ui.aliasChoiceClose?.addEventListener('click', deferAliasChoices);
 ui.form.addEventListener('invalid', event => {
   const collapsedSection = event.target.closest?.('details:not([open])');
   if (collapsedSection) collapsedSection.open = true;

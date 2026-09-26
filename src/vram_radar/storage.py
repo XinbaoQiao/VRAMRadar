@@ -70,7 +70,7 @@ class ProfileStore:
         try:
             with path.open("rb") as handle:
                 raw = tomllib.load(handle)
-        except tomllib.TOMLDecodeError as exc:
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
             raise ConfigError(f"invalid profile TOML: {exc}") from exc
         return Profile.from_dict(raw, expected_id=profile_id)
 
@@ -134,7 +134,7 @@ class WindowStateStore:
             return WindowGeometry()
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return WindowGeometry()
         if not isinstance(raw, dict) or raw.get("schema_version") != 1:
             return WindowGeometry()
@@ -172,7 +172,7 @@ class SnapshotCache:
             return None
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             return None
         if (
             not isinstance(raw, dict)

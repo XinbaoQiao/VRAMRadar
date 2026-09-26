@@ -135,7 +135,7 @@ def _update_failure_details(exc: BaseException) -> tuple[str, str, int | None]:
     if isinstance(exc, (UnicodeError, json.JSONDecodeError)):
         return "update_response_invalid", "GitHub 返回了无法解析的响应", None
     if isinstance(exc, ValueError):
-        return "update_metadata_invalid", "GitHub Release 元数据不完整或不受信任", None
+        return "update_metadata_invalid", "GitHub Release 信息不完整或不受信任", None
     return "update_network_failed", "暂时无法连接 GitHub，请稍后重试", None
 
 

@@ -76,7 +76,7 @@
       [translationProbe.textContent, ui.toast.textContent, ...['title', 'aria-label', 'alt', 'data-label'].map(name => translationProbe.getAttribute(name))].every(value => !hasChinese(value));
     assertions.command_redaction_marker_is_english = renderProcessName({pid: 1,
       name: 'train', command_preview: 'python train.py --token [已隐藏]'}).includes('[redacted]');
-    translationProbe.textContent = '已暂停这台服务器';
+    translationProbe.textContent = '已暂停监控这台服务器';
     await wait(50);
     assertions.dynamic_english_updates_are_translated = !hasChinese(translationProbe.textContent);
     const originalConfirm = window.confirm;
@@ -92,9 +92,37 @@
     }
     assertions.native_update_confirmation_is_english = confirmationText.includes('GitHub') && !hasChinese(confirmationText);
     window.VRAMRadarI18n.setLanguage('zh-CN');
-    assertions.language_round_trip_restores_chinese = translationProbe.textContent === '已暂停这台服务器'
+    assertions.language_round_trip_restores_chinese = translationProbe.textContent === '已暂停监控这台服务器'
       && translationProbe.getAttribute('title') === '文件夹路径';
     translationProbe.remove();
+    const profileBeforeImport = currentProfile;
+    openSettings({forceNormal: true});
+    const importedChoice = {
+      id: 'fixture-choice', group_key: 'machine:fixture-a|fixture-b',
+      reason: 'same_destination', kept_server_id: 'fixture-a', default_alias: 'fixture-a',
+      aliases: ['fixture-a', 'fixture-b'],
+      routes: ['fixture-a', 'fixture-b'].map(alias => ({
+        primary_alias: alias, aliases: [alias], summary: alias, ssh_config_file: `${alias}.conf`,
+      })),
+    };
+    applyImportedServerConfig({
+      paths: ['fixture-a.conf', 'fixture-b.conf'], auto_sync: false, warnings: [],
+      servers: [{id: 'fixture-a', display_name: 'Fixture', backend: 'direct_ssh',
+        ssh_alias: 'fixture-a', ssh_config_file: 'fixture-a.conf', enabled: true}],
+      pending_alias_choices: [importedChoice],
+    });
+    const importedProfile = collectProfile();
+    assertions.multi_source_import_preserves_choice_before_save =
+      !importedProfile.auto_sync_servers
+      && importedProfile.pending_alias_choices.some(choice => choice.id === importedChoice.id)
+      && importedProfile.pending_alias_choices[0].routes[1].ssh_config_file === 'fixture-b.conf';
+    ui.dialog.close();
+    await wait(50);
+    currentProfile = profileBeforeImport;
+    openSettings({forceNormal: true});
+    assertions.cancelled_import_does_not_leak_choices_into_next_editor =
+      importAliasChoiceDrafts.length === 0 && !document.getElementById('import-alias-choices');
+    ui.dialog.close();
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
         anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top}, scrollCalls};
