@@ -26,6 +26,7 @@ import webbrowser
 from typing import Any, Callable
 
 from .usage_monitor import CodexUsageMonitor
+from .providers import PROVIDERS, ProviderMonitor, normalize_selection
 from .usage_surface import CodexUsageSurface
 
 from .connectors import (
@@ -923,7 +924,8 @@ class AppApi:
             self._profile_mutation_lock = service.profile_mutation_lock
         self._profile_revision = 0
         self._codex_usage = CodexUsageMonitor(getattr(paths, "runtime", None))
-        self._codex_usage.configure(profile.codex_usage_enabled, profile.codex_executable)
+        self._usage_providers = ProviderMonitor()
+        self._configure_usage(profile)
         self._automatic_import_enabled = bool(automatic_import_enabled)
         self._restart_arguments = list(restart_arguments or ["--profile", profile.id])
         self._update_progress_lock = threading.Lock()
@@ -1197,7 +1199,7 @@ class AppApi:
 
     def get_codex_usage(self, force: bool = False) -> dict[str, Any]:
         with self._profile_mutation_lock:
-            self._codex_usage.configure(self.profile.codex_usage_enabled, self.profile.codex_executable)
+            self._configure_usage(self.profile)
             return self._codex_usage.snapshot(force=force is True)
 
     def save_codex_usage_settings(self, enabled: bool, executable: str, revision: int) -> dict[str, Any]:
@@ -1215,6 +1217,41 @@ class AppApi:
             if result["ok"]:
                 result["usage"] = self.get_codex_usage()
             return result
+
+    def _configure_usage(self, profile: Profile) -> None:
+        """``codex_usage_enabled`` stays the master switch of the usage strip;
+        ``usage_providers`` selects which apps it shows (default: Codex)."""
+        selected = getattr(profile, "usage_providers", ("codex",))
+        self._codex_usage.configure(bool(profile.codex_usage_enabled and "codex" in selected),
+                                    profile.codex_executable)
+        monitor = getattr(self, "_usage_providers", None)
+        if monitor is not None:
+            monitor.configure(bool(profile.codex_usage_enabled), profile.codex_executable)
+
+    def get_usage_providers(self, force: bool = False) -> dict[str, Any]:
+        """Lock-free read for the native strip's 1 s timer (never probes inline)."""
+        profile = self.profile
+        if force is True:
+            self._usage_providers.refresh()
+        return {
+            "enabled": bool(profile.codex_usage_enabled),
+            "selected": list(profile.usage_providers),
+            "registry": [{"id": spec.id, "name": spec.name, "short": spec.short} for spec in PROVIDERS],
+            "providers": self._usage_providers.snapshot(),
+        }
+
+    def save_usage_providers(self, provider_ids: Any) -> dict[str, Any]:
+        if not isinstance(provider_ids, (list, tuple)) or not all(isinstance(item, str) for item in provider_ids):
+            return {"ok": False, "code": "invalid_usage_providers"}
+        selected = normalize_selection(list(provider_ids))
+        with self._profile_mutation_lock:
+            raw = self.profile.to_dict()
+            raw["usage_providers"] = list(selected)
+            try:
+                updated = Profile.from_dict(raw)
+            except ConfigError:
+                return {"ok": False, "code": "invalid_usage_providers"}
+            return self._persist_local_preferences(updated)
 
     def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
         if key not in {"codex_show_disks", "codex_time_format"}:
@@ -1286,7 +1323,7 @@ class AppApi:
                     raise RuntimeError("profile_rollback_failed") from rollback_exc
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = updated_profile
-            self._codex_usage.configure(updated_profile.codex_usage_enabled, updated_profile.codex_executable)
+            self._configure_usage(updated_profile)
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, updated_profile)
             self._reset_task_alerts_if_servers_changed(old_profile, updated_profile)
@@ -3462,6 +3499,7 @@ class AppApi:
                 "codex_executable",
                 "codex_show_disks",
                 "codex_time_format",
+                "usage_providers",
                 "favorite_server_ids",
                 "pinned_server_ids",
                 "favorite_gpus",
@@ -3722,7 +3760,7 @@ class AppApi:
                     raise RuntimeError("profile_rollback_failed") from rollback_exc
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = profile
-            self._codex_usage.configure(profile.codex_usage_enabled, profile.codex_executable)
+            self._configure_usage(profile)
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, profile)
             self._reset_task_alerts_if_servers_changed(old_profile, profile)
@@ -4915,7 +4953,10 @@ def main(argv: list[str] | None = None) -> int:
                         open_home=lambda: shutdown.restore(lambda: window.evaluate_js(
                             "document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());"
                         )),
-                        refresh=lambda: api.get_codex_usage(True), disable=disable_usage_surface,
+                        refresh=lambda: (api.get_codex_usage(True), api.get_usage_providers(True)),
+                        disable=disable_usage_surface,
+                        providers=api.get_usage_providers, save_providers=api.save_usage_providers,
+                        rescan=lambda: api.get_usage_providers(True),
                         quit_application=shutdown.request,
                     )
                     window.events.loaded += usage_surface.start
@@ -5022,6 +5063,7 @@ def main(argv: list[str] | None = None) -> int:
                 finally:
                     shutdown.request()
                     api._codex_usage.close()
+                    api._usage_providers.close()
                     api._bind_update_check_observer(None)
                     if args.gui_update_smoke:
                         faulthandler.cancel_dump_traceback_later()

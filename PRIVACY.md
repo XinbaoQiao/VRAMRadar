@@ -27,6 +27,15 @@ output into its Profile, logs, diagnostics, or interface. The enable switch and
 optional executable path are saved locally; quota values are kept in memory.
 Turning the feature off cancels its pending query. See [Codex usage](docs/subscription-usage.md).
 
+The usage strip's **Models** menu can also show other AI desktop apps found on
+this computer (DeepSeek Harness, Grok, Kimi, Claude, GLM, Qwen, Tencent Yuanbao).
+These probes make no network requests. They read only installation facts
+(uninstall registry entries, registered packages, process names) and small
+non-secret status files or log lines those apps write themselves. Credential
+stores are checked for existence and size only and are never opened, decrypted
+or copied. Results stay in memory; only the list of selected apps is saved. See
+[AI app providers](docs/ai-app-providers.md).
+
 VRAM Radar does not send server addresses, SSH configuration, credentials,
 remote file listings, GPU status, job data, or application logs to a VRAM Radar
 service. GitHub and each user-configured server process connection metadata

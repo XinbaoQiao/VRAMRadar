@@ -258,14 +258,77 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
             "time_percent": time_percent, "warning": warning, "low": row["low"]}
 
 
+def _provider_status(state: dict | None, english: bool) -> str:
+    if not state:
+        return "Scanning" if english else "检测中"
+    if state.get("state") == "error":
+        return "Probe failed" if english else "检测失败"
+    if state.get("installed"):
+        if state.get("running"):
+            return "Running" if english else "运行中"
+        return "Installed" if english else "已安装"
+    if state.get("code") == "leftover_data":
+        return "Leftover data only" if english else "仅有旧数据"
+    return "Not found" if english else "未检测到"
+
+
+def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *, now: float | None = None) -> dict:
+    """One compact column for a non-Codex provider.  Only facts the provider
+    actually verified are shown; missing data reads as a status, never a number."""
+    english = language == "en"
+    key = "en" if english else "zh"
+    now = time.time() if now is None else now
+    name, short = spec.get("name") or spec.get("id", "?"), spec.get("short") or spec.get("id", "?")
+    if not state:
+        status = _provider_status(None, english)
+        return {"value": f"{short} …", "countdown": status, "low": False, "warning": False,
+                "detail": f"{name} · {status}"}
+    def local(value, fallback=""):
+        return value.get(key) or fallback if isinstance(value, dict) else fallback
+    headline = local(state.get("headline"), "—")
+    subline = local(state.get("subline"))
+    lines = [f"{name} · {headline}" + (f" · {subline}" if subline else "")]
+    facts = []
+    if state.get("installed"):
+        version = state.get("version")
+        facts.append((f"Installed {version}" if english else f"已安装 {version}").strip())
+    else:
+        facts.append(_provider_status(state, english))
+    signed = state.get("signed_in")
+    if signed is True:
+        facts.append("Signed in" if english else "已登录")
+    elif signed is False:
+        facts.append("Not signed in / no key" if english else "未登录或未配置")
+    last = state.get("last_used")
+    if isinstance(last, (int, float)) and math.isfinite(last) and 0 < last <= now + 86400:
+        stamp = time.strftime("%m-%d %H:%M", time.localtime(last))
+        facts.append(("Last activity " if english else "最近活动 ") + stamp)
+    lines.append("  " + " · ".join(facts))
+    for fact in state.get("facts", [])[:8]:
+        value = local(fact)
+        if value:
+            lines.append("  " + value)
+    warning = state.get("state") in {"error", "not_installed"} or bool(state.get("stale"))
+    return {"value": f"{short} {headline}", "countdown": subline or _provider_status(state, english),
+            "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines)}
+
+
 class CodexUsageSurface:
     def __init__(self, window, snapshot: Callable[[], dict], *, language: Callable[[], str],
                  open_settings: Callable[[], object], refresh: Callable[[], object],
                  disable: Callable[[], object], quit_application: Callable[[], object],
                  open_home: Callable[[], object] | None = None,
                  display_options: Callable[[], dict] | None = None,
-                 save_display: Callable[[str, object], dict] | None = None):
+                 save_display: Callable[[str, object], dict] | None = None,
+                 providers: Callable[[], dict] | None = None,
+                 save_providers: Callable[[list], dict] | None = None,
+                 rescan: Callable[[], object] | None = None):
         self.window, self.snapshot, self.language = window, snapshot, language
+        # Without a provider source the strip is exactly the Codex-only widget.
+        self.providers = providers or (lambda: {"enabled": True, "selected": ["codex"], "providers": {}})
+        self.save_providers = save_providers
+        self.rescan = rescan or (lambda: None)
+        self._extra_columns: list = []
         self.open_settings, self.refresh = open_settings, refresh
         self.open_home = open_home or open_settings
         self.display_options = display_options or (lambda: {})
@@ -674,6 +737,33 @@ class CodexUsageSurface:
             self._display_choices.append((item, key, value, zh, en))
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
+        # Multi-provider picker (multi-select, persisted in the Profile).
+        from .providers import PROVIDERS
+        self._models_menu = menu.Items.Add("显示模型")
+        self._models_menu.DropDown.Renderer = renderer
+        self._models_menu.DropDown.SizeChanged += round_menu
+        self._model_items = {}
+        def toggle_model(provider_id):
+            try:
+                current = list(self.providers().get("selected") or ["codex"])
+            except Exception:
+                current = ["codex"]
+            chosen = [x for x in current if x != provider_id] if provider_id in current else current + [provider_id]
+            if not chosen:
+                return  # keep at least one; the strip (and this menu) must stay reachable
+            def save():
+                try:
+                    self._display_error = not bool(self.save_providers and self.save_providers(chosen).get("ok"))
+                except Exception:
+                    self._display_error = True
+            self._action(save)
+        for spec in PROVIDERS:
+            item = self._models_menu.DropDownItems.Add(spec.name)
+            item.Click += lambda _s, _e, pid=spec.id: toggle_model(pid)
+            self._model_items[spec.id] = (item, spec)
+        self._models_menu.DropDownItems.Add(ToolStripSeparator())
+        self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
+        self._rescan_item.Click += lambda *_: self._action(self.rescan)
         menu.Items.Add(ToolStripSeparator())
         menu.Items.Add(action_items[-1])
         menu_scale = windows_taskbar_dpi()/96
@@ -683,6 +773,7 @@ class CodexUsageSurface:
             action_items[1]: ("−", "可在设置中重新开启", "Restore from Settings"),
             self._dock_item: ("✓", "固定显示在展开箭头旁", "Keep beside the system tray"),
             self._display_menu: ("☷", "显示设置", "Display options"),
+            self._models_menu: ("◉", "显示模型", "Models"),
             action_items[-1]: ("×", "关闭软件与额度显示", "Close Radar and its widget"),
         }
         for item in descriptions:
@@ -698,6 +789,7 @@ class CodexUsageSurface:
             menu.Font = self._menu_font
             self._window_menu.DropDown.Font = menu.Font
             self._display_menu.DropDown.Font = menu.Font
+            self._models_menu.DropDown.Font = menu.Font
             menu.Padding = Padding(round(6*menu_scale))
             for item in descriptions:
                 item.Size = Size(round(205*menu_scale), round(34*menu_scale))
@@ -731,6 +823,28 @@ class CodexUsageSurface:
         for control in text_controls:
             control.ContextMenuStrip = menu
 
+        def make_column():
+            pair = []
+            for y in (0, 20):
+                label = Label()
+                label.AutoSize = False
+                label.Font = self._fonts[0 if y == 0 else 1]
+                label.TextAlign = ContentAlignment.MiddleRight
+                label.BackColor = form.BackColor
+                label.ForeColor = menu.ForeColor
+                label.Location = Point(scale(5), scale(y))
+                label.Size = Size(scale(47), scale(20))
+                label.ContextMenuStrip = menu
+                label.MouseEnter += update_hover
+                label.MouseLeave += update_hover
+                label.MouseDown += mouse_down
+                label.MouseMove += mouse_move
+                label.MouseUp += mouse_up
+                form.Controls.Add(label)
+                pair.append(label)
+            self._extra_columns.append(tuple(pair))
+            return tuple(pair)
+
         def choose(identity):
             self._selected_id = identity
             tick()
@@ -743,9 +857,29 @@ class CodexUsageSurface:
             language = self.language()
             options = self.display_options()
             show_disks = bool(options.get("codex_show_disks", False))
-            if show_disks != self._show_disks:
-                self._show_disks = show_disks
+            try:
+                overview = self.providers() or {}
+            except Exception:
+                overview = {}
+            selected = [x for x in (overview.get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
+            provider_states = overview.get("providers") if isinstance(overview.get("providers"), dict) else {}
+            master_enabled = overview.get("enabled", True) is not False
+            others = [spec for pid, (item, spec) in self._model_items.items()
+                      if pid in selected and pid != "codex"] if master_enabled else []
+            multi = bool(others)
+            # Disks describe one Codex window; a multi-provider strip is text only.
+            effective_disks = show_disks and not multi
+            if effective_disks != self._show_disks:
+                self._show_disks = effective_disks
                 form.Invalidate()
+            english = language == "en"
+            self._models_menu.Text = "Models" if english else "显示模型"
+            self._rescan_item.Text = "Detect again" if english else "重新检测"
+            for pid, (item, spec) in self._model_items.items():
+                pstate = provider_states.get(pid)
+                item.Text = f"{spec.name} · {_provider_status(pstate, english)}"
+                item.Checked = pid in selected
+                item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
             self._display_menu.Text = ("Display options" if language == "en" else "显示设置") + (
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
             for item, key, value, zh, en in self._display_choices:
@@ -763,8 +897,10 @@ class CodexUsageSurface:
                 track_color = Color.FromArgb(*( (210, 215, 218) if bright else (65, 72, 77) ))
                 warning_color = Color.FromArgb(*( (139, 85, 0) if bright else (224, 176, 100) ))
                 self._labels[0].ForeColor = quota_color
-                for label in text_controls:
+                for label in [*text_controls, *(c for pair in self._extra_columns for c in pair)]:
                     label.BackColor = form.BackColor
+                self._models_menu.DropDown.BackColor = form.BackColor
+                self._models_menu.DropDown.ForeColor = menu.ForeColor
                 self._window_menu.DropDown.BackColor = form.BackColor
                 self._window_menu.DropDown.ForeColor = menu.ForeColor
                 self._display_menu.DropDown.BackColor = form.BackColor
@@ -785,16 +921,18 @@ class CodexUsageSurface:
                 for y, label in zip((0, 20), text_controls):
                     label.Font = self._fonts[0 if y == 0 else 1]
                     label.Location = Point(scale(5), scale(y))
+                for top, bottom in self._extra_columns:
+                    top.Font, bottom.Font = self._fonts[0], self._fonts[1]
                 for old_font in old_fonts:
                     old_font.Dispose()
-            rows = quota_lines(state, language)
-            self.active = bool(rows)
-            if not rows:
+            rows = quota_lines(state, language) if "codex" in selected else []
+            self.active = bool(rows or others)
+            if not self.active:
                 click_timer.Stop()
                 self._last_click = None
                 form.Hide()
                 return
-            windows = state.get("windows", [])
+            windows = state.get("windows", []) if rows else []
             identities = [window.get("id") or f"{window.get('name')}:{window.get('window_minutes')}:{index}"
                           for index, window in enumerate(windows)]
             index = identities.index(self._selected_id) if self._selected_id in identities else 0
@@ -813,30 +951,67 @@ class CodexUsageSurface:
             self._window_menu.Enabled = bool(windows)
             for i in range(self._window_menu.DropDownItems.Count):
                 self._window_menu.DropDownItems[i].Checked = i == index
-            reading = widget_reading(state, index, language)
-            quota_color = Color.FromArgb(*usage_color(reading["percent"], bright=self._palette[3]))
-            time_color = Color.FromArgb(*usage_color(reading["remaining_seconds"], bright=self._palette[3], waiting=True))
-            self._labels[0].ForeColor = quota_color
-            self._labels[0].Text = reading["value"]
-            self._countdowns[0].Text = reading["countdown"]
-            # Keep the gap tight without shrinking type or clipping longer
-            # countdowns (for example 168.0h) and localized status messages.
-            text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
+            bright = self._palette[3]
+            if rows:
+                reading = widget_reading(state, index, language)
+                quota_color = Color.FromArgb(*usage_color(reading["percent"], bright=bright))
+                time_color = Color.FromArgb(*usage_color(reading["remaining_seconds"], bright=bright, waiting=True))
+                self._labels[0].ForeColor = quota_color
+                self._labels[0].Text = ("Cx " if multi else "") + reading["value"]
+                self._countdowns[0].Text = reading["countdown"]
+                self._countdowns[0].ForeColor = time_color
+            else:
+                reading = widget_reading({})
             for label in text_controls:
-                label.Size = Size(text_width, scale(20))
-            left_padding = 25 if self._show_disks else 5
-            for y, label in zip((0, 20), text_controls):
-                label.Location = Point(scale(left_padding), scale(y))
-            form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
-            self._countdowns[0].ForeColor = time_color
+                label.Visible = bool(rows)
+            while len(self._extra_columns) < len(others):
+                make_column()
+            neutral = Color.FromArgb(*((0, 98, 150) if bright else (143, 208, 248)))
+            provider_rows = []
+            for (top, bottom), spec in zip(self._extra_columns, others):
+                info = provider_reading(provider_states.get(spec.id),
+                                        {"id": spec.id, "name": spec.name, "short": spec.short}, language)
+                provider_rows.append(info)
+                top.Text, bottom.Text = info["value"], info["countdown"]
+                top.ForeColor = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
+                                 warning_color if info["warning"] else menu.ForeColor)
+                bottom.ForeColor = warning_color if info["warning"] else neutral
+                top.Visible = bottom.Visible = True
+            for top, bottom in self._extra_columns[len(others):]:
+                top.Visible = bottom.Visible = False
+            if not multi:
+                # Keep the gap tight without shrinking type or clipping longer
+                # countdowns (for example 168.0h) and localized status messages.
+                text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
+                for label in text_controls:
+                    label.Size = Size(text_width, scale(20))
+                left_padding = 25 if self._show_disks else 5
+                for y, label in zip((0, 20), text_controls):
+                    label.Location = Point(scale(left_padding), scale(y))
+                form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
+            else:
+                columns = ([tuple(text_controls)] if rows else []) + self._extra_columns[:len(others)]
+                x, gap = scale(5), scale(8)
+                for top, bottom in columns:
+                    width = max(scale(40), top.GetPreferredSize(Size(0, 0)).Width,
+                                bottom.GetPreferredSize(Size(0, 0)).Width)
+                    top.Size = bottom.Size = Size(width, scale(20))
+                    top.Location, bottom.Location = Point(x, 0), Point(x, scale(20))
+                    x += width + gap
+                form.ClientSize = Size(x - gap + scale(2), scale(40))
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()
             hint = "Click: GPU home · Double-click: quota details" if language == "en" else "单击打开 GPU 主页 · 双击查看额度详情"
-            tip = "\n".join(row["detail"] for row in rows) + "\n" + hint
-            form.AccessibleName = "Codex · " + rows[index]["label"]
+            details = [row["detail"] for row in rows]
+            if rows and multi:
+                details = ["Codex"] + ["  " + line for line in details]
+            details += [info["detail"] for info in provider_rows]
+            tip = "\n".join(details) + "\n" + hint
+            form.AccessibleName = ("Codex · " + rows[index]["label"]) if rows and not multi else (
+                "AI usage" if english else "AI 用量")
             form.AccessibleDescription = tip
-            for control in [form, *text_controls]:
+            for control in [form, *text_controls, *(c for pair in self._extra_columns for c in pair)]:
                 tooltip.SetToolTip(control, tip)
             for i, (zh, en, _) in enumerate(actions):
                 action_items[i].Text = en if language == "en" else zh

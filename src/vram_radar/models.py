@@ -663,6 +663,16 @@ def alias_choice_group_key(reason: str, aliases: list[str] | tuple[str, ...]) ->
     return f"{reason}:" + "|".join(normalized)
 
 
+
+def normalize_usage_providers(value: Any) -> tuple[str, ...]:
+    """Tolerant by design: a newer/older release's unknown ids are dropped,
+    never fatal, so a profile always loads and Codex remains the fallback."""
+    if not isinstance(value, (list, tuple)):
+        value = ["codex"]
+    from .providers import normalize_selection
+
+    return normalize_selection([item for item in value[:64] if isinstance(item, str)])
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -683,6 +693,9 @@ class Profile:
     codex_executable: str = ""
     codex_show_disks: bool = False
     codex_time_format: str = "days"
+    # Which AI apps the usage strip shows (see providers/). Profiles written
+    # before multi-provider support have no key and keep showing Codex only.
+    usage_providers: tuple[str, ...] = ("codex",)
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -910,6 +923,7 @@ class Profile:
             codex_executable=require_optional_local_path(raw.get("codex_executable", ""), "codex_executable"),
             codex_show_disks=require_bool(raw.get("codex_show_disks", False), "codex_show_disks"),
             codex_time_format=codex_time_format,
+            usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -938,6 +952,7 @@ class Profile:
             "codex_executable": self.codex_executable,
             "codex_show_disks": self.codex_show_disks,
             "codex_time_format": self.codex_time_format,
+            "usage_providers": list(self.usage_providers),
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],
