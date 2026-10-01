@@ -18,10 +18,73 @@ from datetime import datetime, timezone
 import re
 import time
 
+from . import grok_usage, kimi_usage
 from .base import (Environment, base_state, detect_install, newest_mtime, pair, read_json,
                    read_tail_lines, running_pair, safe_stat, text)
 
 ID, NAME, SHORT = "kimi", "Kimi", "Kimi"
+
+# Session-based quota reading (opt-in, see providers.session_consent): set by
+# probe_all each round to ('kimi' selected) and consent granted.  When off,
+# Kimi behaves exactly as before (log snapshot only).
+SESSION = {"enabled": False}
+CACHE = grok_usage.UsageCache(kimi_usage.fetch_usage, signature=kimi_usage.signature)
+
+
+def _session_usage(data) -> dict | None:
+    if data is None or not (data / kimi_usage.TOKEN_STORE).exists():
+        return None
+    try:
+        return CACHE.get(data, kimi_usage.BACKEND)
+    except Exception as exc:  # a crypto/HTTP hiccup must not break the probe
+        import logging
+        logging.getLogger("vram_radar").info("kimi session usage unavailable (%s)", type(exc).__name__)
+        return {"status": "error"}
+
+
+def apply_session(state: dict, session: dict | None, now: float | None = None) -> dict:
+    """Merge a live membership reading; an expired login reads as re-login."""
+    if not session:
+        return state
+    now = time.time() if now is None else now
+    status = session.get("status")
+    if status == "unauthorized":
+        state["headline"] = pair("需重新登录", "Sign in again")
+        state["subline"] = pair("打开 Kimi 一次", "open Kimi once")
+        state["brief"] = pair("需重新登录（打开 Kimi 一次）", "Sign in again (open Kimi once)")
+        state["session_quota"], state["session_relogin"] = "expired", True
+        expired = session.get("expired_at")
+        when = time.strftime("%m-%d %H:%M", time.localtime(expired)) if isinstance(expired, (int, float)) else ""
+        state["facts"].insert(0, pair("自动读取额度失败：Kimi 登录已过期" + (f"（{when}）" if when else "")
+                                      + "，请打开 Kimi 一次（会自动续期或重新登录）",
+                                      "Automatic quota read failed: Kimi sign-in expired" + (f" ({when})" if when else "")
+                                      + "; open Kimi once to renew or sign in"))
+        return state
+    if status != "ok":
+        return state
+    exhausted = bool(session.get("exhausted")) or bool(session.get("overdrawn")) or bool(session.get("send_blocked"))
+    member = session.get("is_member")
+    tier_zh = "会员" if member else "免费版" if member is False else ""
+    tier_en = "member" if member else "free plan" if member is False else ""
+    state["headline"] = pair("已用尽", "Exhausted") if exhausted else pair("可用", "OK")
+    reset = session.get("reset_at")
+    if isinstance(reset, (int, float)) and reset > now:
+        hours = (reset - now) / 3600
+        label = f"{hours:.1f}h" if hours >= 0.1 else "<0.1h"
+        state["subline"] = pair(label, label)
+        state["reset_at"] = reset
+    else:
+        state["subline"] = pair("自动读取", "auto")
+    state["brief"] = pair(("额度已用尽" if exhausted else "额度未用尽") + (f" · {tier_zh}" if tier_zh else "") + "（自动读取）",
+                          ("Quota exhausted" if exhausted else "Quota not exhausted") + (f" · {tier_en}" if tier_en else "") + " (auto)")
+    state["low"] = exhausted
+    state["stale"] = False
+    state["quota_available"] = True
+    state["quota_source"] = "session"
+    state["session_quota"] = "ok"
+    state["facts"].insert(0, pair("额度经你授权，使用 Kimi 本机登录只读查询获取（每 5 分钟最多一次）",
+                                  "Quota read with your consent via Kimi's local login, read-only (at most every 5 min)"))
+    return state
 STALE_SECONDS = 6 * 3600
 _LINE = re.compile(r"^\[(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)(?:\.\d+)?\].*?\[SubscriptionManager\]\S*\s+"
                    r"refreshed\((sub|stats)\):\s*(.*)$")
@@ -163,4 +226,6 @@ def probe(env: Environment, *, now: float | None = None) -> dict:
         state["headline"] = (pair("已登录", "Signed in") if state["signed_in"] else
                              pair("未登录", "Signed out") if state["signed_in"] is False else pair("已安装", "Installed"))
         state["subline"] = running_pair(state["running"])
+    if SESSION.get("enabled"):
+        state = apply_session(state, _session_usage(data))
     return state

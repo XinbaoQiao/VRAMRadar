@@ -361,8 +361,10 @@ class UsageCache:
     """At most one query per ``MIN_INTERVAL`` seconds, exponential backoff on
     error, serving the last good reading meanwhile."""
 
-    def __init__(self, fetch=fetch_usage, *, interval: float = MIN_INTERVAL, clock=time.time):
+    def __init__(self, fetch=fetch_usage, *, interval: float = MIN_INTERVAL, clock=time.time,
+                 signature=None):
         self.fetch, self.interval, self.clock = fetch, interval, clock
+        self.signature_of = signature  # None: grok's sand-secrets.json (looked up per call)
         self.lock = threading.Lock()
         self.last: dict | None = None
         self.last_good: dict | None = None
@@ -373,7 +375,7 @@ class UsageCache:
 
     def get(self, userdata: Path, backend: str = DEFAULT_BACKEND) -> dict:
         now = self.clock()
-        signature = _signature(userdata)
+        signature = (self.signature_of or _signature)(userdata)
         with self.lock:
             if signature != self.signature:   # sign-in/out or token rotation
                 self.signature, self.next_at, self.failures = signature, 0.0, 0
