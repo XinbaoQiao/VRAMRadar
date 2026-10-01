@@ -328,7 +328,7 @@
         </div>
       <div class="field-grid server-primary-fields">
         <label><span>显示名称</span><input data-field="display_name" required maxlength="80" placeholder="4090 实验服务器"></label>
-        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="local">本地 NVIDIA GPU</option></select><small>自动识别会在保存验证时实际连接；失败后可手动指定。</small></label>
+        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="local">本地 GPU（NVIDIA / AMD / Intel）</option></select><small>自动识别会在保存验证时实际连接；失败后可手动指定。</small></label>
         <label><span>OpenSSH 别名（优先）</span><input data-field="ssh_alias" placeholder="gpu-lab"></label>
         <label><span>主机地址</span><input data-field="host" placeholder="gpu.example.edu"></label>
         <p class="editor-help primary-help">填写 OpenSSH 别名或主机地址之一。自动导入将沿用 SSH Config，并确认私钥路径与连接类型。</p>

@@ -20,6 +20,15 @@ class LocalGpuTests(unittest.TestCase):
         self.server = ServerProfile.from_dict({
             "id": "local-5060", "display_name": "Local GPU", "backend": "local",
         })
+        # These tests cover the nvidia-smi backend; keep the real NVML,
+        # Windows counters and sysfs of the test machine out of them.
+        from vram_radar import local_gpu
+        def unavailable(*_args, **_kwargs):
+            raise local_gpu.BackendUnavailable("disabled_in_test")
+        for name in ("_nvml_query", "_windows_query", "_sysfs_query"):
+            patcher = patch.object(local_gpu, name, side_effect=unavailable)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def query(self, result=None):
         result = result or SimpleNamespace(returncode=0, stdout=GPU_ROWS,
@@ -55,7 +64,7 @@ class LocalGpuTests(unittest.TestCase):
         with patch('vram_radar.local_gpu._nvidia_smi_path', return_value=None):
             with self.assertRaises(ConnectorFailure) as caught:
                 query_server(self.server)
-        self.assertEqual(caught.exception.code, 'local_nvidia_smi_missing')
+        self.assertEqual(caught.exception.code, 'local_gpu_missing')
 
     def test_query_timeout_is_retryable(self):
         with patch('vram_radar.local_gpu._nvidia_smi_path', return_value='nvidia-smi'), \

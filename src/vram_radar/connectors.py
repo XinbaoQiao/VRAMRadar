@@ -970,6 +970,10 @@ def run_remote(
         return result.stdout.decode("utf-8", errors="replace")
 
 
+def _smi_unknown(value: str) -> bool:
+    return value.strip("[] ").casefold() in {"n/a", "not supported", "unknown error", "unknown", "", "gpu is lost"}
+
+
 def parse_nvidia_smi_rows(text: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for row in csv.reader(io.StringIO(text), skipinitialspace=True):
@@ -987,8 +991,10 @@ def parse_nvidia_smi_rows(text: str) -> list[dict[str, Any]]:
             total_mib = float(total)
             used_mib = float(used)
             free_mib = float(free)
-            utilization_percent = None if utilization == "N/A" else float(utilization)
-            temperature_c = None if temperature == "N/A" else float(temperature)
+            # Unsupported sensors read "N/A", "[N/A]", "[Not Supported]" or
+            # "[Unknown Error]" depending on driver/GPU; they stay unknown.
+            utilization_percent = None if _smi_unknown(utilization) else float(utilization)
+            temperature_c = None if _smi_unknown(temperature) else float(temperature)
         except ValueError as exc:
             raise ConnectorFailure(
                 "parse_failed", "nvidia-smi 返回了无法识别的数值", retryable=False, state="misconfigured"
