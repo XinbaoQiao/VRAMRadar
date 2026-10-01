@@ -34,6 +34,13 @@ packages, process names) and small non-secret status files or log lines those
 apps write themselves. Encrypted credential stores (Grok, Kimi) are checked for
 existence and size only and are never opened, decrypted or copied.
 
+While **Grok** is selected, VRAM Radar may read the usage figure Grok itself
+shows in its own account menu, through Windows UI Automation (the accessibility
+interface screen readers use). It only looks while the Grok window is in the
+foreground, only inside open menus (never chat text or input fields), keeps
+only a percentage, a short reset phrase and the time it was seen, in memory,
+and never clicks, types or changes anything in Grok.
+
 One network read exists, and only while **DeepSeek** is selected in the Models
 menu: VRAM Radar repeats the same read-only wallet query DeepSeek Harness makes
 for its own account page (`GET https://platform.deepseek.com/api/v0/users/get_user_summary`,

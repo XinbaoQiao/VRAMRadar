@@ -51,7 +51,7 @@ class QuotaSurfaceTests(unittest.TestCase):
         api.GetMonitorInfoW.side_effect = monitor
         api.GetWindowThreadProcessId.side_effect = owner
         api.GetClassNameW.side_effect = lambda _h, text, _n: setattr(text, 'value', 'TestWindow')
-        with patch.object(ctypes, 'windll', SimpleNamespace(user32=api), create=True):
+        with patch('vram_radar.usage_surface._dll', lambda _name: api):
             self.assertTrue(windows_surface_obscured(3))
             api.IsZoomed.return_value = True
             self.assertFalse(windows_surface_obscured(3))

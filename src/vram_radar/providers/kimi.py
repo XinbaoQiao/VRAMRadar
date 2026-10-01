@@ -134,6 +134,12 @@ def probe(env: Environment, *, now: float | None = None) -> dict:
     if sub or stats:
         state["quota_available"] = True
         state["headline"] = pair("已用尽", "Exhausted") if exhausted else pair("可用", "OK")
+        member = _bool(sub.get("isMember")) if sub else None
+        tier_zh = "会员" if member else "免费版" if member is False else ""
+        tier_en = "member" if member else "free plan" if member is False else ""
+        # Kimi reports only exhausted / not exhausted (no remaining number).
+        state["brief"] = pair(("额度已用尽" if exhausted else "额度未用尽") + (f" · {tier_zh}" if tier_zh else ""),
+                              ("Quota exhausted" if exhausted else "Quota not exhausted") + (f" · {tier_en}" if tier_en else ""))
         state["low"] = exhausted
         when = time.strftime("%m-%d %H:%M", time.localtime(as_of)) if as_of else "?"
         state["facts"].append(pair(f"数据来自 Kimi 自身日志，记录于 {when}" + ("（Kimi 运行时才会刷新）" if stale else ""),

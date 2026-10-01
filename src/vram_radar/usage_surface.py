@@ -9,6 +9,27 @@ import threading
 import time
 from typing import Callable
 
+_DLLS: dict = {}
+
+
+def _dll(name: str):
+    """Private WinDLL instances.  Setting ``argtypes`` on the process-wide
+    ``ctypes.windll.user32`` leaked into tray.py (which passes its own RECT
+    structure) and broke off-screen window recovery."""
+    lib = _DLLS.get(name)
+    if lib is None:
+        import ctypes
+        from ctypes import wintypes
+        lib = ctypes.WinDLL(name, use_last_error=True)
+        if name == "user32":
+            lib.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+            lib.FindWindowW.restype = wintypes.HWND
+            lib.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
+            lib.FindWindowExW.restype = wintypes.HWND
+            lib.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        _DLLS[name] = lib
+    return lib
+
 
 def quota_lines(state: dict, language: str = "zh-CN", *, now: float | None = None) -> list[dict]:
     """One compact line per actual window; never invent a reset or a quota."""
@@ -68,12 +89,7 @@ def windows_taskbar_geometry():
     """Read Explorer's taskbar and notification area without changing either."""
     import ctypes
     from ctypes import wintypes
-    user32 = ctypes.windll.user32
-    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-    user32.FindWindowW.restype = wintypes.HWND
-    user32.FindWindowExW.argtypes = [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]
-    user32.FindWindowExW.restype = wintypes.HWND
-    user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32 = _dll("user32")
     taskbar = user32.FindWindowW("Shell_TrayWnd", None)
     tray = user32.FindWindowExW(taskbar, None, "TrayNotifyWnd", None) if taskbar else None
     rectangles = []
@@ -110,6 +126,15 @@ def left_slot(bar, elements, size, margin=6):
     back to ``taskbar_anchor``.  Vertical taskbars are not supported here.
     """
     width, height = size
+    gap = left_gap(bar, elements, margin)
+    if gap is None or gap[1] - gap[0] < width:
+        return None
+    y = bar[1] + (bar[3] - bar[1] - height) // 2
+    return gap[0], y
+
+
+def left_gap(bar, elements, margin=6):
+    """(left, right) of the empty taskbar area used by ``left_slot``, or None."""
     left_edge = bar[0] + margin
     for key in LEFT_BOUND_IDS:
         rect = elements.get(key)
@@ -122,10 +147,9 @@ def left_slot(bar, elements, size, margin=6):
     if widgets and widgets[0] > (bar[0] + bar[2]) / 2:
         return None  # Widgets on the right (left-aligned layout); no left gap
     right_edge = min(candidates) - margin if candidates else None
-    if right_edge is None or right_edge - left_edge < width:
+    if right_edge is None or right_edge <= left_edge:
         return None
-    y = bar[1] + (bar[3] - bar[1] - height) // 2
-    return left_edge, y
+    return left_edge, right_edge
 
 
 class TaskbarLayout:
@@ -206,9 +230,7 @@ def taskbar_scale(dpi, geometry):
 def windows_taskbar_dpi(fallback=96):
     import ctypes
     from ctypes import wintypes
-    user32 = ctypes.windll.user32
-    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-    user32.FindWindowW.restype = wintypes.HWND
+    user32 = _dll("user32")
     user32.GetDpiForWindow.argtypes = [wintypes.HWND]
     return user32.GetDpiForWindow(user32.FindWindowW("Shell_TrayWnd", None)) or fallback
 
@@ -243,7 +265,7 @@ def sample_taskbar_color(bar, exclude=None, near=None):
     """
     try:
         import ctypes
-        user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+        user32, gdi32 = _dll("user32"), _dll("gdi32")
         user32.GetDC.restype = ctypes.c_void_p
         user32.GetDC.argtypes = [ctypes.c_void_p]
         user32.ReleaseDC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -309,7 +331,7 @@ def windows_taskbar_palette(bar=None, exclude=None, near=None):
         try:
             import ctypes
             color, opaque = ctypes.c_uint(), ctypes.c_int()
-            if ctypes.windll.dwmapi.DwmGetColorizationColor(ctypes.byref(color), ctypes.byref(opaque)) == 0:
+            if _dll("dwmapi").DwmGetColorizationColor(ctypes.byref(color), ctypes.byref(opaque)) == 0:
                 accent = ((color.value >> 16) & 255, (color.value >> 8) & 255, color.value & 255)
         except OSError:
             pass
@@ -317,18 +339,80 @@ def windows_taskbar_palette(bar=None, exclude=None, near=None):
     return taskbar_palette(settings, sampled, accent)
 
 
+# Font scale steps tried so up to six apps fit left of Start.
+FIT_FACTORS = (1.0, 0.92, 0.85, 0.78, 0.72)
+
+# Strip background styles (persisted as Profile.usage_background).
+BACKGROUND_STYLES = ("transparent", "match", "dark", "light", "accent")
+BACKGROUND_LABELS = {
+    "transparent": ("透明（无背景）", "Transparent (no background)"),
+    "match": ("与任务栏同色", "Match taskbar"),
+    "dark": ("深色半透明胶囊", "Subtle dark pill"),
+    "light": ("浅色胶囊", "Subtle light pill"),
+    "accent": ("主题色调", "Accent tint"),
+}
+
+
+def _mix(a, b, t):
+    return tuple(max(0, min(255, round(x*(1-t) + y*t))) for x, y in zip(a, b))
+
+
+def strip_look(style, base, accent=None):
+    """Colours for one background style over the taskbar colour ``base``.
+
+    ``fill`` is the pill colour (None = no pill).  ``keyed`` means the form's
+    own background is made fully transparent (colour key = ``base``), so only
+    the pill and the text are drawn and everything else shows the real
+    taskbar.  Text colour is chosen for contrast against what is under it.
+    """
+    style = style if style in BACKGROUND_STYLES else "transparent"
+    base = tuple(int(v) for v in base)
+    dark_bar = _luminance(base) <= 140
+    fill = None
+    if style == "dark":
+        fill = _mix(base, (0, 0, 0), 0.45 if dark_bar else 0.16)
+    elif style == "light":
+        fill = _mix(base, (255, 255, 255), 0.17 if dark_bar else 0.8)
+    elif style == "accent":
+        fill = _mix(base, tuple(accent or (0, 120, 215)), 0.55 if dark_bar else 0.35)
+    surface = fill or base
+    bright = _luminance(surface) > 140
+    foreground = (26, 26, 26) if bright else (245, 245, 245)
+    hover = tuple(max(0, v-18) if bright else min(255, v+24) for v in surface)
+    return {"style": style, "base": base, "fill": fill, "surface": surface, "foreground": foreground,
+            "hover": hover, "bright": bright, "keyed": style != "match"}
+
+
+def windows_accent_color():
+    """The user's accent colour (Settings > Personalization > Colors)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM") as key:
+            value = int(winreg.QueryValueEx(key, "AccentColor")[0]) & 0xFFFFFFFF
+            return (value & 255, (value >> 8) & 255, (value >> 16) & 255)  # ABGR
+    except (OSError, ValueError, TypeError):
+        pass
+    try:
+        import ctypes
+        color, opaque = ctypes.c_uint(), ctypes.c_int()
+        if _dll("dwmapi").DwmGetColorizationColor(ctypes.byref(color), ctypes.byref(opaque)) == 0:
+            return ((color.value >> 16) & 255, (color.value >> 8) & 255, color.value & 255)
+    except (OSError, AttributeError):
+        pass
+    return None
+
+
 def windows_surface_obscured(widget, docked=True):
     """Yield to fullscreen applications and to a hidden/restarting taskbar."""
     import ctypes
     from ctypes import wintypes
-    u = ctypes.windll.user32
+    u = _dll("user32")
     class MonitorInfo(ctypes.Structure):
         _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT),
                     ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
     u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
     u.MonitorFromWindow.restype = wintypes.HANDLE
     u.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
-    u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
     u.GetForegroundWindow.restype = wintypes.HWND
     u.IsWindowVisible.argtypes = [wintypes.HWND]
     u.IsZoomed.argtypes = [wintypes.HWND]
@@ -463,7 +547,7 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
     if not state:
         status = _provider_status(None, english)
         return {"name": short, "value": "…", "countdown": status, "low": False, "warning": False,
-                "detail": f"{name} · {status}"}
+                "detail": f"{name} · {status}", "brief": f"{name}  {status}"}
     def local(value, fallback=""):
         return value.get(key) or fallback if isinstance(value, dict) else fallback
     headline = local(state.get("headline"), "—")
@@ -490,8 +574,47 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
         if value:
             lines.append("  " + value)
     warning = state.get("state") in {"error", "not_installed"} or bool(state.get("stale"))
+    # One short tooltip line: name + key quota/balance + reset (if any).
+    brief = local(state.get("brief")) or headline
+    reset = state.get("reset_at")
+    if (isinstance(reset, (int, float)) and math.isfinite(reset) and reset > now
+            and not state.get("stale")):
+        brief += (" · resets in " if english else " · ") + _hours(reset - now) + ("" if english else " 后重置")
+    elif subline and re.match(r"^(记录|As of|旧记录|Old data)", subline):
+        brief += f" ({subline})" if english else f"（{subline}）"
     return {"name": short, "value": headline, "countdown": subline or _provider_status(state, english),
-            "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines)}
+            "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines),
+            "brief": f"{name}  {brief}"}
+
+
+def _hours(seconds):
+    return f"{seconds / 3600:.1f}h" if seconds >= 360 else "<0.1h"
+
+
+def codex_brief(rows, language: str = "zh-CN") -> str:
+    """Codex in one line: each window's remaining quota and its reset."""
+    english = language == "en"
+    if not rows:
+        return "Codex"
+    if len(rows) == 1 and rows[0].get("label") == "Codex":
+        return f"Codex  {rows[0].get('countdown') or rows[0].get('value')}"
+    parts = []
+    for row in rows:
+        part = f"{row['label']} {row['value']}"
+        countdown = row.get("countdown") or ""
+        if re.fullmatch(r"<?\d+(?:\.\d)?h", countdown):
+            part += (f" · resets in {countdown}" if english else f" · {countdown} 后重置")
+        elif countdown:
+            part += f" · {countdown}"
+        parts.append(part)
+    return "Codex  " + (" | ".join(parts))
+
+
+def concise_tooltip(codex_rows, provider_rows, language: str = "zh-CN") -> str:
+    """Hover text: one short line per selected app, no diagnostics."""
+    lines = [codex_brief(codex_rows, language)] if codex_rows else []
+    lines += [info.get("brief") or info.get("name", "") for info in provider_rows]
+    return "\n".join(line for line in lines if line)
 
 
 class CodexUsageSurface:
@@ -591,11 +714,11 @@ class CodexUsageSurface:
         self._selected_id = None
         self._hovered = False
 
-        def rounded_path():
+        def rounded_path(inset=0):
             path = GraphicsPath()
-            diameter, width, height = scale(16), form.Width-1, form.Height-1
-            for x, y, angle in [(0, 0, 180), (width-diameter, 0, 270),
-                                 (width-diameter, height-diameter, 0), (0, height-diameter, 90)]:
+            diameter, width, height = scale(16), form.Width-1-inset, form.Height-1-inset
+            for x, y, angle in [(inset, inset, 180), (width-diameter, inset, 270),
+                                 (width-diameter, height-diameter, 0), (inset, height-diameter, 90)]:
                 path.AddArc(x, y, diameter, diameter, angle, 90)
             path.CloseFigure()
             return path
@@ -619,6 +742,15 @@ class CodexUsageSurface:
             pen = Pen(track_color, 1)
             track = SolidBrush(track_color)
             try:
+                fill = getattr(self, "_fill", None)
+                if fill is not None:
+                    pill = rounded_path(1)
+                    brush = SolidBrush(fill)
+                    try:
+                        graphics.FillPath(brush, pill)
+                    finally:
+                        brush.Dispose()
+                        pill.Dispose()
                 if self._hovered:
                     graphics.DrawPath(pen, path)
                 self._disk_bounds = []
@@ -649,7 +781,7 @@ class CodexUsageSurface:
         # Showing the strip must not interrupt typing in another application.
         import ctypes
         from ctypes import wintypes
-        user32 = ctypes.windll.user32
+        user32 = _dll("user32")
         get_style = user32.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.GetWindowLongW
         set_style = user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.SetWindowLongW
         get_style.argtypes = [wintypes.HWND, ctypes.c_int]
@@ -674,7 +806,9 @@ class CodexUsageSurface:
             label.Font = self._fonts[0 if y == 0 else 1]
             label.TextAlign = ContentAlignment.MiddleRight
             label.ForeColor = Color.FromArgb(231, 238, 242) if y == 0 else time_color
-            label.BackColor = form.BackColor
+            # Transparent labels show what the form paints (pill or nothing),
+            # so rounded pills keep their corners under the text.
+            label.BackColor = Color.Transparent
             label.Location = Point(scale(5), scale(y))
             label.Size = Size(scale(47), scale(20))
             form.Controls.Add(label)
@@ -790,6 +924,8 @@ class CodexUsageSurface:
             user32.SetForegroundWindow(handle)
         menu.Opening += activate_menu_owner
         menu.Closed += lambda *_: user32.PostMessageW(handle, 0, 0, 0)
+        self._menu_back = form.BackColor
+        self._fill = None
         menu.BackColor = form.BackColor
         menu.ForeColor = Color.FromArgb(231, 238, 242)
         menu.Font = Font("Microsoft YaHei UI", 9, FontStyle.Regular)
@@ -808,13 +944,13 @@ class CodexUsageSurface:
             path.CloseFigure()
             return path
         def fill_background(_sender, event):
-            brush = SolidBrush(form.BackColor)
+            brush = SolidBrush(self._menu_back)
             try:
                 event.Graphics.FillRectangle(brush, event.AffectedBounds)
             finally:
                 brush.Dispose()
         def fill_item(_sender, event):
-            brush = SolidBrush(form.BackColor)
+            brush = SolidBrush(self._menu_back)
             try:
                 event.Graphics.FillRectangle(brush, 0, 0, event.Item.Width, event.Item.Height)
                 if event.Item.Selected:
@@ -845,7 +981,7 @@ class CodexUsageSurface:
         renderer.RenderToolStripBorder += draw_border
         def draw_arrow(_sender, event):
             rect = event.ArrowRectangle
-            brush = SolidBrush(form.BackColor)
+            brush = SolidBrush(self._menu_back)
             pen = Pen(menu.ForeColor, 1.5)
             try:
                 event.Graphics.FillRectangle(brush, rect)
@@ -858,7 +994,7 @@ class CodexUsageSurface:
         renderer.RenderArrow += draw_arrow
         def draw_check(_sender, event):
             rect = event.ImageRectangle
-            brush = SolidBrush(self._menu_hover if event.Item.Selected else form.BackColor)
+            brush = SolidBrush(self._menu_hover if event.Item.Selected else self._menu_back)
             pen = Pen(menu.ForeColor, 1.6)
             try:
                 event.Graphics.FillRectangle(brush, rect.Left-2, 0, rect.Width+4, event.Item.Height)
@@ -870,7 +1006,7 @@ class CodexUsageSurface:
                 brush.Dispose()
                 pen.Dispose()
         def draw_separator(_sender, event):
-            brush = SolidBrush(form.BackColor)
+            brush = SolidBrush(self._menu_back)
             pen = Pen(self._menu_hover)
             try:
                 event.Graphics.FillRectangle(brush, 0, 0, event.Item.Width, event.Item.Height)
@@ -934,6 +1070,14 @@ class CodexUsageSurface:
             item = self._display_menu.DropDownItems.Add(zh)
             item.Click += lambda _s, _e, k=key, v=value: save_choice(k, v)
             self._display_choices.append((item, key, value, zh, en))
+        self._display_menu.DropDownItems.Add(ToolStripSeparator())
+        self._background_title = self._display_menu.DropDownItems.Add("背景")
+        self._background_title.Enabled = False
+        for style in BACKGROUND_STYLES:
+            zh, en = BACKGROUND_LABELS[style]
+            item = self._display_menu.DropDownItems.Add(zh)
+            item.Click += lambda _s, _e, v=style: save_choice("usage_background", v)
+            self._display_choices.append((item, "usage_background", style, zh, en))
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
         # Multi-provider picker (multi-select, persisted in the Profile).
@@ -947,6 +1091,9 @@ class CodexUsageSurface:
                 current = list(self.providers().get("selected") or ["codex"])
             except Exception:
                 current = ["codex"]
+            from .providers import MAX_SELECTED
+            if provider_id not in current and len(current) >= MAX_SELECTED:
+                return  # the strip lays out at most six apps legibly
             chosen = [x for x in current if x != provider_id] if provider_id in current else current + [provider_id]
             if not chosen:
                 return  # keep at least one; the strip (and this menu) must stay reachable
@@ -960,6 +1107,8 @@ class CodexUsageSurface:
             item = self._models_menu.DropDownItems.Add(spec.name)
             item.Click += lambda _s, _e, pid=spec.id: toggle_model(pid)
             self._model_items[spec.id] = (item, spec)
+        self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 6 个")
+        self._limit_item.Enabled = False
         self._models_menu.DropDownItems.Add(ToolStripSeparator())
         self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
         self._rescan_item.Click += lambda *_: self._action(self.rescan)
@@ -1024,6 +1173,7 @@ class CodexUsageSurface:
 
         self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
         self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
+        self._fit_fonts = {}
 
         def make_column():
             pair = []
@@ -1032,7 +1182,7 @@ class CodexUsageSurface:
                 label.AutoSize = False
                 label.Font = font
                 label.TextAlign = ContentAlignment.MiddleLeft
-                label.BackColor = form.BackColor
+                label.BackColor = Color.Transparent
                 label.ForeColor = menu.ForeColor
                 label.Location = Point(scale(5), 0)
                 label.Size = Size(scale(47), scale(20))
@@ -1077,46 +1227,59 @@ class CodexUsageSurface:
             english = language == "en"
             self._models_menu.Text = "Models" if english else "显示模型"
             self._rescan_item.Text = "Detect again" if english else "重新检测"
+            from .providers import MAX_SELECTED
+            full = len(selected) >= MAX_SELECTED
             for pid, (item, spec) in self._model_items.items():
                 pstate = provider_states.get(pid)
                 item.Text = f"{spec.name} · {_provider_status(pstate, english)}"
                 item.Checked = pid in selected
-                item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
+                item.Enabled = pid in selected or (not full and (pstate is None or bool(pstate.get("installed"))))
+            self._limit_item.Visible = full
+            self._limit_item.Text = (f"Up to {MAX_SELECTED} shown · untick one first" if english
+                                     else f"最多同时显示 {MAX_SELECTED} 个，请先取消一个")
+            self._background_title.Text = "Background" if english else "背景"
             self._display_menu.Text = ("Display options" if language == "en" else "显示设置") + (
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
+            style = options.get("usage_background")
+            style = style if style in BACKGROUND_STYLES else "transparent"
             for item, key, value, zh, en in self._display_choices:
                 item.Text = en if language == "en" else zh
-                item.Checked = show_disks == value
+                item.Checked = (style if key == "usage_background" else show_disks) == value
             now_mono = time.monotonic()
             theme = theme_settings()
-            if theme != getattr(self, "_theme", None) or now_mono - getattr(self, "_palette_at", 0) >= 5:
-                self._theme, self._palette_at = theme, now_mono
+            if (theme != getattr(self, "_theme", None) or style != getattr(self, "_style", None)
+                    or now_mono - getattr(self, "_palette_at", 0) >= 5):
+                self._theme, self._style, self._palette_at = theme, style, now_mono
                 bar_geometry = windows_taskbar_geometry()
                 own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
                 docked = self._placement == "taskbar" and own is not None
-                self._next_palette = windows_taskbar_palette(bar_geometry[0] if bar_geometry else None, own,
-                                                             own if docked else None)
-            palette = getattr(self, "_next_palette", None) or windows_taskbar_palette()
-            if palette != getattr(self, "_palette", None):
-                self._palette = palette
-                background, foreground, hover, bright = palette
+                base = windows_taskbar_palette(bar_geometry[0] if bar_geometry else None, own,
+                                               own if docked else None)[0]
+                # A colour-keyed strip off the taskbar (free placement) sits on
+                # arbitrary windows; give it a readable surface there.
+                effective = style if docked or style != "transparent" else "dark"
+                self._next_look = strip_look(effective, base, windows_accent_color())
+            look = getattr(self, "_next_look", None) or strip_look(style, windows_taskbar_palette()[0])
+            if look != getattr(self, "_look", None):
+                self._look = look
+                background, foreground, hover, bright = look["base"], look["foreground"], look["hover"], look["bright"]
+                self._palette = (look["surface"], foreground, hover, bright)
                 form.BackColor = Color.FromArgb(*background)
-                menu.BackColor, menu.ForeColor = form.BackColor, Color.FromArgb(*foreground)
+                # Colour key = the taskbar colour itself: anti-aliased text and
+                # pill edges blend toward what is really behind them.
+                form.TransparencyKey = form.BackColor if look["keyed"] else Color.Empty
+                set_style(handle, -20, get_style(handle, -20) | 0x08000000 | 0x00000080)
+                self._fill = Color.FromArgb(*look["fill"]) if look["fill"] else None
+                self._menu_back = Color.FromArgb(*look["surface"])
+                menu.BackColor, menu.ForeColor = self._menu_back, Color.FromArgb(*foreground)
                 self._menu_hover = Color.FromArgb(*hover)
                 quota_color = Color.FromArgb(*( (25, 160, 20) if bright else (67, 220, 55) ))
                 time_color = Color.FromArgb(*( (0, 98, 150) if bright else (143, 208, 248) ))
-                track_color = Color.FromArgb(*( (210, 215, 218) if bright else (65, 72, 77) ))
                 warning_color = Color.FromArgb(*( (139, 85, 0) if bright else (224, 176, 100) ))
                 self._labels[0].ForeColor = quota_color
-                track_color = Color.FromArgb(*tuple(max(0, v-28) if bright else min(255, v+32) for v in background))
-                for label in [*text_controls, *(c for pair in self._extra_columns for c in pair)]:
-                    label.BackColor = form.BackColor
-                self._models_menu.DropDown.BackColor = form.BackColor
-                self._models_menu.DropDown.ForeColor = menu.ForeColor
-                self._window_menu.DropDown.BackColor = form.BackColor
-                self._window_menu.DropDown.ForeColor = menu.ForeColor
-                self._display_menu.DropDown.BackColor = form.BackColor
-                self._display_menu.DropDown.ForeColor = menu.ForeColor
+                track_color = Color.FromArgb(*tuple(max(0, v-28) if bright else min(255, v+40) for v in look["surface"]))
+                for drop in (self._models_menu.DropDown, self._window_menu.DropDown, self._display_menu.DropDown):
+                    drop.BackColor, drop.ForeColor = self._menu_back, menu.ForeColor
                 for item in menu.Items:
                     item.ForeColor = menu.ForeColor
                 form.Invalidate()
@@ -1138,7 +1301,9 @@ class CodexUsageSurface:
                 self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
                 for top, bottom in self._extra_columns:
                     top.Font, bottom.Font = self._name_font, self._value_font
-                for old_font in (*old_fonts, *old_cell_fonts):
+                old_fit = [font for pair in self._fit_fonts.values() for font in pair]
+                self._fit_fonts = {}
+                for old_font in (*old_fonts, *old_cell_fonts, *old_fit):
                     old_font.Dispose()
             rows = quota_lines(state, language) if "codex" in selected else []
             self.active = bool(rows or others)
@@ -1199,7 +1364,7 @@ class CodexUsageSurface:
             while len(self._extra_columns) < len(cells):
                 make_column()
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
-                (fg.R, fg.G, fg.B), (form.BackColor.R, form.BackColor.G, form.BackColor.B))))
+                (fg.R, fg.G, fg.B), self._palette[0])))
             for (name_label, value_label), (name, value, color) in zip(self._extra_columns, cells):
                 name_label.Text, value_label.Text = name, value
                 name_label.ForeColor, value_label.ForeColor = muted, color
@@ -1217,33 +1382,50 @@ class CodexUsageSurface:
                     label.Location = Point(scale(left_padding), scale(y))
                 form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
             else:
-                # Two provider rows per column: "Name  value", full names.
+                # Two provider rows per column: "Name  value", full names.  Up
+                # to six apps (three columns) must fit the empty taskbar area
+                # left of Start: shrink the type a little before giving up.
                 used = self._extra_columns[:len(cells)]
-                x, gap, inner = scale(7), scale(10), scale(4)
-                for start in range(0, len(used), 2):
-                    group = used[start:start+2]
-                    name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
-                    value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
-                    for row, (name_label, value_label) in enumerate(group):
-                        y = scale(10) if len(group) == 1 else scale(20)*row
-                        name_label.Size = Size(name_w, scale(20))
-                        value_label.Size = Size(value_w, scale(20))
-                        name_label.Location = Point(x, y)
-                        value_label.Location = Point(x + name_w + inner, y)
-                    x += name_w + inner + value_w + gap
-                form.ClientSize = Size(x - gap + scale(7), scale(40))
+                available = None
+                if self._placement == "taskbar" and geometry:
+                    elements = self._layout.elements(user32.FindWindowW("Shell_TrayWnd", None) or 0, geometry[0])
+                    gap_area = left_gap(geometry[0], elements, scale(6)) if elements else None
+                    available = gap_area[1] - gap_area[0] if gap_area else None
+                for factor in FIT_FACTORS:
+                    fonts = self._fit_fonts.get(factor)
+                    if fonts is None:
+                        fonts = self._fit_fonts[factor] = (
+                            Font("Segoe UI", max(1, round(scale(12)*factor)), FontStyle.Regular, GraphicsUnit.Pixel),
+                            Font("Segoe UI", max(1, round(scale(13)*factor)), FontStyle.Bold, GraphicsUnit.Pixel))
+                    for top, bottom in used:
+                        if top.Font is not fonts[0]:
+                            top.Font = fonts[0]
+                        if bottom.Font is not fonts[1]:
+                            bottom.Font = fonts[1]
+                    x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
+                    for start in range(0, len(used), 2):
+                        group = used[start:start+2]
+                        name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
+                        value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
+                        for row, (name_label, value_label) in enumerate(group):
+                            y = scale(10) if len(group) == 1 else scale(20)*row
+                            name_label.Size = Size(name_w, scale(20))
+                            value_label.Size = Size(value_w, scale(20))
+                            name_label.Location = Point(x, y)
+                            value_label.Location = Point(x + name_w + inner, y)
+                        x += name_w + inner + value_w + gap
+                    width = x - gap + scale(7*factor)
+                    if available is None or width <= available:
+                        break
+                form.ClientSize = Size(width, scale(40))
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()
             hint = "Click: GPU home · Double-click: quota details" if language == "en" else "单击打开 GPU 主页 · 双击查看额度详情"
-            details = [row["detail"] for row in rows]
-            if rows and multi:
-                details = ["Codex"] + ["  " + line for line in details]
-            details += [info["detail"] for info in provider_rows]
-            tip = "\n".join(details) + "\n" + hint
+            tip = concise_tooltip(rows, provider_rows, language)
             form.AccessibleName = ("Codex · " + rows[index]["label"]) if rows and not multi else (
                 "AI usage" if english else "AI 用量")
-            form.AccessibleDescription = tip
+            form.AccessibleDescription = tip + "\n" + hint
             for control in [form, *text_controls, *(c for pair in self._extra_columns for c in pair)]:
                 tooltip.SetToolTip(control, tip)
             for i, (zh, en, _) in enumerate(actions):

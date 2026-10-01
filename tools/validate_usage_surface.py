@@ -170,7 +170,7 @@ def main() -> int:
                     try:
                         surface._menu.DrawToBitmap(bitmap, Rectangle(0, 0, bitmap.Width, bitmap.Height))
                         bitmap.Save(str(args.output.resolve() / "context-menu.png"), ImageFormat.Png)
-                        assertions["menu_uses_radar_palette"] = surface._menu.BackColor == surface.form.BackColor
+                        assertions["menu_uses_radar_palette"] = surface._menu.BackColor == surface._menu_back
                     finally:
                         bitmap.Dispose()
                         surface._menu.Close()
@@ -237,11 +237,28 @@ def main() -> int:
                 display["codex_time_format"] = "days"
                 invoke(tick)
                 invoke(lambda: assertions.update(unified_decimal_hours_ignore_legacy_preference=(
-                    len(surface._display_choices) == 2 and surface._countdowns[0].Text.endswith("h")
+                    len([c for c in surface._display_choices if c[1] != "usage_background"]) == 2 and surface._countdowns[0].Text.endswith("h")
                     and "." in surface._countdowns[0].Text),
                     countdown_matches_percent_font=(surface._countdowns[0].Font.Bold
                         and surface._countdowns[0].Font.Size == surface._labels[0].Font.Size)))
                 display.update(codex_show_disks=True, codex_time_format="decimal")
+                invoke(tick)
+                looks = {}
+                for style in ("transparent", "match", "dark", "light", "accent"):
+                    display["usage_background"] = style
+                    surface._palette_at = 0
+                    invoke(tick)
+                    def record(style=style):
+                        keyed = surface.form.TransparencyKey == surface.form.BackColor
+                        looks[style] = (keyed, surface._fill is not None)
+                    invoke(record)
+                assertions["background_styles_apply"] = (
+                    looks["transparent"] == (True, False) and looks["match"][1] is False
+                    and not looks["match"][0] and all(looks[s] == (True, True) for s in ("dark", "light", "accent")))
+                invoke(lambda: assertions.update(style_keeps_non_activating_toolwindow=bool(
+                    __import__("ctypes").WinDLL("user32").GetWindowLongW(int(surface.form.Handle.ToInt64()), -20)
+                    & 0x08000080 == 0x08000080)))
+                display["usage_background"] = "transparent"
                 invoke(tick)
                 original_state = dict(state)
                 fit_results = []

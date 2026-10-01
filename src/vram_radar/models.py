@@ -673,6 +673,14 @@ def normalize_usage_providers(value: Any) -> tuple[str, ...]:
 
     return normalize_selection([item for item in value[:64] if isinstance(item, str)])
 
+USAGE_BACKGROUNDS = ("transparent", "match", "dark", "light", "accent")
+
+
+def normalize_usage_background(value: Any) -> str:
+    """Unknown styles (older/newer releases) fall back to the default."""
+    return value if isinstance(value, str) and value in USAGE_BACKGROUNDS else "transparent"
+
+
 @dataclass(frozen=True)
 class Profile:
     id: str
@@ -696,6 +704,8 @@ class Profile:
     # Which AI apps the usage strip shows (see providers/). Profiles written
     # before multi-provider support have no key and keep showing Codex only.
     usage_providers: tuple[str, ...] = ("codex",)
+    # Taskbar strip background: see usage_surface.BACKGROUND_STYLES.
+    usage_background: str = "transparent"
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -924,6 +934,7 @@ class Profile:
             codex_show_disks=require_bool(raw.get("codex_show_disks", False), "codex_show_disks"),
             codex_time_format=codex_time_format,
             usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
+            usage_background=normalize_usage_background(raw.get("usage_background", "transparent")),
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -953,6 +964,7 @@ class Profile:
             "codex_show_disks": self.codex_show_disks,
             "codex_time_format": self.codex_time_format,
             "usage_providers": list(self.usage_providers),
+            "usage_background": self.usage_background,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],

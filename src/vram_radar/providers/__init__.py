@@ -33,13 +33,19 @@ FORCE_FLOOR_SECONDS = 5
 LOG = logging.getLogger("vram_radar")
 
 
+# The taskbar strip lays out at most this many apps legibly (three columns
+# of two rows); the Models menu disables further ticks at the limit.
+MAX_SELECTED = 6
+
+
 def normalize_selection(values) -> tuple[str, ...]:
-    """Known ids in registry order; unknown/duplicate ids are dropped."""
+    """Known ids in registry order; unknown/duplicate ids are dropped and at
+    most ``MAX_SELECTED`` are kept."""
     if not isinstance(values, (list, tuple)):
         return DEFAULT_PROVIDERS
     wanted = {value for value in values if isinstance(value, str)}
     selected = tuple(provider_id for provider_id in PROVIDER_IDS if provider_id in wanted)
-    return selected or DEFAULT_PROVIDERS
+    return selected[:MAX_SELECTED] or DEFAULT_PROVIDERS
 
 
 def probe_all(env: Environment | None = None, *, codex_executable: str = "",
@@ -85,7 +91,8 @@ def probe_all(env: Environment | None = None, *, codex_executable: str = "",
 class ProviderMonitor:
     """Single background worker; the UI thread only copies ``snapshot()``."""
 
-    def __init__(self, *, probe: Callable[..., dict] = probe_all, interval: float = PROBE_SECONDS):
+    def __init__(self, *, probe: Callable[..., dict] = probe_all, interval: float = PROBE_SECONDS,
+                 screen_reader: bool = True):
         self.probe, self.interval = probe, interval
         self.lock = threading.RLock()
         self.wake = threading.Event()
@@ -98,6 +105,7 @@ class ProviderMonitor:
         self.worker: threading.Thread | None = None
         self.states: dict[str, dict] = {}
         self.loading = False
+        self.screen_reader = screen_reader
 
     def configure(self, enabled: bool, codex_executable: str = "", selected=None) -> None:
         with self.lock:
@@ -106,6 +114,7 @@ class ProviderMonitor:
             selected = normalize_selection(selected) if selected is not None else self.selected
             changed = (self.enabled, self.codex_executable, self.selected) != (enabled, codex_executable, selected)
             self.enabled, self.codex_executable, self.selected = enabled, codex_executable, selected
+            self._configure_screen_reader()
             if not changed:
                 return
             self.next_read = 0
@@ -122,9 +131,24 @@ class ProviderMonitor:
                 self.next_read = 0
                 self.wake.set()
 
+    def _configure_screen_reader(self) -> None:
+        # Grok's usage is only ever on its own screen; read it there (see
+        # screen_usage) only while Grok is shown in the strip.
+        try:
+            if self.screen_reader and self.enabled and "grok" in self.selected and not self.closed:
+                grok._screen_watcher().start()
+            elif grok.WATCHER is not None:
+                grok.WATCHER.stop()
+        except Exception as exc:
+            LOG.info("screen usage reader unavailable (%s)", type(exc).__name__)
+
     def snapshot(self) -> dict[str, dict]:
         with self.lock:
-            return copy.deepcopy(self.states)
+            states = copy.deepcopy(self.states)
+        if "grok" in states and "grok" in self.selected:
+            reading = grok.WATCHER.latest() if grok.WATCHER is not None else None
+            states["grok"] = grok.overlay(states["grok"], reading)
+        return states
 
     def _run(self) -> None:
         while True:
@@ -159,5 +183,7 @@ class ProviderMonitor:
         with self.lock:
             self.closed = True
             self.wake.set()
+        if grok.WATCHER is not None:
+            grok.WATCHER.stop()
         if self.worker:
             self.worker.join(timeout=5)

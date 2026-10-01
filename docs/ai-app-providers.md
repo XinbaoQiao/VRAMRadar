@@ -15,7 +15,7 @@ Each provider is one module in `src/vram_radar/providers/` exposing
 |---|---|---|---|
 | Codex | MSIX `OpenAI.Codex_*`, `find_codex()` CLI | Quota windows (existing) | — |
 | DeepSeek Harness | Uninstall entry, `%LOCALAPPDATA%\Programs\DeepSeek Harness`, process | **Live account balance** (topped-up + granted wallets, CNY/USD), plus local token totals from `~\.dsh\storages\session_projcache\sessions\*.json` | Same read-only `GET /api/v0/users/get_user_summary` the app uses (or public `GET /user/balance` for an API key); every 5 min, backoff on errors, only while selected |
-| Grok (Grok Bot) | Uninstall entry, process, known folders | Signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | Grok's weekly usage comes from a Connect RPC POST (`DashboardService/GetSandUsageStatus`) authenticated by a DPAPI-encrypted token and is kept only in memory; Radar does not decrypt the token or impersonate the app |
+| Grok (Grok Bot) | Uninstall entry, process, known folders | Signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | Grok's weekly usage comes from a Connect RPC POST (`DashboardService/GetSandUsageStatus`) authenticated by a DPAPI-encrypted token and is kept only in memory; Radar does not decrypt the token or impersonate the app. Instead, while Grok is the foreground window and its account (avatar) menu is open, the usage row it renders ("NN%" + reset hint) is read via UI Automation (menus only) and shown as "已用 NN%（HH:MM 读取）" until a newer reading |
 | Kimi | Uninstall entry (`DisplayIcon`), process | Membership level, exhausted / overdrawn / send-blocked and reset time, taken from Kimi's own `logs\main.log` refresh lines; signed in = the encrypted token store exists (not opened) | Kimi fetches quota online with an encrypted token; the log snapshot is only as fresh as Kimi's last run and is marked "As of" when older than 6 h |
 | Claude, GLM 智谱清言, Qwen, 腾讯元宝 | Uninstall entries, MSIX, known folders, processes, sibling folders of other detected apps | Installed / version / running / last data change; "leftover data" when only an old data folder remains | No documented local usage data |
 
@@ -53,3 +53,23 @@ Each provider is one module in `src/vram_radar/providers/` exposing
   `SystemUsesLightTheme` / `AppsUseLightTheme` / `EnableTransparency` /
   `ColorPrevalence` change), falling back to the theme default or accent
   colour. Text colours are picked for contrast against that background.
+
+## Strip options (round 3)
+
+* **Tooltip**: one line per selected app — name, key quota/balance, reset if any.
+* **At most 6 apps** (`providers.MAX_SELECTED`): the Models menu disables further
+  ticks with a hint; the strip lays them out in three two-row columns and shrinks
+  the type (down to 72 %) to stay inside the empty area left of Start.
+* **Background** (Display options > Background, saved as `usage_background`):
+  `transparent` (default; colour-keyed so only text is drawn over the real
+  taskbar — clicks between glyphs fall through to the taskbar), `match`
+  (solid sampled taskbar colour), `dark` / `light` pills and `accent` tint
+  (from `HKCU\Software\Microsoft\Windows\DWM\AccentColor`).
+
+## Local GPU backends
+
+NVML (ctypes, no child process, watchdog thread) → nvidia-smi (bounded, kills
+the tree on timeout) → Windows DXGI + PDH `GPU Adapter Memory` / `GPU Engine`
+counters (any vendor; integrated GPUs report shared memory; English counter
+names so the locale does not matter) → Linux amdgpu sysfs.  Machines with no
+readable GPU (RDP/VM with only the Basic Render Driver) get `local_gpu_missing`.
