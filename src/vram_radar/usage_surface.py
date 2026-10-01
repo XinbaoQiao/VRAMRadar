@@ -859,7 +859,7 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
         value = local(fact)
         if value:
             lines.append("  " + value)
-    warning = state.get("state") in {"error", "not_installed"} or bool(state.get("stale"))
+    warning = state.get("state") in {"error", "not_installed"} or bool(state.get("stale")) or bool(state.get("session_relogin"))
     # One short tooltip line: name + key quota/balance + reset (if any).
     brief = local(state.get("brief")) or headline
     reset = state.get("reset_at")
