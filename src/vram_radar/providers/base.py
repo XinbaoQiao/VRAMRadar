@@ -454,6 +454,15 @@ def detect_install(env: Environment, *, uninstall: Iterable[str] = (), processes
     for root in env.extra_roots:
         for name in sibling_names:
             add_folder(root / name, "", "sibling_folder", 4)
+    if sys.platform == "darwin":
+        # macOS (detection only): an app bundle named after the Windows
+        # executable/folder ("Kimi.exe" -> Kimi.app) in /Applications or
+        # ~/Applications.  No process/registry/MSIX sources exist there.
+        bundles = dict.fromkeys([Path(e).stem + ".app" for e in exe_names] + [n + ".app" for n in sibling_names])
+        for root in (Path("/Applications"), env.home / "Applications"):
+            for bundle in bundles:
+                if exists(root / bundle):
+                    add(root / bundle, "", "mac_app", 3)
     if not candidates:
         return detection
     unique = {}
