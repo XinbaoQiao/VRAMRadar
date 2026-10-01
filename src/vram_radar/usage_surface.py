@@ -1132,7 +1132,8 @@ class CodexUsageSurface:
         """Monitor DPI of the strip (dialogs follow the screen, not the
         taskbar-fitted strip scale); None -> system DPI."""
         try:
-            return max(1.0, float(self.form.DeviceDpi) / 96) if self.form is not None else None
+            # Same source as the menu (DeviceDpi stays 96 under system DPI awareness).
+            return max(1.0, windows_taskbar_dpi(windows_dpi_scale() * 96) / 96)
         except Exception:
             return None
 
