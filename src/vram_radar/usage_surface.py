@@ -152,6 +152,115 @@ def left_gap(bar, elements, margin=6):
     return left_edge, right_edge
 
 
+def content_right(pixels, width, height, threshold=60, min_hits=2):
+    """Column just past the right-most visible content in a BGRA capture.
+
+    Each column's background is taken from its own top/bottom rows (the
+    taskbar is translucent and the hover highlight is a rounded rect), and a
+    column counts as content when at least ``min_hits`` of its middle rows
+    differ from that background by more than ``threshold`` (sum of |dRGB|).
+    Returns an offset in ``0..width`` (0 = nothing visible) or None for bad
+    input.
+    """
+    if width <= 0 or height < 8 or len(pixels) < width * height * 4:
+        return None
+    def px(x, y):
+        i = (y * width + x) * 4
+        return pixels[i + 2], pixels[i + 1], pixels[i]
+    top_rows = (1, 2, 3)
+    bottom_rows = (height - 4, height - 3, height - 2)
+    middle = range(int(height * 0.2), int(height * 0.8) + 1)
+    last = 0
+    for x in range(width):
+        refs = [px(x, y) for y in (*top_rows, *bottom_rows)]
+        ref = tuple(sorted(c[k] for c in refs)[len(refs) // 2] for k in range(3))
+        hits = 0
+        for y in middle:
+            r, g, b = px(x, y)
+            if abs(r - ref[0]) + abs(g - ref[1]) + abs(b - ref[2]) > threshold:
+                hits += 1
+                if hits >= min_hits:
+                    last = x + 1
+                    break
+    return last
+
+
+def capture_screen(rect):
+    """BGRA bytes of a physical-pixel screen rect, or None."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        left, top, right, bottom = (int(v) for v in rect)
+        width, height = right - left, bottom - top
+        if width <= 0 or height <= 0 or width * height > 4_000_000:
+            return None
+        user32, gdi32 = _dll("user32"), _dll("gdi32")
+        vp, ci = ctypes.c_void_p, ctypes.c_int
+        user32.GetDC.restype, user32.GetDC.argtypes = vp, [vp]
+        user32.ReleaseDC.argtypes = [vp, vp]
+        gdi32.CreateCompatibleDC.restype, gdi32.CreateCompatibleDC.argtypes = vp, [vp]
+        gdi32.CreateCompatibleBitmap.restype, gdi32.CreateCompatibleBitmap.argtypes = vp, [vp, ci, ci]
+        gdi32.SelectObject.restype, gdi32.SelectObject.argtypes = vp, [vp, vp]
+        gdi32.BitBlt.argtypes = [vp, ci, ci, ci, ci, vp, ci, ci, wintypes.DWORD]
+        gdi32.DeleteObject.argtypes = [vp]
+        gdi32.DeleteDC.argtypes = [vp]
+
+        class Header(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD),
+                        ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
+                        ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                        ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+        gdi32.GetDIBits.argtypes = [vp, vp, wintypes.UINT, wintypes.UINT, vp, ctypes.POINTER(Header), wintypes.UINT]
+        screen = user32.GetDC(None)
+        if not screen:
+            return None
+        memory = gdi32.CreateCompatibleDC(screen)
+        bitmap = gdi32.CreateCompatibleBitmap(screen, width, height)
+        old = gdi32.SelectObject(memory, bitmap)
+        try:
+            if not gdi32.BitBlt(memory, 0, 0, width, height, screen, left, top, 0x00CC0020):
+                return None
+            header = Header(ctypes.sizeof(Header), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+            buffer = (ctypes.c_ubyte * (width * height * 4))()
+            gdi32.SelectObject(memory, old)
+            if gdi32.GetDIBits(memory, bitmap, 0, height, buffer, ctypes.byref(header), 0) != height:
+                return None
+            return bytes(buffer)
+        finally:
+            gdi32.SelectObject(memory, old)
+            gdi32.DeleteObject(bitmap)
+            gdi32.DeleteDC(memory)
+            user32.ReleaseDC(None, screen)
+    except Exception:
+        return None
+
+
+def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
+    """Shrink the Widgets button to its visible content (icon + weather text).
+
+    Explorer reports the weather button much wider than what it draws
+    (228 px for "23°C / 局部多云" at 150 %, text ending near 150 px), which
+    made the empty gap look ~100 px narrower than it is.  The part covered by
+    our own strip is never scanned, so the strip cannot push itself away.
+    """
+    widgets = elements.get("WidgetsButton") if elements else None
+    if not widgets or widgets[2] - widgets[0] < min_width:
+        return elements
+    left, top, right, bottom = widgets
+    if own and own[0] < right and own[2] > left and own[1] < bottom and own[3] > top:
+        right = max(left, min(right, own[0]))
+    if right - left < min_width:
+        return elements
+    pixels = capture((left, top, right, bottom))
+    edge = content_right(pixels, right - left, bottom - top) if pixels else None
+    if not edge or edge < min_width // 2:
+        return elements
+    trimmed = dict(elements)
+    trimmed["WidgetsButton"] = (left, top, min(widgets[2], left + edge), bottom)
+    return trimmed
+
+
 class TaskbarLayout:
     """Cached UI Automation reader for the primary taskbar's buttons.
 
@@ -161,8 +270,9 @@ class TaskbarLayout:
     back to the classic tray anchor; nothing here can raise into the UI loop.
     """
 
-    def __init__(self, interval: float = 5.0, retry: float = 1.0):
+    def __init__(self, interval: float = 5.0, retry: float = 1.0, trim=trim_widgets):
         self.interval = interval
+        self.trim = trim
         self.retry = min(retry, interval)
         self._key = None
         self._at = 0.0
@@ -196,6 +306,8 @@ class TaskbarLayout:
         self._key, self._at = key, now
         found = self._read(taskbar_handle) if taskbar_handle and self._load() else {}
         found = exclude_rect(found, exclude)
+        if usable_layout(found) and self.trim is not None:
+            found = self.trim(found, exclude)
         if usable_layout(found):
             self._good_key, self._good, self.failures = key, found, 0
             self._elements = found
@@ -270,9 +382,13 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     """
     width, height = size
     y = bar[1] + (bar[3] - bar[1] - height) // 2
-    spot = left_slot(bar, elements, size, margin) if elements else None
-    if spot is not None:
-        return ("left", spot[0], spot[1])
+    # Centered taskbar: the empty area left of Start is authoritative.  A
+    # strip wider than the gap is compacted/clipped by the caller; it never
+    # switches to the tray side (which has even less room and covers pinned
+    # icons).  Only a left-aligned layout (no left gap) uses the tray anchor.
+    gap = left_gap(bar, elements, margin) if elements else None
+    if gap is not None:
+        return ("left", gap[0], y)
     right = tray[0]
     widgets = elements.get("WidgetsButton") if elements else None
     if widgets and widgets[0] > (bar[0] + bar[2]) / 2 and widgets[0] < tray[0]:
@@ -485,8 +601,32 @@ def windows_taskbar_palette(bar=None, exclude=None, near=None):
     return taskbar_palette(settings, sampled, accent)
 
 
-# Font scale steps tried so up to six apps fit left of Start.
-FIT_FACTORS = (1.0, 0.92, 0.85, 0.78, 0.72)
+# (font factor, compaction level) tried in order until the strip fits the
+# left gap.  Type never goes below 90 % of the normal strip font (12/13 px at
+# 100 %, i.e. the original two-app layout); after that content is compacted,
+# and as a last resort the strip is clipped to the gap.
+FIT_PLAN = ((1.0, 0), (1.0, 1), (0.95, 1), (0.9, 1), (0.9, 2))
+FIT_FACTORS = tuple(dict.fromkeys(factor for factor, _ in FIT_PLAN))
+
+
+def compact_value(value: str, level: int) -> str:
+    """Shorter strip value: 1 drops a trailing countdown ("0% 5.1h" -> "0%"),
+    2 also drops unit words ("已用 15%" -> "15%", "¥6.00" -> "¥6")."""
+    text = str(value or "")
+    if level >= 1:
+        text = re.sub(r"\s+<?\d+(?:\.\d)?h$", "", text)
+    if level >= 2:
+        text = re.sub(r"^(?:已用|Used)\s*(\d+(?:\.\d+)?%)$", r"\1", text)
+        text = re.sub(r"(\d+)\.00(?!\d)", r"\1", text)
+    return text
+
+
+def fit_choice(widths, available):
+    """Index into FIT_PLAN of the first fitting width, else the last one."""
+    for index, width in enumerate(widths):
+        if available is None or width <= available:
+            return index
+    return len(widths) - 1
 
 # Strip background styles (persisted as Profile.usage_background).
 BACKGROUND_STYLES = ("transparent", "match", "dark", "light", "accent")
@@ -1671,13 +1811,14 @@ class CodexUsageSurface:
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
                 (fg.R, fg.G, fg.B), self._palette[0])))
             for (name_label, value_label), (name, value, color) in zip(self._extra_columns, cells):
-                name_label.Text, value_label.Text = name, value
+                name_label.Text, value_label.Text = name, compact_value(value, getattr(self, "_fit_level", 0))
                 name_label.ForeColor, value_label.ForeColor = muted, color
                 name_label.Visible = value_label.Visible = True
             for name_label, value_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = False
             if not multi:
                 self._fit_key = None
+                self._fit_level = 0
                 # Keep the gap tight without shrinking type or clipping longer
                 # countdowns (for example 168.0h) and localized status messages.
                 text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
@@ -1689,8 +1830,8 @@ class CodexUsageSurface:
                 form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
             else:
                 # Two provider rows per column: "Name  value", full names.  Up
-                # to six apps (three columns) must fit the empty taskbar area
-                # left of Start: shrink the type a little before giving up.
+                # to four apps (two columns) fit the empty taskbar area left of
+                # Start at the normal font; compact values before clipping.
                 used = self._extra_columns[:len(cells)]
                 available = None
                 if self._placement == "taskbar" and geometry:
@@ -1701,7 +1842,10 @@ class CodexUsageSurface:
                 fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale)
                 if fit_key != self._fit_key:
                     self._fit_key = fit_key
-                    for factor in FIT_FACTORS:
+                    for factor, level in FIT_PLAN:
+                        self._fit_level = level
+                        for (_, value_label), (_, value, _) in zip(used, cells):
+                            value_label.Text = compact_value(value, level)
                         fonts = self._fit_fonts.get(factor)
                         if fonts is None:
                             fonts = self._fit_fonts[factor] = (
@@ -1727,6 +1871,8 @@ class CodexUsageSurface:
                         width = x - gap + scale(7*factor)
                         if available is None or width <= available:
                             break
+                    if available is not None and width > available:
+                        width = max(scale(40), int(available))  # clip, never move sides
                     form.ClientSize = Size(width, scale(40))
             if reading != self._reading:
                 self._reading = reading

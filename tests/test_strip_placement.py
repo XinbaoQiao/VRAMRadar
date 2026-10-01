@@ -10,7 +10,7 @@ GOOD = {"WidgetsButton": (0, 1032, 150, 1080), "StartButton": (700, 1032, 748, 1
 
 class FakeLayout(TaskbarLayout):
     def __init__(self, readings):
-        super().__init__(interval=0)
+        super().__init__(interval=0, trim=None)
         self.readings = list(readings)
 
     def _load(self):
