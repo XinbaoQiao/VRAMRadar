@@ -148,19 +148,58 @@ class QuotaSurfaceTests(unittest.TestCase):
 
 
 class SessionConsentSurfaceTests(unittest.TestCase):
-    def surface(self, *, consented=(), answer=False):
+    def surface(self, *, consented=(), answer=False, states=None):
         from unittest.mock import Mock
-        self.asked, self.saved = [], Mock(return_value={"ok": True})
+        self.asked, self.saved, self.notices = [], Mock(return_value={"ok": True}), []
         def confirm(app, provider):
             self.asked.append((app, provider))
             return answer
         surface = CodexUsageSurface(None, lambda: {}, language=lambda: "zh-CN", open_settings=lambda: None,
                                     disable=lambda: None, refresh=lambda: None, quit_application=lambda: None,
                                     providers=lambda: {"selected": ["codex", "grok"],
-                                                       "session_consent": list(consented)},
+                                                       "session_consent": list(consented),
+                                                       "providers": dict(states or {})},
                                     save_consent=self.saved, confirm_consent=confirm)
+        surface.notify_blocked = self.notices.append
         surface._action = lambda callback: callback()  # run synchronously
         return surface
+
+    def test_not_installed_explains_instead_of_asking(self):
+        surface = self.surface(answer=True, states={"kimi": {"installed": False, "signed_in": None}})
+        self.assertFalse(surface.request_session_consent("kimi"))
+        self.assertEqual(self.asked, [])
+        self.assertIn("未检测到 Kimi", self.notices[0])
+        self.saved.assert_not_called()
+
+    def test_signed_out_explains_instead_of_asking(self):
+        surface = self.surface(answer=True, states={"grok": {"installed": True, "signed_in": False}})
+        self.assertFalse(surface.request_session_consent("grok"))
+        self.assertEqual(self.asked, [])
+        self.assertIn("尚未登录", self.notices[0])
+
+    def test_installed_and_signed_in_or_unknown_asks(self):
+        surface = self.surface(states={"grok": {"installed": True, "signed_in": True}})
+        surface.request_session_consent("grok")
+        surface.request_session_consent("kimi")   # state unknown (fresh start): still asks
+        self.assertEqual([a for a, _ in self.asked], ["Grok", "Kimi"])
+        self.assertEqual(self.notices, [])
+
+    def test_dialog_layout_scales_and_fits_text(self):
+        from vram_radar.usage_surface import dialog_layout
+        normal, big = dialog_layout(1.0, 60), dialog_layout(1.5, 90)
+        self.assertEqual(big["client"][0], 660)
+        self.assertGreaterEqual(big["label"][3], 90)
+        self.assertGreater(big["button_y"], big["label"][1] + big["label"][3])
+        self.assertLessEqual(big["button_y"] + big["button"][1], big["client"][1])
+        self.assertEqual(normal["font_px"], 12)
+        self.assertEqual(big["font_px"], 18)
+
+    def test_fresh_profile_has_no_consent(self):
+        from vram_radar.models import Profile
+        self.assertEqual(Profile.empty("new").usage_session_consent, ())
+        raw = Profile.empty("new").to_dict()
+        raw.pop("usage_session_consent", None)
+        self.assertEqual(Profile.from_dict(raw).usage_session_consent, ())
 
     def test_dialog_text(self):
         from vram_radar.usage_surface import consent_text

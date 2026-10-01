@@ -915,44 +915,98 @@ def consent_text(app: str, provider: str) -> str:
     return CONSENT_TEXT.format(app=app, provider=provider)
 
 
-def windows_consent_dialog(app: str, provider: str) -> bool:
-    """Modal 确认/取消 dialog (UI thread only). True only on 确认."""
-    from System.Drawing import Font, Point, Size, SizeF
-    from System.Windows.Forms import (AutoScaleMode, Button, DialogResult, Form, FormBorderStyle,
-                                      FormStartPosition, Label)
-    dialog = Form()
+def consent_precheck(state: dict | None, app: str) -> str | None:
+    """Why the consent dialog must not be offered yet, or None.
+
+    Session reading needs the app installed and signed in on this PC; asking
+    for consent before that would promise something we cannot do.  An
+    unknown state (first probe not finished) does not block the dialog.
+    """
+    if not isinstance(state, dict):
+        return None
+    if state.get("installed") is False:
+        return f"未检测到 {app}。请先在本机安装并登录 {app}，再开启自动读取额度。"
+    if state.get("signed_in") is False:
+        return f"{app} 尚未登录。请先在 {app} 中登录，再开启自动读取额度。"
+    return None
+
+
+def windows_dpi_scale(fallback: float = 1.0) -> float:
     try:
-        dialog.AutoScaleDimensions = SizeF(96, 96)
-        dialog.AutoScaleMode = AutoScaleMode.Dpi
+        dpi = _dll("user32").GetDpiForSystem()
+        return max(1.0, dpi / 96) if dpi else fallback
+    except Exception:
+        return fallback
+
+
+def dialog_layout(scale: float, text_height: int) -> dict:
+    """Pixel layout of the consent/notice dialog at ``scale`` (DPI/96)."""
+    s = lambda v: int(round(v * scale))
+    width, pad = s(440), s(18)
+    label_h = max(s(40), int(text_height) + s(4))
+    button_y = pad + label_h + s(14)
+    button = (s(82), s(28))
+    return {"client": (width, button_y + button[1] + s(14)), "label": (pad, pad, width - 2 * pad, label_h),
+            "button": button, "button_y": button_y, "gap": s(8), "pad": pad, "font_px": max(12, s(12))}
+
+
+def _windows_dialog(text: str, buttons, scale: float | None) -> bool:
+    """Modal dialog sized explicitly for the monitor scale (no WinForms
+    autoscaling, which left the text clipped/blurry at 150 %)."""
+    from System.Drawing import Font, FontStyle, GraphicsUnit, Point, Size
+    from System.Windows.Forms import (AutoScaleMode, Button, DialogResult, Form, FormBorderStyle,
+                                      FormStartPosition, Label, TextFormatFlags, TextRenderer)
+    scale = scale or windows_dpi_scale()
+    dialog = Form()
+    font = Font("Microsoft YaHei UI", float(max(12, round(12 * scale))), FontStyle.Regular, GraphicsUnit.Pixel)
+    try:
+        dialog.AutoScaleMode = getattr(AutoScaleMode, "None")
+        dialog.Font = font
         dialog.Text = CONSENT_TITLE
-        dialog.Font = Font("Microsoft YaHei UI", 9)
         dialog.FormBorderStyle = FormBorderStyle.FixedDialog
         dialog.StartPosition = FormStartPosition.CenterScreen
-        dialog.MaximizeBox = False
-        dialog.MinimizeBox = False
+        dialog.MaximizeBox = dialog.MinimizeBox = False
         dialog.ShowInTaskbar = False
         dialog.TopMost = True
-        dialog.ClientSize = Size(440, 176)
+        probe = dialog_layout(scale, 0)
+        measured = TextRenderer.MeasureText(text, font, Size(probe["label"][2], 0),
+                                            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height
+        layout = dialog_layout(scale, measured)
+        dialog.ClientSize = Size(*layout["client"])
         label = Label()
-        label.Text = consent_text(app, provider)
-        label.Location = Point(18, 18)
-        label.Size = Size(404, 104)
-        accept = Button()
-        accept.Text = "确认"
-        accept.DialogResult = DialogResult.OK
-        accept.Location = Point(250, 134)
-        accept.Size = Size(82, 28)
-        cancel = Button()
-        cancel.Text = "取消"
-        cancel.DialogResult = DialogResult.Cancel
-        cancel.Location = Point(340, 134)
-        cancel.Size = Size(82, 28)
-        for control in (label, accept, cancel):
-            dialog.Controls.Add(control)
-        dialog.AcceptButton, dialog.CancelButton = accept, cancel
+        label.Text = text
+        label.Location = Point(*layout["label"][:2])
+        label.Size = Size(*layout["label"][2:])
+        dialog.Controls.Add(label)
+        x = layout["client"][0] - layout["pad"]
+        made = []
+        for caption, result in reversed(buttons):
+            button = Button()
+            button.Text = caption
+            button.DialogResult = result
+            button.Size = Size(*layout["button"])
+            x -= layout["button"][0]
+            button.Location = Point(x, layout["button_y"])
+            x -= layout["gap"]
+            dialog.Controls.Add(button)
+            made.insert(0, button)
+        dialog.AcceptButton = made[0]
+        dialog.CancelButton = made[-1]
         return dialog.ShowDialog() == DialogResult.OK
     finally:
         dialog.Dispose()
+        font.Dispose()
+
+
+def windows_consent_dialog(app: str, provider: str, scale: float | None = None) -> bool:
+    """Modal 确认/取消 dialog (UI thread only). True only on 确认."""
+    from System.Windows.Forms import DialogResult
+    return _windows_dialog(consent_text(app, provider), [("确认", DialogResult.OK), ("取消", DialogResult.Cancel)], scale)
+
+
+def windows_notice_dialog(text: str, scale: float | None = None) -> None:
+    from System.Windows.Forms import DialogResult
+    _windows_dialog(text, [("知道了", DialogResult.Cancel)], scale)
 
 
 class CodexUsageSurface:
@@ -974,7 +1028,9 @@ class CodexUsageSurface:
         self.rescan = rescan or (lambda: None)
         # Session-based quota reading consent: dialog injectable for tests.
         self.save_consent = save_consent
-        self.confirm_consent = confirm_consent or windows_consent_dialog
+        self.confirm_consent = confirm_consent or (
+            lambda app, provider: windows_consent_dialog(app, provider, getattr(self, "_scale", None)))
+        self.notify_blocked = lambda text: windows_notice_dialog(text, getattr(self, "_scale", None))
         self._extra_columns: list = []
         self.open_settings, self.refresh = open_settings, refresh
         self.open_home = open_home or open_settings
@@ -1016,6 +1072,18 @@ class CodexUsageSurface:
         shown with its local-only status."""
         spec = self._consent_spec(provider_id)
         if spec is None or self.save_consent is None or self.has_session_consent(provider_id):
+            return False
+        try:
+            states = (self.providers() or {}).get("providers") or {}
+        except Exception:
+            states = {}
+        blocked = consent_precheck(states.get(provider_id) if isinstance(states, dict) else None,
+                                   spec.session_app or spec.name)
+        if blocked:
+            try:
+                self.notify_blocked(blocked)
+            except Exception:
+                logging.getLogger("vram_radar").warning("session consent notice failed")
             return False
         try:
             accepted = self.confirm_consent(spec.session_app or spec.name, spec.session_server or spec.name) is True
