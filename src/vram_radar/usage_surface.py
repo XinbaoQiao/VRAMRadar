@@ -329,7 +329,10 @@ class TaskbarLayout:
         found = self._read(taskbar_handle) if taskbar_handle and self._load() else {}
         found = exclude_rect(found, exclude)
         if usable_layout(found) and self.trim is not None:
-            found = self.trim(found, exclude)
+            try:
+                found = self.trim(found, exclude)
+            except Exception as exc:  # worker thread: never die silently mid-update
+                logging.getLogger("vram_radar").info("widget trim failed (%s)", type(exc).__name__)
         if usable_layout(found):
             self._good_key, self._good, self.failures = key, found, 0
             self._elements = found
@@ -930,6 +933,16 @@ CONSENT_ETA_SECONDS = 5   # measured 1.0-1.8 s (Grok/Kimi, 10-02); margin for sl
 # The strip shows "查询中" for a just-allowed provider until its first
 # session result arrives (or this many seconds pass).
 PENDING_TIMEOUT = 60
+
+
+# Menu footers stay shorter than the rows they explain: a dropdown is as wide
+# as its widest item, so a long footer stretched every row (empty gap between
+# "Grok" and its state).
+AUTO_READ_FOOTER = ("只读查询，登录信息不保存", "Read-only · login never stored")
+
+
+def limit_menu_text(limit: int, language: str = "zh-CN") -> str:
+    return f"Up to {limit} shown" if language == "en" else f"最多显示 {limit} 个"
 
 
 def limit_hint_text(limit: int, language: str = "zh-CN") -> str:
@@ -1582,7 +1595,7 @@ class CodexUsageSurface:
             try:
                 text = limit_hint_text(MAX_SELECTED, self.language())
                 self._limit_item.Visible = True
-                self._limit_item.Text = text
+                self._limit_item.Text = limit_menu_text(MAX_SELECTED, self.language())
                 if form.Visible:
                     self._toast(text, "", "")
             except Exception:
@@ -1630,7 +1643,7 @@ class CodexUsageSurface:
                 item.Click += lambda _s, _e, pid=spec.id: self._consent_clicked(pid)
                 self._consent_items[spec.id] = (item, spec)
         self._consent_menu.DropDownItems.Add(ToolStripSeparator())
-        self._consent_hint = self._consent_menu.DropDownItems.Add("点击开启或关闭 · 只读查询，登录信息不保存")
+        self._consent_hint = self._consent_menu.DropDownItems.Add(AUTO_READ_FOOTER[0])
         self._consent_hint.Enabled = False
         self._consent_menu.Visible = bool(self._consent_items)
         self._item_icons = {}
@@ -1813,8 +1826,7 @@ class CodexUsageSurface:
             self._models_menu.Text = "Models" if english else "显示模型"
             self._rescan_item.Text = "Detect again" if english else "重新检测"
             self._consent_menu.Text = "Read quota automatically" if english else "自动读取额度"
-            self._consent_hint.Text = ("Click to turn on/off · read-only, login never stored" if english
-                                       else "点击开启或关闭 · 只读查询，登录信息不保存")
+            self._consent_hint.Text = AUTO_READ_FOOTER[1 if english else 0]
             consented = overview.get("session_consent") or ()
             icon_px = round(18*menu_scale)
             def set_icon(item, spec, pstate):
@@ -1847,7 +1859,7 @@ class CodexUsageSurface:
                 # explain itself (hint) instead of silently doing nothing.
                 item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
             self._limit_item.Visible = full
-            self._limit_item.Text = limit_hint_text(MAX_SELECTED, language)
+            self._limit_item.Text = limit_menu_text(MAX_SELECTED, language)
             self._background_title.Text = "Background" if english else "背景"
             self._display_menu.Text = ("Display options" if language == "en" else "显示设置") + (
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
@@ -2207,6 +2219,11 @@ class CodexUsageSurface:
                 if getattr(self, "_catcher", None) is not None:
                     self._catcher.Close()
                     self._catcher.Dispose()
+                try:
+                    from .ui_dialogs import close_toast
+                    close_toast()
+                except Exception:
+                    pass
                 for resource in (getattr(self, "_tooltip", None), getattr(self, "_menu", None), getattr(self, "_window_menu", None)):
                     if resource is not None:
                         resource.Dispose()

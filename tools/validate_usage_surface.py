@@ -139,7 +139,8 @@ def main() -> int:
                     surface._menu.Close()
                 invoke(right_click_check)
                 with patch("vram_radar.usage_surface.windows_surface_obscured", return_value=True):
-                    invoke(tick)
+                    for _ in range(2):  # hides after 2 obscured ticks (debounced against flicker)
+                        invoke(tick)
                     assertions["fullscreen_or_hidden_taskbar_hides_widget"] = not surface.form.Visible
                 with patch("vram_radar.usage_surface.windows_surface_obscured", return_value=False):
                     invoke(tick)
@@ -308,7 +309,8 @@ def main() -> int:
             text = captured_text[0]
             assertions["stale_quota_not_shown_as_current"] = "68%" not in text and "—" in text
             state["enabled"] = False
-            invoke(tick)
+            for _ in range(3):  # removed after 3 inactive ticks (debounced)
+                invoke(tick)
             assertions["disable_removes_surface"] = not surface.active and (
                 not surface.form.Visible if sys.platform == "win32" else surface.status_item is None)
             state["enabled"] = True

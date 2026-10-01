@@ -54,13 +54,10 @@ def show_macos_notification(title: str, message: str) -> bool:
         return False
 
 
-class _WindowRect(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
+# The shared ctypes.windll.user32 gets GetWindowRect/MonitorFromRect argtypes
+# (POINTER(wintypes.RECT)) from other modules; a private RECT class then fails
+# with ArgumentError ("failed to recover an off-screen window").  Use the real one.
+_WindowRect = wintypes.RECT
 
 
 def _native_window_handle(window: Any) -> int:

@@ -110,5 +110,18 @@ class FetchNowTests(unittest.TestCase):
             grok.CACHE.next_at, grok.CACHE.failures = 0.0, 0
 
 
+class MenuWidthTests(unittest.TestCase):
+    def test_footers_do_not_stretch_rows(self):
+        from vram_radar.usage_surface import AUTO_READ_FOOTER, limit_menu_text
+        # widest auto-read row is about "Kimi" + gap + "已开启 · 需重新登录" (~15 CJK-width chars)
+        self.assertLessEqual(len(AUTO_READ_FOOTER[0]), 12)
+        self.assertEqual(limit_menu_text(4), "最多显示 4 个")
+        self.assertLessEqual(len(limit_menu_text(4)), len("Qwen 通义") + len("仅有旧数据"))
+
+    def test_tray_rect_matches_shared_user32_argtypes(self):
+        from ctypes import wintypes
+        from vram_radar import tray
+        self.assertIs(tray._WindowRect, wintypes.RECT)
+
 if __name__ == "__main__":
     unittest.main()

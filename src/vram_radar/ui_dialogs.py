@@ -197,11 +197,12 @@ def _exe_icon(path: str, px: int):
         return None
     try:
         icon = Icon.FromHandle(IntPtr(handle.value))
-        bitmap = Bitmap(icon.ToBitmap())
-        icon.Dispose()
-        return bitmap
+        try:
+            return icon.ToBitmap()   # an independent 32-bit ARGB copy
+        finally:
+            icon.Dispose()           # FromHandle does not own the HICON...
     finally:
-        user32.DestroyIcon(handle)
+        user32.DestroyIcon(handle)   # ...so free it here (no GDI/USER leak)
 
 
 def _file_icon(path: str, px: int):
@@ -210,7 +211,13 @@ def _file_icon(path: str, px: int):
     if path.lower().endswith(".ico"):
         icon = Icon(path, Size(px, px))
         try:
-            return Bitmap(icon.ToBitmap(), Size(px, px))
+            frame = icon.ToBitmap()
+            if frame.Width == px and frame.Height == px:
+                return frame
+            try:
+                return Bitmap(frame, Size(px, px))
+            finally:
+                frame.Dispose()
         finally:
             icon.Dispose()
     source = Bitmap(path)
@@ -460,8 +467,8 @@ def show_dialog(spec: dict, *, scale: float | None = None, icon_path: str | None
                 dark: bool | None = None, accent=None) -> str:
     """Modal; returns the chosen button id (Esc / close = ``spec["cancel"]``)."""
     import ctypes
-    from System.Drawing import Point, Size
-    from System.Windows.Forms import (AutoScaleMode, Cursor, Form, FormBorderStyle, FormStartPosition,
+    from System.Drawing import Size
+    from System.Windows.Forms import (AutoScaleMode, Form, FormBorderStyle, FormStartPosition,
                                       ImageLayout, Keys, MouseButtons)
     scale = scale or system_scale()
     dark = system_dark() if dark is None else dark
