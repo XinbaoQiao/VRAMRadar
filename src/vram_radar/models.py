@@ -716,6 +716,8 @@ class Profile:
     usage_session_consent: tuple[str, ...] = ()
     # Taskbar strip background: see usage_surface.BACKGROUND_STYLES.
     usage_background: str = "transparent"
+    # App icons left of each name on the strip (off = the original look).
+    usage_icons: bool = False
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -945,6 +947,7 @@ class Profile:
             usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
             usage_session_consent=normalize_usage_session_consent(raw.get("usage_session_consent", {})),
             usage_background=normalize_usage_background(raw.get("usage_background", "transparent")),
+            usage_icons=raw.get("usage_icons") is True,
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -975,6 +978,7 @@ class Profile:
             "usage_providers": list(self.usage_providers),
             "usage_session_consent": {provider_id: True for provider_id in self.usage_session_consent},
             "usage_background": self.usage_background,
+            "usage_icons": self.usage_icons,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],

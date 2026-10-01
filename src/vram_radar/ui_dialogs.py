@@ -141,6 +141,17 @@ def system_dark() -> bool:
         return False
 
 
+def taskbar_light() -> bool:
+    """Taskbar/shell theme (SystemUsesLightTheme), which can differ from apps'."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            return int(winreg.QueryValueEx(key, "SystemUsesLightTheme")[0]) == 1
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def system_accent():
     try:
         import winreg
@@ -166,11 +177,61 @@ _ICONS: dict = {}
 ICON_EXTENSIONS = (".ico", ".png")
 
 
-def icon_candidates(path: str) -> list[str]:
-    """Where an app's icon may live: the exe itself, then common resource
-    files next to it (Electron/Tauri apps ship resources\\icon.ico/png)."""
+def pick_msix_asset(names, base: str, px: int, light: bool = False) -> str | None:
+    """Best file for an MSIX logo ``base`` (e.g. "Square44x44Logo.png") at
+    px: the smallest ``targetsize-N`` >= px (unplated, matching the
+    taskbar theme), else the largest, else ``scale-*``, else the base."""
+    import re
+    stem, ext = os.path.splitext(base)
+    sized = []
+    for name in names:
+        m = re.fullmatch(re.escape(stem) + r"\.targetsize-(\d+)(_altform-(light)?unplated)?" + re.escape(ext), name, re.I)
+        if m:
+            unplated = bool(m.group(2))
+            themed = unplated and (bool(m.group(3)) == bool(light))
+            sized.append((int(m.group(1)), themed, unplated, name))
+    if sized:
+        best = max(t[1:3] for t in sized)
+        pool = [t for t in sized if t[1:3] == best]
+        bigger = [t for t in pool if t[0] >= px]
+        return (min(bigger) if bigger else max(pool))[3]
+    scaled = sorted((name for name in names if re.fullmatch(re.escape(stem) + r"\.scale-\d+" + re.escape(ext), name, re.I)),
+                    key=lambda n: int(re.findall(r"scale-(\d+)", n)[0]))
+    if scaled:
+        return scaled[-1]
+    return base if base in names else None
+
+
+def msix_logo(folder: str, px: int, light: bool = False) -> str | None:
+    """App logo file of an MSIX package folder (AppxManifest Square44x44Logo)."""
+    import re
+    try:
+        with open(os.path.join(folder, "AppxManifest.xml"), encoding="utf-8", errors="replace") as handle:
+            manifest = handle.read(400_000)
+    except OSError:
+        return None
+    m = re.search(r'Square44x44Logo="([^"]+)"', manifest) or re.search(r"<Logo>([^<]+)</Logo>", manifest)
+    if not m:
+        return None
+    rel = m.group(1).replace("/", os.sep).replace("\\", os.sep)
+    directory = os.path.join(folder, os.path.dirname(rel))
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    chosen = pick_msix_asset(names, os.path.basename(rel), px, light)
+    return os.path.join(directory, chosen) if chosen else None
+
+
+def icon_candidates(path: str, px: int = 32) -> list[str]:
+    """Where an app's icon may live: an MSIX package's logo, the exe itself,
+    then common resource files next to it (Electron/Tauri apps ship
+    resources\\icon.ico/png)."""
     if not path:
         return []
+    if os.path.isdir(path):
+        logo = msix_logo(path, px, light=taskbar_light())
+        return [logo] if logo else []
     folder = os.path.dirname(path)
     out = [path] if path.lower().endswith((".exe", ".ico", ".png")) else []
     for sub in ("", "resources", os.path.join("resources", "app"), "assets"):
@@ -288,7 +349,7 @@ def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     if key in _ICONS:
         return _ICONS[key]
     bitmap = None
-    for candidate in icon_candidates(str(path or "")):
+    for candidate in icon_candidates(str(path or ""), int(px)):
         try:
             if not os.path.isfile(candidate):
                 continue

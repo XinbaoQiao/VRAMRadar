@@ -145,5 +145,44 @@ class MenuTierTests(unittest.TestCase):
         self.assertEqual(tiered(["grok", "kimi"], set(), {}), rows)
         self.assertEqual(tiered(["grok", "kimi"], {"kimi"}, {"grok": {"installed": False}}), [(0, "kimi"), (2, "grok")])
 
+
+class StripIconTests(unittest.TestCase):
+    def test_profile_default_off_and_round_trip(self):
+        from vram_radar.models import Profile
+        raw = Profile.empty("new").to_dict()
+        self.assertIs(raw["usage_icons"], False)
+        raw.pop("usage_icons")
+        self.assertIs(Profile.from_dict(raw).usage_icons, False)   # older profiles
+        raw["usage_icons"] = "yes"                                 # malformed -> off
+        self.assertIs(Profile.from_dict(raw).usage_icons, False)
+        raw["usage_icons"] = True
+        self.assertIs(Profile.from_dict(Profile.from_dict(raw).to_dict()).usage_icons, True)
+
+    def test_msix_asset_choice(self):
+        names = ["Square44x44Logo.png", "Square44x44Logo.scale-200.png",
+                 "Square44x44Logo.targetsize-16_altform-unplated.png", "Square44x44Logo.targetsize-16_altform-lightunplated.png",
+                 "Square44x44Logo.targetsize-24_altform-unplated.png", "Square44x44Logo.targetsize-24_altform-lightunplated.png",
+                 "Square44x44Logo.targetsize-48_altform-lightunplated.png"]
+        self.assertEqual(ui.pick_msix_asset(names, "Square44x44Logo.png", 24, light=True),
+                         "Square44x44Logo.targetsize-24_altform-lightunplated.png")
+        self.assertEqual(ui.pick_msix_asset(names, "Square44x44Logo.png", 20, light=False),
+                         "Square44x44Logo.targetsize-24_altform-unplated.png")
+        self.assertEqual(ui.pick_msix_asset(names, "Square44x44Logo.png", 64, light=True),
+                         "Square44x44Logo.targetsize-48_altform-lightunplated.png")
+        self.assertEqual(ui.pick_msix_asset(names[:2], "Square44x44Logo.png", 24), "Square44x44Logo.scale-200.png")
+        self.assertIsNone(ui.pick_msix_asset([], "Square44x44Logo.png", 24))
+
+    def test_package_folder_uses_manifest_logo(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            os.makedirs(os.path.join(folder, "assets"))
+            with open(os.path.join(folder, "AppxManifest.xml"), "w", encoding="utf-8") as f:
+                f.write('<Package><uap:VisualElements Square44x44Logo="assets/Square44x44Logo.png"/></Package>')
+            for name in ("Square44x44Logo.png", "Square44x44Logo.targetsize-32_altform-unplated.png"):
+                open(os.path.join(folder, "assets", name), "wb").close()
+            found = ui.icon_candidates(folder, 32)
+            self.assertEqual(len(found), 1)
+            self.assertTrue(found[0].endswith("Square44x44Logo.targetsize-32_altform-unplated.png"))
+
 if __name__ == "__main__":
     unittest.main()

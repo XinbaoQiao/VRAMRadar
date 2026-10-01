@@ -1602,6 +1602,13 @@ class CodexUsageSurface:
             item = self._display_menu.DropDownItems.Add(zh)
             item.Click += lambda _s, _e, v=style: save_choice("usage_background", v)
             self._display_choices.append((item, "usage_background", style, zh, en))
+        self._display_menu.DropDownItems.Add(ToolStripSeparator())
+        self._icons_title = self._display_menu.DropDownItems.Add("图标")
+        self._icons_title.Enabled = False
+        for value, zh, en in ((True, "显示图标", "Show icons"), (False, "不显示", "Hide icons")):
+            item = self._display_menu.DropDownItems.Add(zh)
+            item.Click += lambda _s, _e, v=value: save_choice("usage_icons", v)
+            self._display_choices.append((item, "usage_icons", value, zh, en))
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
         # Multi-provider picker (multi-select, persisted in the Profile).
@@ -1931,9 +1938,11 @@ class CodexUsageSurface:
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
             style = options.get("usage_background")
             style = style if style in BACKGROUND_STYLES else "transparent"
+            show_icons = options.get("usage_icons") is True
+            self._icons_title.Text = "Icons" if english else "图标"
             for item, key, value, zh, en in self._display_choices:
                 item.Text = en if language == "en" else zh
-                item.Checked = style == value
+                item.Checked = (style == value) if key == "usage_background" else (show_icons == value)
             now_mono = time.monotonic()
             theme = theme_settings()
             if (theme != getattr(self, "_theme", None) or style != getattr(self, "_style", None)
@@ -2044,7 +2053,9 @@ class CodexUsageSurface:
             for label in text_controls:
                 label.Visible = bool(rows) and not multi
             cells = []
+            cell_ids = []
             if rows and multi:
+                cell_ids.append("codex")
                 countdown = reading["countdown"]
                 cells.append(("Codex", f"{reading['value']} {countdown}".strip() if countdown != "—" else reading["value"],
                               quota_color))
@@ -2070,6 +2081,7 @@ class CodexUsageSurface:
                 color = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
                          warning_color if info["warning"] else fg)
                 cells.append((info["name"], value, color))
+                cell_ids.append(spec.id)
             while len(self._extra_columns) < len(cells):
                 make_column()
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
@@ -2103,7 +2115,10 @@ class CodexUsageSurface:
                                                      (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
                     gap_area = left_gap(geometry[0], elements, scale(6)) if elements else None
                     available = gap_area[1] - gap_area[0] if gap_area else None
-                fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale)
+                icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
+                    if show_icons else None
+                fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale,
+                           tuple(icon_paths) if icon_paths else None)
                 if fit_key != self._fit_key:
                     self._fit_key = fit_key
                     for factor, level in FIT_PLAN:
@@ -2120,6 +2135,24 @@ class CodexUsageSurface:
                                 top.Font = fonts[0]
                             if bottom.Font is not fonts[1]:
                                 bottom.Font = fonts[1]
+                        # Optional app icon left of each name: text-height,
+                        # vertically centred, drawn by the label (Padding
+                        # keeps the name clear of it; widths include it).
+                        icon_px = max(10, round(scale(16) * factor))
+                        for index, (name_label, _) in enumerate(used):
+                            if icon_paths:
+                                path, pid = icon_paths[index]
+                                try:
+                                    from .ui_dialogs import provider_icon
+                                    image = provider_icon(path, icon_px, cells[index][0])
+                                except Exception:
+                                    image = None
+                            else:
+                                image = None
+                            if name_label.Image is not image:
+                                name_label.Image = image
+                                name_label.ImageAlign = ContentAlignment.MiddleLeft
+                                name_label.Padding = Padding(icon_px + scale(4 * factor), 0, 0, 0) if image else Padding(0)
                         x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
                         for start in range(0, len(used), 2):
                             group = used[start:start+2]
