@@ -926,7 +926,7 @@ def concise_tooltip(codex_rows, provider_rows, language: str = "zh-CN") -> str:
 
 # Seconds from 允许 to the value on the strip, as measured on the user's PC
 # (immediate fetch, see ProviderMonitor.fetch_now); stated in the dialog.
-CONSENT_ETA_SECONDS = 10
+CONSENT_ETA_SECONDS = 5   # measured 1.0-1.8 s (Grok/Kimi, 10-02); margin for slow networks
 # The strip shows "查询中" for a just-allowed provider until its first
 # session result arrives (or this many seconds pass).
 PENDING_TIMEOUT = 60
