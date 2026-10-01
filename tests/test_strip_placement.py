@@ -132,6 +132,7 @@ class WidestWeatherTests(unittest.TestCase):
         layout = TaskbarLayout(trim=None)
         own = (131, 1538, 350, 1589)
         self.assertEqual(self.run_reading(layout, 150, own=None, now=0), 150)    # "局部多云"
+        self.assertEqual(self.run_reading(layout, 150, own=None, now=5), 150)    # confirmed -> remembered
         self.assertEqual(self.run_reading(layout, 113, own=own, now=10), 150)    # narrower: keep widest
         self.assertEqual(self.run_reading(layout, 113, own=own, now=700), 113)   # old reading expired
 
@@ -140,7 +141,16 @@ class WidestWeatherTests(unittest.TestCase):
         own = (121, 1538, 342, 1589)
         self.assertEqual(self.run_reading(layout, 121, own=own, now=0), 237)     # cannot see past the strip
         self.assertEqual(self.run_reading(layout, 150, own=(255, 1538, 476, 1589), now=5), 150)  # real width
-        self.assertEqual(layout._weather_seen, [(5, 150)])
+        self.assertEqual(self.run_reading(layout, 150, own=(168, 1538, 389, 1589), now=10), 150)
+        self.assertEqual(layout._weather_seen, [(10, 150)])
+
+    def test_single_or_near_strip_readings_are_not_remembered(self):
+        layout = TaskbarLayout(trim=None)
+        self.assertEqual(self.run_reading(layout, 120, own=None, now=0), 120)                    # once: used, not kept
+        self.assertEqual(self.run_reading(layout, 127, own=(135, 1538, 368, 1589), now=5), 127)  # 8 px from the strip
+        self.assertEqual(self.run_reading(layout, 127, own=(135, 1538, 368, 1589), now=10), 127)
+        self.assertEqual(layout._weather_seen, [])
+        self.assertEqual(self.run_reading(layout, 113, own=(145, 1538, 378, 1589), now=15), 113)
 
 
 class StripMarginTests(unittest.TestCase):

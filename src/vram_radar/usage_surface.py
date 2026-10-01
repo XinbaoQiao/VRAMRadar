@@ -455,7 +455,14 @@ class TaskbarLayout:
         if occluded:
             right = raw_widgets[2]
         elif right < raw_widgets[2]:
-            self._weather_seen.append((now, right))
+            # Remember a width only when two readings in a row agree and it
+            # is not right up against our own strip (a reading taken while the
+            # strip was moving could include its pixels).  Unconfirmed wider
+            # readings still apply now (safe side), they just are not kept.
+            near_own = bool(own) and own[0] - right <= max(6, round((raw_widgets[3] - raw_widgets[1]) * 0.2))
+            pending, self._weather_pending = getattr(self, "_weather_pending", None), right
+            if not near_own and pending is not None and abs(pending - right) <= 1:
+                self._weather_seen.append((now, right))
         self._weather_seen = [(t, r) for t, r in self._weather_seen if now - t <= self.WEATHER_WINDOW][-200:]
         if self._weather_seen:
             right = max(right, *(r for _, r in self._weather_seen))
