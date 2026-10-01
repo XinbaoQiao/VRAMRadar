@@ -136,7 +136,8 @@ class ProviderProbeTests(unittest.TestCase):
             self.assertTrue(state["signed_in"])
             self.assertFalse(state["stale"])
             self.assertEqual(state["headline"]["en"], "Exhausted")  # sendBlocked
-            self.assertTrue(state["subline"]["en"].endswith("h"))
+            self.assertEqual(state["quota"]["en"], "Exhausted")   # used up is a known quota
+            self.assertIn("reset_at", state)
             self.assertIn("Membership level 20 (member)", [f["en"] for f in state["facts"]])
 
     def test_kimi_stale_and_signed_out(self):

@@ -206,6 +206,7 @@ def probe(env: Environment) -> dict:
         state["low"] = total_zero
         headline, brief = balance_labels(balance.get("wallets", []), shown)
         state["headline"], state["brief"] = headline, brief
+        state["quota"] = headline   # balance; DeepSeek has no reset period
         state["subline"] = pair(f"{format_tokens(total)} tok", f"{format_tokens(total)} tok")
         return state
     reason = (balance or {}).get("status")

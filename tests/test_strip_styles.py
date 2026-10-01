@@ -25,7 +25,10 @@ class Tooltip(unittest.TestCase):
                                 {"id": "kimi", "name": "Kimi"}, now=1000)
         tip = concise_tooltip(rows, [deepseek, kimi])
         lines = tip.split("\n")
-        self.assertEqual(lines, ["Codex  5h 85% · 2.3h 后重置 | 7d 60% · 88.0h 后重置",
+        from vram_radar.reset_format import reset_full
+        self.assertEqual(lines[0], "Codex  5h 85% \u00b7 " + reset_full(1000 + 2.3 * 3600, False)
+                         + " | 7d 60% \u00b7 " + reset_full(1000 + 88 * 3600, False))
+        self.assertEqual(lines[1:], [
                                  "DeepSeek  ¥6.00", "Kimi  额度未用尽 · 免费版（记录 09-03）"])
         self.assertNotIn("1.2.3", tip)
         self.assertNotIn("C:\\", tip)
@@ -33,7 +36,9 @@ class Tooltip(unittest.TestCase):
     def test_future_reset_is_appended(self):
         info = provider_reading({"installed": True, "headline": {"zh": "可用", "en": "OK"}, "reset_at": 1000 + 7200,
                                  "facts": []}, {"id": "kimi", "name": "Kimi"}, now=1000)
-        self.assertEqual(info["brief"], "Kimi  可用 · 2.0h 后重置")
+        from vram_radar.reset_format import reset_full
+        self.assertEqual(info["brief"], info["brief"].split(" \u00b7 ")[0] + " \u00b7 " + reset_full(1000 + 7200, False))
+        self.assertEqual((info["quota"], info["reset"]), ("", "2.0h"))
 
     def test_codex_error_line(self):
         self.assertEqual(codex_brief(quota_lines({"enabled": True, "state": "error", "code": "login_required"})),

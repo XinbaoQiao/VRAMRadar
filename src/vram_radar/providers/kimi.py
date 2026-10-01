@@ -95,15 +95,6 @@ def _usable_last(now: float) -> dict | None:
     return reading
 
 
-def _hours_label(reset, now):
-    if not isinstance(reset, (int, float)) or reset <= now:
-        return None
-    hours = (reset - now) / 3600
-    if hours >= 100:
-        return f"{hours:.0f}h"
-    return f"{hours:.1f}h" if hours >= 0.1 else "<0.1h"
-
-
 def _show_reading(state: dict, reading: dict, now: float, *, read_at: float | None = None) -> dict:
     """Strip: the bare usable amount -- time until the allowance resets (free
     and paid plans alike), 已用尽 when used up.  Tooltip: usage + reset."""
@@ -111,23 +102,19 @@ def _show_reading(state: dict, reading: dict, now: float, *, read_at: float | No
     exhausted = (bool(reading.get("exhausted")) or bool(reading.get("overdrawn"))
                  or bool(reading.get("send_blocked")) or (isinstance(used, (int, float)) and used >= 100))
     reset = reading.get("reset_at")
-    hours = _hours_label(reset, now)
     if exhausted:
         state["headline"] = pair("已用尽", "Used up")
     elif reading.get("active") is False and not reading.get("is_member") and used is None:
         state["headline"] = pair("无额度", "None")
-    elif hours:
-        state["headline"] = pair(hours, hours)
     elif isinstance(used, (int, float)):
         state["headline"] = pair(f"{100 - used:.0f}%", f"{100 - used:.0f}%")
     else:
         state["headline"] = pair("可用", "OK")
+    if exhausted or isinstance(used, (int, float)) or state["headline"].get("en") == "None":
+        state["quota"] = state["headline"]   # remaining share / used up / none
     brief_zh = f"已用 {used:.0f}%" if isinstance(used, (int, float)) else ("已用尽" if exhausted else "可用")
     brief_en = f"{used:.0f}% used" if isinstance(used, (int, float)) else ("used up" if exhausted else "available")
     if isinstance(reset, (int, float)) and reset > now:
-        stamp = time.strftime("%m-%d %H:%M", time.localtime(reset))
-        brief_zh += f" · {stamp} 重置"
-        brief_en += f" · resets {stamp}"
         state["reset_at"] = reset
     if read_at is None:
         state["subline"] = pair("自动读取", "auto")
@@ -321,14 +308,10 @@ def probe(env: Environment, *, now: float | None = None) -> dict:
         state["facts"].append(pair(f"数据来自 Kimi 自身日志，记录于 {when}" + ("（Kimi 运行时才会刷新）" if stale else ""),
                                    f"From Kimi's own log, recorded {when}" + (" (refreshes only while Kimi runs)" if stale else "")))
         reset = state.get("reset_at")
+        if exhausted:
+            state["quota"] = state["headline"]
         if reset and reset > now and not stale:
-            # Minimal strip: the bare time until the allowance resets.
-            label = _hours_label(reset, now)
-            if exhausted:
-                state["subline"] = pair(label, label)   # 已用尽 + time until it resets
-            else:
-                state["headline"] = pair(label, label)
-                state["subline"] = running_pair(state["running"])
+            state["subline"] = running_pair(state["running"])
         elif stale:
             state["subline"] = pair(f"记录 {time.strftime('%m-%d', time.localtime(as_of))}" if as_of else "旧记录",
                                     f"As of {time.strftime('%m-%d', time.localtime(as_of))}" if as_of else "Old data")

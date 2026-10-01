@@ -47,7 +47,8 @@ def ink_box(buf, stride, bg, rect, threshold=40):
 DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 THEMES = {"light": ((238, 228, 214), (90, 90, 90), (26, 26, 26), (160, 62, 96)),
           "dark": ((32, 32, 32), (180, 180, 180), (245, 245, 245), (227, 143, 163))}
-CELLS = [("Codex", "0% 47.9h"), ("Grok", "100%"), ("DeepSeek", "¥6"), ("Kimi", "168.0h")]
+# (name, quota, reset): both items, quota only (DeepSeek), widest resets.
+CELLS = [("Codex", "0%", "47.6h"), ("Grok", "100%", "3.2d"), ("DeepSeek", "¥6", ""), ("Kimi", "80%", "33.9h")]
 def install_paths():
     """Real install paths from the providers' own detection (icons as shipped)."""
     import importlib
@@ -100,17 +101,19 @@ def run(save=None):
                     name_font = Font("Segoe UI", max(1, round(scale(12) * factor)), FontStyle.Regular, GraphicsUnit.Pixel)
                     value_font = Font("Segoe UI", max(1, round(scale(13) * factor)), FontStyle.Bold, GraphicsUnit.Pixel)
                     used = []
-                    for idx, (name, value) in enumerate(CELLS):
+                    for idx, (name, value, reset) in enumerate(CELLS):
                         pair = []
-                        for font, text, fg in ((name_font, name, name_fg), (value_font, compact_value(value, level),
-                                                                           low_fg if idx == 0 else value_fg)):
+                        quota_fg = low_fg if idx == 0 else value_fg
+                        dim_fg = tuple(round(f * 0.7 + b * 0.3) for f, b in zip(quota_fg, bg))
+                        for font, text, fg in ((name_font, name, name_fg), (value_font, compact_value(value, level), quota_fg),
+                                               (value_font, reset if level < 1 else "", dim_fg)):
                             lab = Label(); lab.AutoSize = False; lab.Font = font
                             lab.TextAlign = ContentAlignment.MiddleLeft; lab.BackColor = Color.Transparent
-                            lab.ForeColor = Color.FromArgb(*fg); lab.Text = text
+                            lab.ForeColor = Color.FromArgb(*fg); lab.Text = text; lab.Visible = bool(text)
                             form.Controls.Add(lab); pair.append(lab)
                         used.append(tuple(pair))
                     px = strip_icon_px(strip_scale, factor)
-                    for name_label, _ in used:
+                    for name_label, *_ in used:
                         name = name_label.Text
                         image = None
                         if mode == "icons":
@@ -132,13 +135,24 @@ def run(save=None):
                     need = math.ceil(6 * display * factor) if mode == "icons" else 1
                     cells = []
                     rects = []
-                    for (name_label, value_label), (name, _) in zip(used, CELLS):
+                    for (name_label, value_label, reset_label), (name, *_) in zip(used, CELLS):
                         nr = (name_label.Left, name_label.Top, name_label.Right, name_label.Bottom)
                         vr = (value_label.Left, value_label.Top, value_label.Right, value_label.Bottom)
                         rects += [nr, vr]
                         ni = ink_columns(buf, stride, bg, nr, bmp.Height)
                         vi = ink_columns(buf, stride, bg, vr, bmp.Height)
                         gap = (min(vi) - max(ni) - 1) if ni and vi else None
+                        reset_gap = None
+                        if reset_label.Text:
+                            rr = (reset_label.Left, reset_label.Top, reset_label.Right, reset_label.Bottom)
+                            rects.append(rr)
+                            ri = ink_columns(buf, stride, bg, rr, bmp.Height)
+                            reset_gap = (min(ri) - max(vi) - 1) if ri and vi else None
+                            # Quota and reset stay two readable items (>= a thin space apart).
+                            if reset_gap is None or reset_gap < max(2, math.ceil(2 * display * factor)):
+                                failures.append(f"{key} {name}: quota/reset gap {reset_gap}")
+                            if reset_label.GetPreferredSize(Size(0, 0)).Width > reset_label.Width or (ri and max(ri) >= rr[2] - 1):
+                                failures.append(f"{key} {name}: reset clipped")
                         clipped = (value_label.GetPreferredSize(Size(0, 0)).Width > value_label.Width
                                    or (not name_label.Image and name_label.GetPreferredSize(Size(0, 0)).Width > name_label.Width)
                                    or (name_label.Image is not None and name_label.Image.Width > name_label.Width)
@@ -172,7 +186,7 @@ def run(save=None):
                                 cells_icon = None
                         else:
                             cells_icon = None
-                        cells.append({"cell": name, "gap": gap, "icon": cells_icon, "ink": [min(ni) if ni else None, max(ni) if ni else None,
+                        cells.append({"cell": name, "gap": gap, "reset_gap": reset_gap, "icon": cells_icon, "ink": [min(ni) if ni else None, max(ni) if ni else None,
                                                                         min(vi) if vi else None, max(vi) if vi else None]})
                         if gap is None or gap < need:
                             failures.append(f"{key} {name}: gap {gap} < {need}")
@@ -184,7 +198,7 @@ def run(save=None):
                         for b in rects[i + 1:]:
                             if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]:
                                 failures.append(f"{key}: overlap {a} {b}")
-                    col_gap = used[2][0].Left - max(used[0][1].Right, used[1][1].Right)
+                    col_gap = used[2][0].Left - max(c.Right for c in (*used[0][1:], *used[1][1:]) if c.Visible)
                     if col_gap < 1:
                         failures.append(f"{key}: columns touch ({col_gap})")
                     results.append({"case": key, "width": width, "column_gap": col_gap, "cells": cells})

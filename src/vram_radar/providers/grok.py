@@ -26,6 +26,8 @@ from __future__ import annotations
 import logging
 import time
 
+from ..reset_format import reset_full
+
 from . import grok_usage
 from .base import (Environment, base_state, detect_install, newest_mtime, pair, pid_alive, read_json,
                    running_pair, text)
@@ -72,6 +74,7 @@ def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict
     reset = (reading.get("reset_text") or "").strip()
     left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
     state["headline"] = pair(left, left)
+    state["quota"] = pair(left, left)
     state["subline"] = pair(f"读于 {stamp}", f"read {stamp}")
     state["brief"] = pair(f"已用 {value}" + (f" · {reset}" if reset else "") + f"（{stamp} 读取）",
                           f"{value} used" + (f" · {reset}" if reset else "") + f" (read {stamp})")
@@ -115,11 +118,14 @@ def _apply_session(state: dict, session: dict) -> dict:
     value = f"{used:.0f}%"
     reset_at = session.get("reset_at")
     reset_zh, reset_en = _reset_labels(reset_at)
+    if reset_zh:
+        state["reset_at"] = reset_at   # weekly nextResetTimestampUtc
     left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
     state["headline"] = pair(left, left)
+    state["quota"] = pair(left, left)
     state["subline"] = pair(reset_zh or "自动读取", reset_en or "auto")
-    brief_zh = f"已用 {value}" + (f" · {reset_zh}" if reset_zh else "")
-    brief_en = f"{value} used" + (f" · {reset_en}" if reset_en else "")
+    brief_zh = f"已用 {value}"
+    brief_en = f"{value} used"
     state["brief"] = pair(brief_zh, brief_en)
     state["low"] = used >= 90
     fetched = session.get("fetched_at")
@@ -140,8 +146,7 @@ def _apply_session(state: dict, session: dict) -> dict:
 def _reset_labels(reset_at) -> tuple[str, str]:
     if not isinstance(reset_at, (int, float)) or reset_at <= 0:
         return "", ""
-    stamp = time.strftime("%m-%d %H:%M", time.localtime(reset_at))
-    return f"{stamp} 重置", f"resets {stamp}"
+    return reset_full(reset_at, False), reset_full(reset_at, True)
 
 
 def probe(env: Environment) -> dict:

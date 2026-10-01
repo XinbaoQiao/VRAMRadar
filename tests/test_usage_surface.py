@@ -73,11 +73,11 @@ class QuotaSurfaceTests(unittest.TestCase):
         self.assertEqual((row["value"], row["percent"], row["countdown"]), ("68%", 68, "2.0h"))
         self.assertNotIn("time_percent", row)
         weekly = widget_reading(state, 1, now=1000)
-        self.assertEqual((weekly["value"], weekly["countdown"]), ("42%", "48.0h"))
-        self.assertEqual(widget_reading(state, 1, now=1000, time_format="hours")["countdown"], "48.0h")
-        self.assertEqual(widget_reading(state, 1, now=1000, time_format="decimal")["countdown"], "48.0h")
-        self.assertEqual(widget_reading(state, 1, language="en", now=1000)["countdown"], "48.0h")
-        self.assertEqual(widget_reading(state, 1, language="en", now=1000, time_format="hours")["countdown"], "48.0h")
+        self.assertEqual((weekly["value"], weekly["countdown"]), ("42%", "2.0d"))   # >= 48 h reads in days
+        self.assertEqual(widget_reading(state, 1, now=1000, time_format="hours")["countdown"], "2.0d")
+        self.assertEqual(widget_reading(state, 1, now=1000, time_format="decimal")["countdown"], "2.0d")
+        self.assertEqual(widget_reading(state, 1, language="en", now=1000)["countdown"], "2.0d")
+        self.assertEqual(widget_reading(state, 1, language="en", now=1000, time_format="hours")["countdown"], "2.0d")
         self.assertEqual(widget_reading(state, language="en", now=8000)["countdown"], "<0.1h")
 
     def test_reference_widget_unknown_or_stale_reads_as_status(self):
@@ -112,7 +112,7 @@ class QuotaSurfaceTests(unittest.TestCase):
         ]}, now=1000)
         self.assertEqual([row["label"] for row in rows], ["5h", "7d"])
         self.assertEqual([row["value"] for row in rows], ["68%", "9%"])
-        self.assertEqual([row["countdown"] for row in rows], ["2.0h", "48.0h"])
+        self.assertEqual([row["countdown"] for row in rows], ["2.0h", "2.0d"])
         self.assertTrue(rows[1]["low"])
 
     def test_disabled_has_no_surface_even_with_cached_windows(self):

@@ -202,7 +202,9 @@ class ApplyTests(unittest.TestCase):
                                                     "reset_at": 1760000000})
         self.assertEqual(state["headline"]["zh"], "34%")
         self.assertEqual(state["quota_source"], "session")
-        self.assertIn("重置", state["brief"]["zh"])
+        self.assertEqual(state["quota"]["zh"], "34%")
+        self.assertEqual(state["reset_at"], 1760000000)   # nextResetTimestampUtc
+        self.assertNotIn("\u91cd\u7f6e", state["brief"]["zh"])   # the reset is appended once, by provider_reading
         # A later screen reading does not clobber the consented session reading.
         kept = grok.overlay(state, None)
         self.assertEqual(kept["quota_source"], "session")

@@ -10,6 +10,8 @@ import time
 from typing import Callable
 import os
 
+from .reset_format import RESET_RE, reset_full, reset_short, strip_parts, valid_epoch
+
 # Alpha of the strip's hit-test window: WinForms maps Opacity to a byte
 # (int(opacity * 255)), so this is alpha 1/255 -- invisible, yet hit-testable
 # (only alpha 0 / colour-keyed pixels pass clicks through).
@@ -90,13 +92,14 @@ def quota_lines(state: dict, language: str = "zh-CN", *, now: float | None = Non
         elif expired:
             countdown = "Updating…" if english else "等待更新"
         else:
-            countdown = f"{(reset-now) / 3600:.1f}h" if reset-now >= 360 else "<0.1h"
+            countdown = reset_short(reset - now)
         value = window.get("remaining_percent")
         valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
                  and math.isfinite(value) and not expired and not state.get("stale")
                  and state.get("state") in {"ready", "loading"})
         percent = f"{max(0, min(100, value)):.0f}%" if valid else "—"
         rows.append({"label": duration, "value": percent, "countdown": countdown,
+                     "reset_at": reset if valid_reset and not expired else None,
                      "low": valid and value <= 10,
                      "detail": f"{window.get('name') or 'Codex'} · {duration} · {percent} · {countdown}"})
     if rows:
@@ -195,21 +198,32 @@ def set_name_cell(name_label, image, name: str, strip_scale: float, factor: floa
 
 
 def place_columns(used, strip_scale: float, factor: float) -> int:
-    """Lay out (name, value) label pairs, two rows per column; returns the
-    client width.  Icon cells reserve exactly the icon width and keep
-    ``icon_gap_px`` clear before the value; text cells use the tight gap."""
+    """Lay out (name, value[, reset]) label cells, two rows per column;
+    returns the client width.  Icon cells reserve exactly the icon width and
+    keep ``icon_gap_px`` clear before the value; text cells use the tight
+    gap.  A shown reset label sits right after its own value, a small gap
+    apart (quota only / reset only / both)."""
     from System.Drawing import Point, Size
     scale = lambda value: round(value * strip_scale)
     icon_px = strip_icon_px(strip_scale, factor)
-    x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
+    x, gap, inner, rgap = scale(7*factor), scale(10*factor), scale(4*factor), 0   # label padding already reads as a space
+    preferred = lambda label: label.GetPreferredSize(Size(0, 0)).Width
+
+    def widths(cell):
+        value, reset = cell[1], (cell[2] if len(cell) > 2 and cell[2].Text else None)
+        vw = preferred(value) if value.Text or reset is None else 0
+        rw = preferred(reset) if reset is not None else 0
+        return vw, rw
+
     for start in range(0, len(used), 2):
         group = used[start:start+2]
-        has_icon = any(n.Image is not None and not n.Text for n, _ in group)
-        name_w = max(icon_px if (n.Image is not None and not n.Text) else n.GetPreferredSize(Size(0, 0)).Width
-                     for n, _ in group)
+        has_icon = any(c[0].Image is not None and not c[0].Text for c in group)
+        name_w = max(icon_px if (c[0].Image is not None and not c[0].Text) else preferred(c[0]) for c in group)
         between = max(inner, icon_gap_px(strip_scale, factor)) if has_icon else inner
-        value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
-        for row, (name_label, value_label) in enumerate(group):
+        sizes = [widths(c) for c in group]
+        content_w = max(vw + (rgap if vw and rw else 0) + rw for vw, rw in sizes)
+        for row, (cell, (vw, rw)) in enumerate(zip(group, sizes)):
+            name_label, value_label = cell[0], cell[1]
             # Rows split the strip height exactly (scale(20)*2 can be 1 px
             # taller than scale(40), which clipped the lower row).
             total, top_h = scale(40), scale(40) // 2
@@ -217,11 +231,15 @@ def place_columns(used, strip_scale: float, factor: float) -> int:
                 y, row_h = (total - scale(20)) // 2, scale(20)
             else:
                 y, row_h = (0, top_h) if row == 0 else (top_h, total - top_h)
+            vx = x + name_w + between
             name_label.Size = Size(name_w, row_h)
-            value_label.Size = Size(value_w, row_h)
             name_label.Location = Point(x, y)
-            value_label.Location = Point(x + name_w + between, y)
-        x += name_w + between + value_w + gap
+            value_label.Size = Size(vw if rw else content_w, row_h)
+            value_label.Location = Point(vx, y)
+            if len(cell) > 2:
+                cell[2].Size = Size(rw, row_h)
+                cell[2].Location = Point(vx + vw + (rgap if vw else 0), y)
+        x += name_w + between + content_w + gap
     return x - gap + scale(7*factor)
 
 
@@ -792,7 +810,7 @@ def compact_value(value: str, level: int) -> str:
     2 also drops unit words ("已用 15%" -> "15%", "¥6.00" -> "¥6")."""
     text = str(value or "")
     if level >= 1:
-        text = re.sub(r"\s+<?\d+(?:\.\d)?h$", "", text)
+        text = re.sub(r"\s+<?\d+(?:\.\d)?[hd]$", "", text)
     if level >= 2:
         text = re.sub(r"^(?:已用|Used)\s*(\d+(?:\.\d+)?%)$", r"\1", text)
         text = re.sub(r"(\d+)\.00(?!\d)", r"\1", text)
@@ -978,7 +996,7 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
         countdown = "—"
     else:
         # Legacy saved format values remain readable but no longer alter display.
-        countdown = f"{left / 3600:.1f}h" if left >= 360 else "<0.1h"
+        countdown = reset_short(left)
     return {"value": row["value"], "percent": percent, "countdown": countdown,
             "remaining_seconds": left if not warning and left is not None and left > 0 else None,
             "warning": warning, "low": row["low"]}
@@ -1038,18 +1056,16 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
     # One short tooltip line: name + key quota/balance + reset (if any).
     brief = local(state.get("brief")) or headline
     reset = state.get("reset_at")
-    if (isinstance(reset, (int, float)) and math.isfinite(reset) and reset > now
-            and not state.get("stale")):
-        brief += (" · resets in " if english else " · ") + _hours(reset - now) + ("" if english else " 后重置")
-    elif subline and re.match(r"^(记录|As of|旧记录|Old data)", subline):
+    reset_ok = valid_epoch(reset) and reset > now
+    if reset_ok:
+        brief += " \u00b7 " + reset_full(reset, english)
+    if subline and re.match(r"^(记录|As of|旧记录|Old data)", subline):
         brief += f" ({subline})" if english else f"（{subline}）"
     return {"name": short, "value": headline, "countdown": subline or _provider_status(state, english),
+            "quota": local(state.get("quota")), "reset": reset_short(reset - now) if reset_ok else "",
+            "reset_full": reset_full(reset, english) if reset_ok else "",
             "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines),
             "brief": f"{name}  {brief}"}
-
-
-def _hours(seconds):
-    return f"{seconds / 3600:.1f}h" if seconds >= 360 else "<0.1h"
 
 
 def codex_brief(rows, language: str = "zh-CN") -> str:
@@ -1063,8 +1079,9 @@ def codex_brief(rows, language: str = "zh-CN") -> str:
     for row in rows:
         part = f"{row['label']} {row['value']}"
         countdown = row.get("countdown") or ""
-        if re.fullmatch(r"<?\d+(?:\.\d)?h", countdown):
-            part += (f" · resets in {countdown}" if english else f" · {countdown} 后重置")
+        full = reset_full(row.get("reset_at"), english) if RESET_RE.fullmatch(countdown) else ""
+        if full:
+            part += " \u00b7 " + full
         elif countdown:
             part += f" · {countdown}"
         parts.append(part)
@@ -1994,7 +2011,7 @@ class CodexUsageSurface:
 
         def make_column():
             pair = []
-            for font in (self._name_font, self._value_font):
+            for font in (self._name_font, self._value_font, self._value_font):
                 label = Label()
                 label.AutoSize = False
                 label.Font = font
@@ -2207,8 +2224,8 @@ class CodexUsageSurface:
                 old_cell_fonts = (self._name_font, self._value_font)
                 self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
                 self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
-                for top, bottom in self._extra_columns:
-                    top.Font, bottom.Font = self._name_font, self._value_font
+                for top, bottom, reset_label in self._extra_columns:
+                    top.Font, bottom.Font, reset_label.Font = self._name_font, self._value_font, self._value_font
                 old_fit = [font for pair in self._fit_fonts.values() for font in pair]
                 self._fit_fonts = {}
                 for old_font in (*old_fonts, *old_cell_fonts, *old_fit):
@@ -2263,8 +2280,12 @@ class CodexUsageSurface:
             if rows and multi:
                 cell_ids.append("codex")
                 countdown = reading["countdown"]
-                cells.append(("Codex", f"{reading['value']} {countdown}".strip() if countdown != "—" else reading["value"],
-                              quota_color))
+                if RESET_RE.fullmatch(countdown):
+                    value, reset_txt = reading["value"], countdown
+                else:
+                    value = f"{reading['value']} {countdown}".strip() if countdown != "—" else reading["value"]
+                    reset_txt = ""
+                cells.append(("Codex", value, reset_txt, quota_color))
             provider_rows = []
             fg = menu.ForeColor
             for spec in others:
@@ -2275,31 +2296,34 @@ class CodexUsageSurface:
                     pstate = provider_states.get(spec.id)
                     if still_pending(pstate, granted, time.time()):
                         info = {**info, "value": "Reading" if english else "查询中", "countdown": "",
-                                "low": False, "warning": False}
+                                "quota": "", "reset": "", "low": False, "warning": False}
                     else:
                         self._pending.pop(spec.id, None)
                         logging.getLogger("vram_radar").info(
                             "auto read %s: first result %.1f s after consent", spec.id, time.time() - granted)
                 provider_rows.append(info)
-                value = info["value"]
-                if re.fullmatch(r"<?\d+(?:\.\d)?h", info["countdown"] or ""):
-                    value = f"{value} {info['countdown']}"
+                value, reset_txt = strip_parts(info.get("quota", ""), info.get("reset", ""), info["value"])
                 color = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
                          warning_color if info["warning"] else fg)
-                cells.append((info["name"], value, color))
+                cells.append((info["name"], value, reset_txt, color))
                 cell_ids.append(spec.id)
             while len(self._extra_columns) < len(cells):
                 make_column()
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
                 (fg.R, fg.G, fg.B), self._palette[0])))
-            for (name_label, value_label), (name, value, color) in zip(self._extra_columns, cells):
+            dim = lambda c: Color.FromArgb(*(round(f*0.7 + b*0.3) for f, b in zip((c.R, c.G, c.B), self._palette[0])))
+            for (name_label, value_label, reset_label), (name, value, reset_txt, color) in zip(self._extra_columns, cells):
                 # 图标 mode: the icon replaces the name (tooltip keeps full names).
                 name_label.Text = "" if show_icons and multi and name_label.Image is not None else name
-                value_label.Text = compact_value(value, getattr(self, "_fit_level", 0))
-                name_label.ForeColor, value_label.ForeColor = muted, color
+                level = getattr(self, "_fit_level", 0)
+                value_label.Text = compact_value(value, level)
+                reset_label.Text = reset_txt if level < 1 else ""
+                # Reset countdown: same weight, slightly dimmer than the quota.
+                name_label.ForeColor, value_label.ForeColor, reset_label.ForeColor = muted, color, dim(color)
                 name_label.Visible = value_label.Visible = True
-            for name_label, value_label in self._extra_columns[len(cells):]:
-                name_label.Visible = value_label.Visible = False
+                reset_label.Visible = bool(reset_label.Text)
+            for name_label, value_label, reset_label in self._extra_columns[len(cells):]:
+                name_label.Visible = value_label.Visible = reset_label.Visible = False
             if not multi:
                 self._fit_key = None
                 self._fit_level = 0
@@ -2325,26 +2349,30 @@ class CodexUsageSurface:
                     available = gap_area[1] - gap_area[0] if gap_area else None
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
                     if show_icons else None
-                fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale,
+                fit_key = (tuple((n, v, r) for n, v, r, _ in cells), available, self._scale,
                            tuple(icon_paths) if icon_paths else None, icon_light)
                 if fit_key != self._fit_key:
                     self._fit_key = fit_key
                     for factor, level in FIT_PLAN:
                         self._fit_level = level
-                        for (_, value_label), (_, value, _) in zip(used, cells):
+                        for (_, value_label, reset_label), (_, value, reset_txt, _) in zip(used, cells):
                             value_label.Text = compact_value(value, level)
+                            reset_label.Text = reset_txt if level < 1 else ""
+                            reset_label.Visible = bool(reset_label.Text)
                         fonts = self._fit_fonts.get(factor)
                         if fonts is None:
                             fonts = self._fit_fonts[factor] = (
                                 Font("Segoe UI", max(1, round(scale(12)*factor)), FontStyle.Regular, GraphicsUnit.Pixel),
                                 Font("Segoe UI", max(1, round(scale(13)*factor)), FontStyle.Bold, GraphicsUnit.Pixel))
-                        for top, bottom in used:
+                        for top, bottom, reset_label in used:
                             if top.Font is not fonts[0]:
                                 top.Font = fonts[0]
                             if bottom.Font is not fonts[1]:
                                 bottom.Font = fonts[1]
+                            if reset_label.Font is not fonts[1]:
+                                reset_label.Font = fonts[1]
                         icon_px = strip_icon_px(self._scale, factor)
-                        for index, (name_label, _) in enumerate(used):
+                        for index, (name_label, *_) in enumerate(used):
                             image = None
                             if icon_paths:
                                 path, pid = icon_paths[index]

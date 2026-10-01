@@ -80,7 +80,7 @@ class StripFitTests(unittest.TestCase):
         self.assertEqual(balance_labels([w("granted", "0")], [])[0]["zh"], "无余额")
         now = 1_000_000
         ok = kimi._show_reading({"facts": []}, {"used_percent": 0, "is_member": False, "reset_at": now + 36.3 * 3600}, now)
-        self.assertEqual(ok["headline"]["zh"], "36.3h")
+        self.assertEqual((ok["quota"]["zh"], ok["reset_at"]), ("100%", now + 36.3 * 3600))
         self.assertEqual(ok["brief"]["zh"].split(" · ")[0], "已用 0%")
         self.assertEqual(kimi._show_reading({"facts": []}, {"used_percent": 100}, now)["headline"]["zh"], "已用尽")
         self.assertEqual(kimi._show_reading({"facts": []}, {"is_member": False}, now)["headline"]["zh"], "可用")
