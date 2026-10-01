@@ -148,3 +148,19 @@ class StripMarginTests(unittest.TestCase):
         from vram_radar.usage_surface import strip_margin, taskbar_scale
         self.assertEqual(strip_margin(taskbar_scale(144, None)), 18)   # 150 %
         self.assertEqual(strip_margin(taskbar_scale(96, None)), 12)    # 100 %
+
+
+class ContentClusterTests(unittest.TestCase):
+    def test_own_strip_pixels_after_blank_run_are_ignored(self):
+        from vram_radar.usage_surface import content_right
+        w, h = 120, 20
+        buf = bytearray(b"\xf0\xf0\xf0\xff" * w * h)
+        def ink(x0, x1):
+            for x in range(x0, x1):
+                for y in range(6, 14):
+                    i = (y * w + x) * 4
+                    buf[i:i + 3] = b"\x20\x20\x20"
+        ink(5, 20); ink(26, 50)      # weather icon + text (6 px internal gap)
+        ink(80, 110)                 # our strip, 30 px further right
+        self.assertEqual(content_right(bytes(buf), w, h), 110)
+        self.assertEqual(content_right(bytes(buf), w, h, max_gap=14), 50)

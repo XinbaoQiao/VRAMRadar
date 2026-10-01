@@ -8,7 +8,7 @@ class StripPixelTests(unittest.TestCase):
         import check_strip_pixels
         out = check_strip_pixels.run()
         self.assertTrue(out["ok"], out["failures"])
-        self.assertEqual(out["cases"], 40)
+        self.assertEqual(out["cases"], 48)
 
 
 if __name__ == "__main__":

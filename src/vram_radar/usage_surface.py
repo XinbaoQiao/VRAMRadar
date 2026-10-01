@@ -232,7 +232,7 @@ def left_gap(bar, elements, margin=6):
     return left_edge, right_edge
 
 
-def content_right(pixels, width, height, threshold=60, min_hits=2):
+def content_right(pixels, width, height, threshold=60, min_hits=2, max_gap=None):
     """Column just past the right-most visible content in a BGRA capture.
 
     Each column's background is taken from its own top/bottom rows (the
@@ -240,7 +240,9 @@ def content_right(pixels, width, height, threshold=60, min_hits=2):
     column counts as content when at least ``min_hits`` of its middle rows
     differ from that background by more than ``threshold`` (sum of |dRGB|).
     Returns an offset in ``0..width`` (0 = nothing visible) or None for bad
-    input.
+    input.  With ``max_gap`` only the first cluster counts: content after a
+    blank run wider than ``max_gap`` columns (e.g. our own strip, drawn
+    there while a background scan used a stale strip rect) is ignored.
     """
     if width <= 0 or height < 8 or len(pixels) < width * height * 4:
         return None
@@ -262,6 +264,8 @@ def content_right(pixels, width, height, threshold=60, min_hits=2):
                 if hits >= min_hits:
                     last = x + 1
                     break
+        if max_gap is not None and last and x + 1 - last > max_gap:
+            break
     return last
 
 
@@ -333,7 +337,9 @@ def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
     if right - left < min_width:
         return elements
     pixels = capture((left, top, right, bottom))
-    edge = content_right(pixels, right - left, bottom - top) if pixels else None
+    # Weather icon->text spacing is ~0.14 x bar height; the strip keeps >= 18 px
+    # (+ its own padding) clear, so a 0.2 x height blank run ends the widget.
+    edge = content_right(pixels, right - left, bottom - top, max_gap=max(6, round((bottom - top) * 0.2))) if pixels else None
     if not edge or edge < min_width // 2:
         return elements
     trimmed = dict(elements)

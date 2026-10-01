@@ -66,8 +66,9 @@ def ink_columns(buf, stride, bg, rect, height, threshold=40):
 def run(save=None):
     results, failures = [], []
     paths = install_paths()
-    for display in DISPLAY_SCALES:
-        strip_scale = max(0.6, display * STRIP_DENSITY)
+    # (display scale, strip scale): normal taskbars, plus a small-buttons
+    # taskbar at 100 % (32 px tall -> strip scale 0.65).
+    for display, strip_scale in [(d, max(0.6, d * STRIP_DENSITY)) for d in DISPLAY_SCALES] + [(1.0, 0.65)]:
         for theme, (bg, name_fg, value_fg, low_fg) in THEMES.items():
             for mode in ("text", "icons"):
                 for factor, level in (FIT_PLAN[0], FIT_PLAN[-1]):
@@ -105,7 +106,7 @@ def run(save=None):
                     form.DrawToBitmap(bmp, Rectangle(0, 0, form.Width, form.Height))
                     # DrawToBitmap draws the client area at the client origin for a borderless form.
                     buf, stride = pixels(bmp)
-                    key = f"{display:.2f}/{theme}/{mode}/f{factor}"
+                    key = f"{display:.2f}{'s' if strip_scale < 0.8 else ''}/{theme}/{mode}/f{factor}"
                     need = math.ceil(6 * display * factor) if mode == "icons" else 1
                     cells = []
                     rects = []
@@ -138,7 +139,7 @@ def run(save=None):
                         failures.append(f"{key}: columns touch ({col_gap})")
                     results.append({"case": key, "width": width, "column_gap": col_gap, "cells": cells})
                     if save and factor == 1.0:
-                        bmp.Save(os.path.join(save, f"strip_{display:.2f}_{theme}_{mode}.png".replace(".", "_", 1)))
+                        bmp.Save(os.path.join(save, "strip_" + key.split("/f")[0].replace("/", "_").replace(".", "_") + ".png"))
                     bmp.Dispose(); form.Dispose()
     return {"ok": not failures, "cases": len(results), "failures": failures[:20], "results": results}
 
