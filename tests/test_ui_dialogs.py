@@ -114,7 +114,8 @@ class MenuWidthTests(unittest.TestCase):
     def test_footers_do_not_stretch_rows(self):
         from vram_radar.usage_surface import AUTO_READ_FOOTER, limit_menu_text
         # widest auto-read row is about "Kimi" + gap + "已开启 · 需重新登录" (~15 CJK-width chars)
-        self.assertLessEqual(len(AUTO_READ_FOOTER[0]), 12)
+        self.assertNotIn("\n", AUTO_READ_FOOTER[0])
+        self.assertLessEqual(len(AUTO_READ_FOOTER[0]), 8)
         self.assertEqual(limit_menu_text(4), "最多显示 4 个")
         self.assertLessEqual(len(limit_menu_text(4)), len("Qwen 通义") + len("仅有旧数据"))
 

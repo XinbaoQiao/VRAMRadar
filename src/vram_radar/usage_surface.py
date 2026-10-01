@@ -938,7 +938,9 @@ PENDING_TIMEOUT = 60
 # Menu footers stay shorter than the rows they explain: a dropdown is as wide
 # as its widest item, so a long footer stretched every row (empty gap between
 # "Grok" and its state).
-AUTO_READ_FOOTER = ("只读查询，登录信息不保存", "Read-only · login never stored")
+# One short line (a multi-line item makes WinForms raise every row height;
+# a long line set the width).  Rows are ~8 chars wide.
+AUTO_READ_FOOTER = ("只读，不保存登录", "Read-only, no login kept")
 
 
 def limit_menu_text(limit: int, language: str = "zh-CN") -> str:
