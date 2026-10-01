@@ -61,6 +61,27 @@ def _wait_for_exit(pid: int, timeout_seconds: float = 30.0) -> bool:
     return False
 
 
+def _retry(action, attempts: int = 10, delay: float = 0.5):
+    """File moves right after the app exits can hit a short-lived lock
+    (antivirus, Explorer thumbnails, a probe that is still closing)."""
+    for attempt in range(attempts):
+        try:
+            return action()
+        except OSError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+    return None
+
+
+def _relaunch(executable: Path, arguments: list[str]) -> bool:
+    try:
+        subprocess.Popen([str(executable), *arguments], close_fds=True)
+        return True
+    except OSError:
+        return False
+
+
 def _load_plan(path: Path) -> dict[str, Any]:
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict) or document.get("schema_version") != 1:
@@ -127,12 +148,19 @@ def run_update(plan_path: Path) -> int:
     _status(plan_path, "shutdown-request-complete")
     if not _wait_for_exit(pid):
         raise RuntimeError("VRAM Radar did not close; the existing version was preserved")
-    if _hash(installer) != expected_hash:
-        raise ValueError("installer hash changed before execution")
-
-    _status(plan_path, "existing-process-exited")
-    backup = install_root.with_name(f"{install_root.name}.update-backup-{uuid.uuid4().hex}")
-    install_root.replace(backup)
+    # From here on the app has exited: every failure path must start the
+    # existing version again (it used to stay closed after a locked folder or
+    # a changed installer).
+    try:
+        if _hash(installer) != expected_hash:
+            raise ValueError("installer hash changed before execution")
+        _status(plan_path, "existing-process-exited")
+        backup = install_root.with_name(f"{install_root.name}.update-backup-{uuid.uuid4().hex}")
+        _retry(lambda: install_root.replace(backup))
+    except Exception:
+        _relaunch(executable, restart_arguments)
+        _status(plan_path, "preserved-and-restarted")
+        raise
     _status(plan_path, "backup-created")
     try:
         command = [
@@ -160,15 +188,24 @@ def run_update(plan_path: Path) -> int:
         if probe.returncode != 0:
             raise RuntimeError("the updated application failed its launch probe")
     except Exception:
-        if install_root.exists():
-            shutil.rmtree(install_root, ignore_errors=True)
-        backup.replace(install_root)
-        subprocess.Popen([str(executable), *restart_arguments], close_fds=True)
+        def restore():
+            if install_root.exists():
+                shutil.rmtree(install_root, ignore_errors=True)
+            backup.replace(install_root)
+        try:
+            _retry(restore)
+        except OSError:
+            # Could not move the old version back (files still locked): run it
+            # from the backup folder rather than leaving no app at all.
+            _relaunch(backup / executable.name, restart_arguments)
+            _status(plan_path, "rollback-failed-started-backup")
+            raise
+        _relaunch(executable, restart_arguments)
         _status(plan_path, "rollback-restored")
         raise
     else:
         shutil.rmtree(backup, ignore_errors=True)
-        subprocess.Popen([str(executable), *restart_arguments], close_fds=True)
+        _relaunch(executable, restart_arguments)
         _status(plan_path, "update-complete")
     return 0
 

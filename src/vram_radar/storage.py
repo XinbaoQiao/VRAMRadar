@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
+import re
 from pathlib import Path
 import shutil
+import sys
 import time
 from typing import Any
 import tomllib
@@ -15,6 +17,28 @@ import tomli_w
 
 from .models import ConfigError, Profile, require_id
 from .window_state import WindowGeometry
+
+
+def system_ui_language(platform: str = sys.platform, environ: dict[str, str] | None = None) -> str:
+    """``zh-CN`` for a Chinese system UI, otherwise ``en`` (first run only)."""
+    tag = ""
+    try:
+        if platform == "win32":
+            import ctypes
+            langid = int(ctypes.windll.kernel32.GetUserDefaultUILanguage())
+            return "zh-CN" if langid & 0x3FF == 0x04 else "en"
+        if platform == "darwin":
+            from Foundation import NSLocale  # type: ignore[import-not-found]
+            preferred = NSLocale.preferredLanguages()
+            tag = str(preferred[0]) if preferred else ""
+    except Exception:
+        return "zh-CN"
+    if not tag:
+        env = os.environ if environ is None else environ
+        tag = next((env[name] for name in ("LC_ALL", "LC_MESSAGES", "LANG") if env.get(name)), "")
+    if not tag or tag.split(".")[0] in {"C", "POSIX"}:
+        return "zh-CN"
+    return "zh-CN" if tag.lower().startswith("zh") else "en"
 
 
 @dataclass(frozen=True)
@@ -69,6 +93,30 @@ def atomic_write_text(path: Path, text: str) -> None:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+_ORPHAN_TEMPORARY = re.compile(r"\..+\.[0-9a-f]{32}\.tmp")
+
+
+def prune_orphan_temporaries(root: Path, *, max_age: float = 86400.0, now: float | None = None) -> int:
+    """Remove ``atomic_write_text`` temporaries left behind by a killed process
+    or a power loss (they were never cleaned up and accumulated)."""
+    now = time.time() if now is None else now
+    removed = 0
+    try:
+        candidates = list(root.rglob(".*.tmp"))
+    except OSError:
+        return 0
+    for path in candidates:
+        if not _ORPHAN_TEMPORARY.fullmatch(path.name):
+            continue
+        try:
+            if path.is_file() and now - path.stat().st_mtime > max_age:
+                path.unlink()
+                removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 class ProfileStore:

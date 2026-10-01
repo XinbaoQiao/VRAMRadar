@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import re
@@ -297,7 +298,10 @@ def check_latest_release(
                 platform_name=platform_name,
             ),
         }
-    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
+    # http.client.HTTPException (IncompleteRead, BadStatusLine, RemoteDisconnected
+    # on a flaky link) is not an OSError and used to escape the check.
+    except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, RuntimeError,
+            http.client.HTTPException) as exc:
         error_code, error_message, http_status = _update_failure_details(exc)
         logging.getLogger("vram_radar").warning(
             "update check failed code=%s exception=%s",

@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -80,6 +81,8 @@ from .ssh_keys import (
     remove_generated_key,
 )
 from .storage import (
+    prune_orphan_temporaries,
+    system_ui_language,
     NotificationStateStore,
     ProfileStore,
     SnapshotCache,
@@ -4276,9 +4279,11 @@ class AppApi:
                     "message": "更新包已通过 SHA-256 校验，并已在 Finder 中显示",
                 }
             return {"ok": False, "error": "当前平台暂不支持应用内安装"}
-        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
-            logging.getLogger("vram_radar").warning("safe update failed: %s", exc)
-            return {"ok": False, "error": str(exc) or "更新失败，当前版本未被修改"}
+        except (OSError, RuntimeError, ValueError, TimeoutError, http.client.HTTPException) as exc:
+            logging.getLogger("vram_radar").warning("safe update failed: %s", type(exc).__name__ if isinstance(exc, http.client.HTTPException) else exc)
+            # A truncated download (IncompleteRead) has no user-meaningful text.
+            message = "" if isinstance(exc, http.client.HTTPException) else str(exc)
+            return {"ok": False, "error": message or "更新失败，当前版本未被修改"}
 
     def open_latest_release(self) -> dict[str, Any]:
         if self.latest_release_url is None:
@@ -4670,7 +4675,14 @@ def build_runtime(
     paths = storage_paths(home)
     logger = configure_logging(paths)
     store = ProfileStore(paths)
+    for folder in (paths.config, paths.cache):
+        prune_orphan_temporaries(folder)
+    first_run = not store.profile_path(profile_id).exists()
     profile, recovery = store.load_or_recover(profile_id)
+    if first_run:
+        # A fresh profile follows the system UI language (an English Windows
+        # or macOS used to start in Chinese); an existing choice is kept.
+        profile = replace(profile, ui_language=system_ui_language())
     explicit_source = servers_config is not None
     sources: list[Path] = []
     primary_source: Path | None = None
@@ -4803,7 +4815,7 @@ def main(argv: list[str] | None = None) -> int:
                 asset,
                 storage_paths(args.home).cache / "update-download-smoke",
             )
-        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        except (OSError, RuntimeError, ValueError, TimeoutError, http.client.HTTPException) as exc:
             print(json.dumps({
                 "ok": False,
                 "code": "update_download_failed",

@@ -140,6 +140,14 @@ let dashboardDisclosureMode = 'default';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000;
 const UPDATE_CHECK_ON_FOCUS_AFTER_MS = 60 * 60 * 1000;
+let updateCheckFailures = 0;
+// A fixed 5-minute retry polled GitHub all night while offline and made a
+// rate limit (403/429) worse: back off 5, 10, 20 ... minutes, at most 6 hours.
+function updateRetryDelay(failures, code) {
+  if (code === 'update_rate_limited') return 60 * 60 * 1000;
+  const steps = Math.max(0, Math.min(10, (failures || 1) - 1));
+  return Math.min(UPDATE_CHECK_INTERVAL_MS, UPDATE_CHECK_RETRY_MS * 2 ** steps);
+}
 let recommendationRequested = false;
 let activeServerId = '';
 let serverNavigationFrame = null;
@@ -5051,7 +5059,8 @@ async function checkForUpdates({interactive = false} = {}) {
     }
     if (!result?.ok) {
       showUpdateCheckFailure(result?.error, interactive);
-      scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
+      updateCheckFailures += 1;
+      scheduleUpdateCheck(updateRetryDelay(updateCheckFailures, result?.code));
       return;
     }
     if (!result.update_available) {
@@ -5065,6 +5074,7 @@ async function checkForUpdates({interactive = false} = {}) {
           if (!updateCheckInFlight) ui.updateCheckStatus.textContent = '发现新版本后会进入通知中心';
         }, 4000);
       }
+      updateCheckFailures = 0;
       scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
       return;
     }
@@ -5073,10 +5083,12 @@ async function checkForUpdates({interactive = false} = {}) {
     ui.updateNotice.replaceChildren();
     ui.updateNotice.hidden = true;
     if (interactive) ui.updateCheckStatus.textContent = `发现新版本 ${result.latest_version}`;
+    updateCheckFailures = 0;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {
     showUpdateCheckFailure(error?.message, interactive);
-    scheduleUpdateCheck(UPDATE_CHECK_RETRY_MS);
+    updateCheckFailures += 1;
+    scheduleUpdateCheck(updateRetryDelay(updateCheckFailures));
   } finally {
     updateCheckInFlight = false;
     if (interactive) ui.checkForUpdates.disabled = false;

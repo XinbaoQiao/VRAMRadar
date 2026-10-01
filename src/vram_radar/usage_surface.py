@@ -2477,7 +2477,6 @@ class CodexUsageSurface:
         signature = (language, str(rows))
         if self._last_signature == signature:
             return
-        self._last_signature = signature
         title = "C  " + " · ".join(f"{row['label']} {row['value']} ({row['countdown']})" for row in rows[:2])
         self.status_item.button().setTitle_(title)
         self.status_item.button().setToolTip_("\n".join(["Codex", *(row["detail"] for row in rows)]))
@@ -2496,6 +2495,9 @@ class CodexUsageSurface:
             item.setTarget_(self._delegate)
             menu.addItem_(item)
         self.status_item.setMenu_(menu)
+        # Only now: a failed update (e.g. the item vanished during sleep/wake
+        # or a display change) is retried on the next tick instead of sticking.
+        self._last_signature = signature
 
     def stop(self) -> None:
         self.closed = True

@@ -38,8 +38,8 @@ opens the GPU home page; double-click opens Codex usage details. A single click
 waits for the system double-click interval so double-clicking does not open both.
 The right internal padding is two logical pixels. **Hide usage strip** turns the display off; re-enable
 it in Settings → Extensions. Placement resets to the taskbar on the next launch.
-Right-click **Display options** to choose **Text only** (default) or **Disks and
-text**. Countdown values consistently use one decimal place and the `h` suffix,
+Right-click **Display options** to choose **Labels** (**Text** or **Icons**) and
+**Background**. Countdown values consistently use one decimal place and the `h` suffix,
 such as **87.5h**; less than 0.1 hour reads **<0.1h**. Both lines use the same bold
 font size. Colors change continuously from cool blue/green toward amber/coral
 as quota decreases or reset approaches; long reset waits also continue changing.
@@ -70,8 +70,10 @@ windows wait for a successful refresh instead of assuming the quota reset.
 The native background worker checks every five minutes, including while Radar
 is minimized. **Refresh usage** requests an earlier check (with a ten-second
 retry floor). Disabling the feature cancels its pending request and clears the
-display. Errors clear previously displayed quota so switching or signing out
-of accounts cannot leave an old account's quota presented as current.
+display. Sign-in and account errors clear previously displayed quota so switching
+or signing out cannot leave an old account's quota presented as current; a
+transient timeout or disconnect keeps the last values, marked stale, and retries
+after one minute.
 
 Radar starts its own short-lived `codex app-server` child and sends only
 `initialize`, `initialized`, `account/read` with `refreshToken: false`, and
