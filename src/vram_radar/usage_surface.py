@@ -1670,6 +1670,17 @@ class CodexUsageSurface:
                 self._tick_deferred = False
                 self._tick()
         menu.Closed += menu_closed
+        # Fallback dismissal if the foreground switch was refused: poll the
+        # mouse buttons only while the menu is open (never blocks the click).
+        from System.Windows.Forms import ToolStripDropDownCloseReason
+        from .menu_dismiss import OutsideClickWatch, menu_rects, win32_buttons, win32_cursor
+        outside_watch = OutsideClickWatch(
+            Timer(), win32_buttons(), win32_cursor(),
+            lambda: menu_rects(menu, form, getattr(self, "_catcher", None)),
+            lambda: menu.Close(ToolStripDropDownCloseReason.AppClicked), lambda: menu.Visible)
+        self._outside_watch = outside_watch
+        menu.Opened += outside_watch.start
+        menu.Closed += outside_watch.stop
         self._menu_back = form.BackColor
         self._fill = None
         menu.BackColor = form.BackColor
@@ -2532,6 +2543,8 @@ class CodexUsageSurface:
         self.active = False
         def cleanup():
             if sys.platform == "win32":
+                if getattr(self, "_outside_watch", None) is not None:
+                    self._outside_watch.dispose()
                 if self.timer is not None:
                     self.timer.Stop()
                     self.timer.Dispose()

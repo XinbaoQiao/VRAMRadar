@@ -238,6 +238,39 @@ def main() -> int:
                 invoke(lambda: outside.append(outside_focus_check()))
                 result["outside_dismissal"] = outside[0]
                 assertions["outside_activation_closes_parent_and_submenu"] = all(outside[0].values())
+                def outside_press_check():
+                    # Fallback watcher on the real menu, button/cursor readers
+                    # replaced (no real input): inside keeps it, outside closes.
+                    from vram_radar.menu_dismiss import BUTTONS
+                    watch = surface._outside_watch
+                    real = watch._buttons, watch._cursor
+                    up, left = (False,) * len(BUTTONS), (True,) + (False,) * (len(BUTTONS) - 1)
+                    fake = {"b": up, "c": (-30000, -30000)}
+                    watch._buttons, watch._cursor = (lambda: fake["b"]), (lambda: fake["c"])
+                    def press(at):
+                        fake["c"], fake["b"] = at, left
+                        watch.tick()
+                        fake["b"] = up
+                        watch.tick()
+                    try:
+                        surface._menu.Show(Point(100, 200))
+                        surface._display_menu.ShowDropDown()
+                        started = watch.running
+                        sub = surface._display_menu.DropDown.Bounds
+                        press((sub.Left + 3, sub.Top + 3))
+                        press((surface._menu.Left + 3, surface._menu.Top + 3))
+                        inside_kept = surface._menu.Visible and surface._display_menu.DropDown.Visible
+                        press((-30000, -30000))
+                        closed = not surface._menu.Visible and not surface._display_menu.DropDown.Visible
+                        return {"started": started, "inside_kept": inside_kept, "outside_closed": closed,
+                                "stopped": not watch.running}
+                    finally:
+                        watch._buttons, watch._cursor = real
+                        surface._menu.Close()
+                pressed = []
+                invoke(lambda: pressed.append(outside_press_check()))
+                result["outside_press"] = pressed[0]
+                assertions["outside_press_closes_menu_and_stops_polling"] = all(pressed[0].values())
                 from unittest.mock import patch
                 for bright, background, foreground in [(True, (243, 243, 243), (28, 28, 28)),
                                                         (False, (32, 32, 32), (240, 240, 240))]:
