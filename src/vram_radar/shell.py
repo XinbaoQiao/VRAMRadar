@@ -80,6 +80,14 @@ from .ssh_keys import (
     prepare_generated_key,
     remove_generated_key,
 )
+from .housekeeping import (
+    HealthWatchdog,
+    Housekeeper,
+    idle_seconds,
+    prune_webview_sessions,
+    run_maintenance,
+    webview_storage_path,
+)
 from .storage import (
     prune_orphan_temporaries,
     system_ui_language,
@@ -154,6 +162,17 @@ def _ssh_config_block(server: Any, details: Any) -> str:
         )
     )
     return "\n".join(lines)
+
+
+HEALTH_RESTART_IDLE_SECONDS = 600.0
+
+
+def prune_missing_markers(markers: dict[tuple[str, str], str], server_id: str, current: dict[str, Any]) -> int:
+    """Drop a server's task-absence markers for tasks no longer tracked."""
+    stale = [key for key in markers if key[0] == server_id and key[1] not in current]
+    for key in stale:
+        markers.pop(key, None)
+    return len(stale)
 
 
 def configure_logging(paths: StoragePaths) -> logging.Logger:
@@ -607,8 +626,16 @@ def _wait_for_process_exit(pid: int, timeout_seconds: float = 15.0) -> bool:
     return False
 
 
-def webview_start_options(debug: bool, icon_path: Path) -> dict[str, Any]:
+def webview_start_options(debug: bool, icon_path: Path, storage_path: Path | None = None) -> dict[str, Any]:
     options: dict[str, Any] = {"debug": debug}
+    if sys.platform == "win32" and storage_path is not None:
+        # pywebview's private mode otherwise puts each run's WebView2 profile
+        # in a random %TEMP%\tmpXXXX folder that is only deleted on a clean
+        # exit; every crash or forced stop leaked ~20 MB there.  Keep it in our
+        # own cache (still private, still deleted on exit) so housekeeping can
+        # remove the folders of runs that ended abnormally.
+        options["private_mode"] = True
+        options["storage_path"] = str(storage_path)
     # Windows and macOS obtain their application icon from the packaged
     # executable/.app bundle. pywebview's runtime icon option is only supported
     # by its GTK/Qt backends.
@@ -687,6 +714,51 @@ def window_frontend_is_ready(window: Any) -> bool:
         })()"""
     )
     return result is True
+
+
+def main_window_visible(window: Any) -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.IsWindowVisible(int(window.native.Handle.ToInt64())))
+    except Exception:
+        return True  # unknown: showing the window again is the safe side
+
+
+def start_housekeeping(api: Any, paths: StoragePaths, profile_id: str, window: Any,
+                       exit_requested: threading.Event, surface: Callable[[], Any]) -> Housekeeper:
+    """Daily light maintenance plus a conservative self-health watchdog."""
+
+    def maintenance() -> dict[str, Any]:
+        return run_maintenance(paths, profile_id, [server.id for server in api.profile.servers])
+
+    def idle() -> bool:
+        seconds = idle_seconds()
+        if seconds is None or seconds < HEALTH_RESTART_IDLE_SECONDS:
+            return False
+        worker = getattr(api, "_update_worker", None)
+        if worker is not None and worker.is_alive():
+            return False
+        try:
+            menu = getattr(surface(), "_menu", None)
+            return not (menu is not None and bool(menu.Visible))
+        except Exception:
+            return False
+
+    def restart(reason: str) -> bool:
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
+            logging.getLogger("vram_radar").info("health: self-restart only runs in the installed Windows app")
+            return False
+        arguments = [sys.executable, *api._restart_arguments, "--wait-pid", str(os.getpid())]
+        if not main_window_visible(window):
+            arguments.append("--start-hidden")
+        subprocess.Popen(arguments, close_fds=True, creationflags=0x00000008 | 0x00000200)
+        exit_requested.set()
+        return True
+
+    keeper = Housekeeper(maintenance, watchdog=HealthWatchdog(paths.runtime / f"{profile_id}.health.json"),
+                         restart=restart, is_idle=idle)
+    keeper.start()
+    return keeper
 
 
 def activation_worker(
@@ -1903,6 +1975,9 @@ class AppApi:
                     )
                 }
                 self._task_alert_active[server_id] = current
+                # Absence markers of tasks that are no longer tracked (filter
+                # changed, server removed) were kept forever.
+                prune_missing_markers(self._task_alert_process_missing_once, server_id, current)
                 if previous != current:
                     state_changed = True
                 if previous is None:
@@ -4789,7 +4864,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gui-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--gui-update-smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--quit-existing", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--wait-pid", type=int, default=0, help=argparse.SUPPRESS)
+    parser.add_argument("--start-hidden", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.wait_pid > 0:
+        # Health self-restart: the previous process is still shutting down.
+        _wait_for_process_exit(args.wait_pid, timeout_seconds=60.0)
 
     if args.show_release:
         print(current_release_tag())
@@ -4964,6 +5044,7 @@ def main(argv: list[str] | None = None) -> int:
                     height=initial_geometry.height,
                     min_size=(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT),
                     background_color="#071017",
+                    hidden=bool(args.start_hidden),
                 )
                 window_state.attach(window)
                 # ``before_show`` is a synchronous pywebview lifecycle event;
@@ -5106,6 +5187,8 @@ def main(argv: list[str] | None = None) -> int:
                         return shutdown.on_closing()
                     window.events.closing += non_tray_closing_handler
                 worker.start()
+                housekeeper = None if gui_smoke else start_housekeeping(
+                    api, paths, profile.id, window, exit_requested, lambda: usage_surface)
                 smoke_result: dict[str, Any] = {}
                 smoke_worker: threading.Thread | None = None
                 if gui_smoke:
@@ -5124,10 +5207,16 @@ def main(argv: list[str] | None = None) -> int:
                         daemon=True,
                     )
                     smoke_worker.start()
-                start_options = webview_start_options(args.debug, icon_path)
+                webview_storage = None
+                if sys.platform == "win32":
+                    prune_webview_sessions(paths.cache)
+                    webview_storage = webview_storage_path(paths.cache)
+                start_options = webview_start_options(args.debug, icon_path, webview_storage)
                 try:
                     webview.start(**start_options)
                 finally:
+                    if housekeeper is not None:
+                        housekeeper.stop()
                     shutdown.request()
                     api._codex_usage.close()
                     api._usage_providers.close()

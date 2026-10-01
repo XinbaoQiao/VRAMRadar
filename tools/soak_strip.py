@@ -165,7 +165,7 @@ def run(ticks: int = 3000, opens: int = 40) -> dict:
             result.update(ok=True, ticks=ticks, tick_ms={"median": round(statistics.median(q), 2),
                                                          "p95": round(q[int(len(q) * 0.95)], 2),
                                                          "max": round(q[-1], 2)},
-                          menu_open_ms={"median": round(statistics.median(menu_ms), 1), "max": round(max(menu_ms), 1)},
+                          menu_open_ms=({"median": round(statistics.median(menu_ms), 1), "max": round(max(menu_ms), 1)} if menu_ms else None),
                           base=base, after_ticks=after_ticks, final=final,
                           growth={k: round(final[k] - base[k], 1) for k in base})
         except Exception as error:

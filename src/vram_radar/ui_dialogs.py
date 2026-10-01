@@ -193,6 +193,19 @@ def system_scale() -> float:
 # -- icons --------------------------------------------------------------------
 
 _ICONS: dict = {}
+ICON_CACHE_LIMIT = 128
+
+
+def _remember(cache: dict, key, value, limit: int = ICON_CACHE_LIMIT):
+    """Bounded icon cache: the oldest entry is dropped (never Disposed -- a
+    dropped bitmap may still be shown by a menu item; .NET frees it later).
+    Keys include DPI size and theme, so months of DPI/theme switches grew it."""
+    while len(cache) >= limit:
+        cache.pop(next(iter(cache)))
+        if cache is _SOURCES:
+            _BOXES.clear()  # keyed by id(source): ids of dropped sources get reused
+    cache[key] = value
+    return value
 ICON_EXTENSIONS = (".ico", ".png")
 
 
@@ -360,8 +373,7 @@ def glyph_icon(glyph: str, px: int, rgb=(26, 26, 26)):
     finally:
         for item in (font, brush, fmt, graphics):
             item.Dispose()
-    _ICONS[key] = bitmap
-    return bitmap
+    return _remember(_ICONS, key, bitmap)
 
 
 ICON_SOURCE_PX = 256
@@ -388,8 +400,7 @@ def icon_source(path: str | None):
                 break
         except Exception as exc:
             LOG.info("app icon unavailable (%s)", type(exc).__name__)
-    _SOURCES[key] = source
-    return source
+    return _remember(_SOURCES, key, source)
 
 
 def _load_image(path: str):
@@ -435,8 +446,7 @@ def art_box(source, threshold: int = 40):
     else:
         cols = [x for x in range(w) if any(buf[y * stride + x * 4 + 3] > threshold for y in range(rows[0], rows[-1] + 1))]
         box = (cols[0], rows[0], cols[-1] + 1, rows[-1] + 1)
-    _BOXES[key] = box
-    return box
+    return _remember(_BOXES, key, box)
 
 
 def icon_art_px(px: int) -> int:
@@ -499,7 +509,7 @@ def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     try:
         source = _SOURCES.get(bundled) if bundled in _SOURCES else None
         if bundled and source is None:
-            source = _SOURCES[bundled] = _load_image(bundled)
+            source = _remember(_SOURCES, bundled, _load_image(bundled))
         source = source if bundled else icon_source(path)
         if source is not None:
             bitmap = fit_icon(source, int(px))
@@ -510,8 +520,7 @@ def provider_icon(path: str | None, px: int, name: str = "", accent=None):
             bitmap = letter_tile(name, px, accent)
         except Exception:
             bitmap = None
-    _ICONS[key] = bitmap
-    return bitmap
+    return _remember(_ICONS, key, bitmap)
 
 
 # -- drawing --------------------------------------------------------------------
