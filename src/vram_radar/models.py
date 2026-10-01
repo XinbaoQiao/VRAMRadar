@@ -673,6 +673,14 @@ def normalize_usage_providers(value: Any) -> tuple[str, ...]:
 
     return normalize_selection([item for item in value[:64] if isinstance(item, str)])
 
+def normalize_usage_session_consent(value: Any) -> tuple[str, ...]:
+    """Per-provider consent for session-based quota reading. Profiles
+    without the key (or with anything malformed) mean no consent at all."""
+    from .providers import normalize_session_consent
+
+    return normalize_session_consent(value)
+
+
 USAGE_BACKGROUNDS = ("transparent", "match", "dark", "light", "accent")
 
 
@@ -704,6 +712,9 @@ class Profile:
     # Which AI apps the usage strip shows (see providers/). Profiles written
     # before multi-provider support have no key and keep showing Codex only.
     usage_providers: tuple[str, ...] = ("codex",)
+    # Providers the user allowed to read quota with their app's saved login
+    # (persisted as an {id: true} map; absent = no consent).
+    usage_session_consent: tuple[str, ...] = ()
     # Taskbar strip background: see usage_surface.BACKGROUND_STYLES.
     usage_background: str = "transparent"
     favorite_server_ids: tuple[str, ...] = ()
@@ -934,6 +945,7 @@ class Profile:
             codex_show_disks=require_bool(raw.get("codex_show_disks", False), "codex_show_disks"),
             codex_time_format=codex_time_format,
             usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
+            usage_session_consent=normalize_usage_session_consent(raw.get("usage_session_consent", {})),
             usage_background=normalize_usage_background(raw.get("usage_background", "transparent")),
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
@@ -964,6 +976,7 @@ class Profile:
             "codex_show_disks": self.codex_show_disks,
             "codex_time_format": self.codex_time_format,
             "usage_providers": list(self.usage_providers),
+            "usage_session_consent": {provider_id: True for provider_id in self.usage_session_consent},
             "usage_background": self.usage_background,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),

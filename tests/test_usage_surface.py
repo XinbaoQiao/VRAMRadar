@@ -146,3 +146,56 @@ class QuotaSurfaceTests(unittest.TestCase):
         self.assertEqual(strip_bounds((-1920, 0, 0, 1040), (236, 48)), (-244, 984))
         self.assertEqual(strip_bounds((0, 0, 800, 600), (236, 48), (1700, 1000)), (564, 552))
         self.assertEqual(strip_bounds((40, 0, 1920, 1080), (236, 48), (-10, -10)), (40, 0))
+
+
+class SessionConsentSurfaceTests(unittest.TestCase):
+    def surface(self, *, consented=(), answer=False):
+        from unittest.mock import Mock
+        self.asked, self.saved = [], Mock(return_value={"ok": True})
+        def confirm(app, provider):
+            self.asked.append((app, provider))
+            return answer
+        surface = CodexUsageSurface(None, lambda: {}, language=lambda: "zh-CN", open_settings=lambda: None,
+                                    disable=lambda: None, refresh=lambda: None, quit_application=lambda: None,
+                                    providers=lambda: {"selected": ["codex", "grok"],
+                                                       "session_consent": list(consented)},
+                                    save_consent=self.saved, confirm_consent=confirm)
+        surface._action = lambda callback: callback()  # run synchronously
+        return surface
+
+    def test_dialog_text(self):
+        from vram_radar.usage_surface import consent_text
+        self.assertEqual(consent_text("Grok", "xAI"),
+                         "显存雷达将使用 Grok 在本机保存的登录状态，向 xAI 服务器发送只读的额度查询。"
+                         "登录凭证只在内存中使用，不会保存、记录或上传。每 5 分钟最多查询一次，可随时在菜单中撤销。")
+
+    def test_cancel_keeps_local_only_and_saves_nothing(self):
+        surface = self.surface(answer=False)
+        self.assertFalse(surface.request_session_consent("grok"))
+        self.assertEqual(self.asked, [("Grok", "xAI")])
+        self.saved.assert_not_called()
+
+    def test_confirm_persists_consent(self):
+        surface = self.surface(answer=True)
+        self.assertTrue(surface.request_session_consent("kimi"))
+        self.saved.assert_called_once_with("kimi", True)
+        self.assertFalse(surface._display_error)
+
+    def test_not_asked_for_incapable_or_already_consented(self):
+        surface = self.surface(consented=["grok"], answer=True)
+        self.assertFalse(surface.request_session_consent("codex"))
+        self.assertFalse(surface.request_session_consent("grok"))
+        self.assertEqual(self.asked, [])
+        self.saved.assert_not_called()
+
+    def test_menu_click_revokes_consented_provider(self):
+        surface = self.surface(consented=["grok"])
+        surface._consent_clicked("grok")
+        self.saved.assert_called_once_with("grok", False)
+        self.assertEqual(self.asked, [])
+
+    def test_dialog_failure_counts_as_cancel(self):
+        surface = self.surface()
+        surface.confirm_consent = lambda app, provider: 1 / 0
+        self.assertFalse(surface.request_session_consent("grok"))
+        self.saved.assert_not_called()

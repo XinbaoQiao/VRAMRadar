@@ -26,7 +26,7 @@ import webbrowser
 from typing import Any, Callable
 
 from .usage_monitor import CodexUsageMonitor
-from .providers import PROVIDERS, ProviderMonitor, normalize_selection
+from .providers import PROVIDERS, SESSION_CONSENT_IDS, ProviderMonitor, normalize_selection
 from .usage_surface import CodexUsageSurface
 
 from .connectors import (
@@ -1227,6 +1227,8 @@ class AppApi:
         monitor = getattr(self, "_usage_providers", None)
         if monitor is not None:
             monitor.configure(bool(profile.codex_usage_enabled), profile.codex_executable, selected)
+            if hasattr(monitor, "set_session_consent"):
+                monitor.set_session_consent(getattr(profile, "usage_session_consent", ()))
 
     def get_usage_providers(self, force: bool = False) -> dict[str, Any]:
         """Lock-free read for the native strip's 1 s timer (never probes inline)."""
@@ -1236,7 +1238,9 @@ class AppApi:
         return {
             "enabled": bool(profile.codex_usage_enabled),
             "selected": list(profile.usage_providers),
-            "registry": [{"id": spec.id, "name": spec.name, "short": spec.short} for spec in PROVIDERS],
+            "registry": [{"id": spec.id, "name": spec.name, "short": spec.short,
+                          "needs_session_consent": spec.needs_session_consent} for spec in PROVIDERS],
+            "session_consent": list(getattr(profile, "usage_session_consent", ())),
             "providers": self._usage_providers.snapshot(),
         }
 
@@ -1251,6 +1255,24 @@ class AppApi:
                 updated = Profile.from_dict(raw)
             except ConfigError:
                 return {"ok": False, "code": "invalid_usage_providers"}
+            return self._persist_local_preferences(updated)
+
+    def save_usage_session_consent(self, provider_id: Any, granted: Any) -> dict[str, Any]:
+        """Grant (True) or revoke (False) one provider's session-based quota
+        reading; only providers with ``needs_session_consent`` qualify."""
+        if (not isinstance(provider_id, str) or provider_id not in SESSION_CONSENT_IDS
+                or not isinstance(granted, bool)):
+            return {"ok": False, "code": "invalid_usage_session_consent"}
+        with self._profile_mutation_lock:
+            raw = self.profile.to_dict()
+            consented = [item for item in self.profile.usage_session_consent if item != provider_id]
+            if granted:
+                consented.append(provider_id)
+            raw["usage_session_consent"] = {item: True for item in consented}
+            try:
+                updated = Profile.from_dict(raw)
+            except ConfigError:
+                return {"ok": False, "code": "invalid_usage_session_consent"}
             return self._persist_local_preferences(updated)
 
     def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
@@ -3500,6 +3522,7 @@ class AppApi:
                 "codex_show_disks",
                 "codex_time_format",
                 "usage_providers",
+                "usage_session_consent",
                 "usage_background",
                 "favorite_server_ids",
                 "pinned_server_ids",
@@ -4958,6 +4981,7 @@ def main(argv: list[str] | None = None) -> int:
                         refresh=lambda: (api.get_codex_usage(True), api.get_usage_providers(True)),
                         disable=disable_usage_surface,
                         providers=api.get_usage_providers, save_providers=api.save_usage_providers,
+                        save_consent=api.save_usage_session_consent,
                         rescan=lambda: api.get_usage_providers(True),
                         quit_application=shutdown.request,
                     )

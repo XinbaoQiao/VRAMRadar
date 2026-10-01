@@ -281,5 +281,65 @@ class ApiTests(unittest.TestCase):
                 api._usage_providers.close()
 
 
+
+class SessionConsentTests(unittest.TestCase):
+    def tearDown(self):
+        from vram_radar import providers
+        providers.set_session_consent(())
+
+    def test_capability_flag_only_on_session_providers(self):
+        from vram_radar.providers import PROVIDERS, SESSION_CONSENT_IDS
+        self.assertEqual(SESSION_CONSENT_IDS, ("grok", "kimi"))
+        flags = {spec.id: spec.needs_session_consent for spec in PROVIDERS}
+        self.assertFalse(flags["codex"] or flags["deepseek"] or flags["claude"])
+        grok_spec = next(spec for spec in PROVIDERS if spec.id == "grok")
+        self.assertTrue(grok_spec.session_app and grok_spec.session_server)
+
+    def test_migration_default_is_no_consent_and_roundtrips(self):
+        legacy = Profile.empty("test").to_dict()
+        legacy.pop("usage_session_consent", None)
+        self.assertEqual(Profile.from_dict(legacy).usage_session_consent, ())
+        for bad in ("grok", 3, None, {"grok": "yes"}, {"grok": 1}, {"codex": True, "future": True}):
+            self.assertEqual(Profile.from_dict({**legacy, "usage_session_consent": bad}).usage_session_consent, ())
+        profile = Profile.from_dict({**legacy, "usage_session_consent": {"kimi": True, "grok": True, "bogus": True}})
+        self.assertEqual(profile.usage_session_consent, ("grok", "kimi"))
+        self.assertEqual(profile.to_dict()["usage_session_consent"], {"grok": True, "kimi": True})
+        self.assertEqual(Profile.from_dict(profile.to_dict()), profile)
+        revoked = Profile.from_dict({**legacy, "usage_session_consent": {"grok": False, "kimi": True}})
+        self.assertEqual(revoked.usage_session_consent, ("kimi",))
+
+    def test_api_persists_grant_and_revoke_and_exposes_to_providers(self):
+        from vram_radar import providers
+        from vram_radar.shell import AppApi
+        from vram_radar.storage import ProfileStore, storage_paths
+        with tempfile.TemporaryDirectory() as directory:
+            paths = storage_paths(Path(directory))
+            profile = Profile.from_dict({**Profile.empty("test").to_dict(), "codex_usage_enabled": True})
+            api = AppApi(profile, ProfileStore(paths), paths, Mock(), automatic_import_enabled=False)
+            try:
+                with patch.object(api._codex_usage, "configure"), patch.object(api._usage_providers, "configure"):
+                    self.assertFalse(providers.session_consent("grok"))
+                    self.assertFalse(api.save_usage_session_consent("codex", True)["ok"])
+                    self.assertFalse(api.save_usage_session_consent("grok", "yes")["ok"])
+                    self.assertTrue(api.save_usage_session_consent("grok", True)["ok"])
+                    self.assertTrue(api.save_usage_session_consent("kimi", True)["ok"])
+                    self.assertEqual(api.store.load("test").usage_session_consent, ("grok", "kimi"))
+                    self.assertTrue(providers.session_consent("grok"))
+                    # Other preference saves keep the consent map.
+                    self.assertTrue(api.save_usage_providers(["codex", "grok"])["ok"])
+                    self.assertEqual(api.store.load("test").usage_session_consent, ("grok", "kimi"))
+                    self.assertTrue(api.save_usage_session_consent("grok", False)["ok"])
+                    self.assertEqual(api.store.load("test").usage_session_consent, ("kimi",))
+                    self.assertFalse(providers.session_consent("grok"))
+                    self.assertTrue(providers.session_consent("kimi"))
+                overview = api.get_usage_providers()
+                self.assertEqual(overview["session_consent"], ["kimi"])
+                capable = [item["id"] for item in overview["registry"] if item["needs_session_consent"]]
+                self.assertEqual(capable, ["grok", "kimi"])
+            finally:
+                api._codex_usage.close()
+                api._usage_providers.close()
+
+
 if __name__ == "__main__":
     unittest.main()

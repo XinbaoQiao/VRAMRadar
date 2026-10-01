@@ -500,6 +500,13 @@ class ProviderSpec:
     short: str
     probe: Callable[[Environment], dict]
     order: int = 100
+    # Session-based quota reading (using the app's own saved login to send a
+    # read-only quota query) is strictly opt-in per provider: the user must
+    # consent first (see providers.session_consent). ``session_app`` is the
+    # local app whose login is used, ``session_server`` whose server is asked.
+    needs_session_consent: bool = False
+    session_app: str = ""
+    session_server: str = ""
 
 
 def base_state(spec_id: str, name: str, short: str, detection: Detection) -> dict:

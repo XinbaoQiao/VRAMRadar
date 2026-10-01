@@ -763,6 +763,55 @@ def concise_tooltip(codex_rows, provider_rows, language: str = "zh-CN") -> str:
     return "\n".join(line for line in lines if line)
 
 
+CONSENT_TITLE = "自动读取额度 · 显存雷达"
+CONSENT_TEXT = ("显存雷达将使用 {app} 在本机保存的登录状态，向 {provider} 服务器发送只读的额度查询。"
+                "登录凭证只在内存中使用，不会保存、记录或上传。每 5 分钟最多查询一次，可随时在菜单中撤销。")
+
+
+def consent_text(app: str, provider: str) -> str:
+    return CONSENT_TEXT.format(app=app, provider=provider)
+
+
+def windows_consent_dialog(app: str, provider: str) -> bool:
+    """Modal 确认/取消 dialog (UI thread only). True only on 确认."""
+    from System.Drawing import Font, Point, Size, SizeF
+    from System.Windows.Forms import (AutoScaleMode, Button, DialogResult, Form, FormBorderStyle,
+                                      FormStartPosition, Label)
+    dialog = Form()
+    try:
+        dialog.AutoScaleDimensions = SizeF(96, 96)
+        dialog.AutoScaleMode = AutoScaleMode.Dpi
+        dialog.Text = CONSENT_TITLE
+        dialog.Font = Font("Microsoft YaHei UI", 9)
+        dialog.FormBorderStyle = FormBorderStyle.FixedDialog
+        dialog.StartPosition = FormStartPosition.CenterScreen
+        dialog.MaximizeBox = False
+        dialog.MinimizeBox = False
+        dialog.ShowInTaskbar = False
+        dialog.TopMost = True
+        dialog.ClientSize = Size(440, 176)
+        label = Label()
+        label.Text = consent_text(app, provider)
+        label.Location = Point(18, 18)
+        label.Size = Size(404, 104)
+        accept = Button()
+        accept.Text = "确认"
+        accept.DialogResult = DialogResult.OK
+        accept.Location = Point(250, 134)
+        accept.Size = Size(82, 28)
+        cancel = Button()
+        cancel.Text = "取消"
+        cancel.DialogResult = DialogResult.Cancel
+        cancel.Location = Point(340, 134)
+        cancel.Size = Size(82, 28)
+        for control in (label, accept, cancel):
+            dialog.Controls.Add(control)
+        dialog.AcceptButton, dialog.CancelButton = accept, cancel
+        return dialog.ShowDialog() == DialogResult.OK
+    finally:
+        dialog.Dispose()
+
+
 class CodexUsageSurface:
     def __init__(self, window, snapshot: Callable[[], dict], *, language: Callable[[], str],
                  open_settings: Callable[[], object], refresh: Callable[[], object],
@@ -772,12 +821,17 @@ class CodexUsageSurface:
                  save_display: Callable[[str, object], dict] | None = None,
                  providers: Callable[[], dict] | None = None,
                  save_providers: Callable[[list], dict] | None = None,
-                 rescan: Callable[[], object] | None = None):
+                 rescan: Callable[[], object] | None = None,
+                 save_consent: Callable[[str, bool], dict] | None = None,
+                 confirm_consent: Callable[[str, str], bool] | None = None):
         self.window, self.snapshot, self.language = window, snapshot, language
         # Without a provider source the strip is exactly the Codex-only widget.
         self.providers = providers or (lambda: {"enabled": True, "selected": ["codex"], "providers": {}})
         self.save_providers = save_providers
         self.rescan = rescan or (lambda: None)
+        # Session-based quota reading consent: dialog injectable for tests.
+        self.save_consent = save_consent
+        self.confirm_consent = confirm_consent or windows_consent_dialog
         self._extra_columns: list = []
         self.open_settings, self.refresh = open_settings, refresh
         self.open_home = open_home or open_settings
@@ -802,6 +856,49 @@ class CodexUsageSurface:
             except Exception:
                 logging.getLogger("vram_radar").warning("Codex surface action failed")
         threading.Thread(target=invoke, daemon=True, name="codex-surface-action").start()
+
+    @staticmethod
+    def _consent_spec(provider_id):
+        from .providers import PROVIDERS
+        return next((spec for spec in PROVIDERS if spec.id == provider_id and spec.needs_session_consent), None)
+
+    def has_session_consent(self, provider_id) -> bool:
+        try:
+            return provider_id in (self.providers().get("session_consent") or ())
+        except Exception:
+            return False
+
+    def request_session_consent(self, provider_id) -> bool:
+        """UI thread. Ask a capable, not yet consented provider's consent.
+        确认 persists it; 取消 changes nothing, so a just-ticked provider stays
+        shown with its local-only status."""
+        spec = self._consent_spec(provider_id)
+        if spec is None or self.save_consent is None or self.has_session_consent(provider_id):
+            return False
+        try:
+            accepted = self.confirm_consent(spec.session_app or spec.name, spec.session_server or spec.name) is True
+        except Exception:
+            logging.getLogger("vram_radar").warning("session consent dialog failed")
+            accepted = False
+        if accepted:
+            self._action(lambda: self._store_consent(provider_id, True))
+        return accepted
+
+    def revoke_session_consent(self, provider_id) -> None:
+        if self.save_consent is not None and self._consent_spec(provider_id) is not None:
+            self._action(lambda: self._store_consent(provider_id, False))
+
+    def _consent_clicked(self, provider_id) -> None:
+        if self.has_session_consent(provider_id):
+            self.revoke_session_consent(provider_id)
+        else:
+            self.request_session_consent(provider_id)
+
+    def _store_consent(self, provider_id, granted: bool) -> None:
+        try:
+            self._display_error = not bool(self.save_consent(provider_id, granted).get("ok"))
+        except Exception:
+            self._display_error = True
 
     def _disable(self) -> None:
         # Keep settings reachable when disabling the only macOS menu-bar entry.
@@ -1261,6 +1358,8 @@ class CodexUsageSurface:
                 except Exception:
                     self._display_error = True
             self._action(save)
+            if provider_id not in current:
+                self.request_session_consent(provider_id)  # 取消 keeps it ticked, local-only
         for spec in PROVIDERS:
             item = self._models_menu.DropDownItems.Add(spec.name)
             item.Click += lambda _s, _e, pid=spec.id: toggle_model(pid)
@@ -1268,6 +1367,16 @@ class CodexUsageSurface:
         self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 6 个")
         self._limit_item.Enabled = False
         self._models_menu.DropDownItems.Add(ToolStripSeparator())
+        self._consent_menu = self._models_menu.DropDownItems.Add("自动读取额度…")
+        self._consent_menu.DropDown.Renderer = renderer
+        self._consent_menu.DropDown.SizeChanged += round_menu
+        self._consent_items = {}
+        for spec in PROVIDERS:
+            if spec.needs_session_consent:
+                item = self._consent_menu.DropDownItems.Add(spec.name)
+                item.Click += lambda _s, _e, pid=spec.id: self._consent_clicked(pid)
+                self._consent_items[spec.id] = (item, spec)
+        self._consent_menu.Visible = bool(self._consent_items)
         self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
         self._rescan_item.Click += lambda *_: self._action(self.rescan)
         menu.Items.Add(ToolStripSeparator())
@@ -1386,6 +1495,14 @@ class CodexUsageSurface:
             english = language == "en"
             self._models_menu.Text = "Models" if english else "显示模型"
             self._rescan_item.Text = "Detect again" if english else "重新检测"
+            self._consent_menu.Text = "Read quota automatically…" if english else "自动读取额度…"
+            consented = overview.get("session_consent") or ()
+            for pid, (item, spec) in self._consent_items.items():
+                if pid in consented:
+                    item.Text = (f"Revoke automatic reading · {spec.name}" if english
+                                 else f"撤销自动读取 · {spec.name}")
+                else:
+                    item.Text = f"{spec.name} · Allow…" if english else f"{spec.name} · 允许…"
             from .providers import MAX_SELECTED
             full = len(selected) >= MAX_SELECTED
             for pid, (item, spec) in self._model_items.items():

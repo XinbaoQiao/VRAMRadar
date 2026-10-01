@@ -19,8 +19,10 @@ from .base import Environment, ProviderSpec, pair
 PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(codex.ID, codex.NAME, codex.SHORT, codex.probe, 0),
     ProviderSpec(deepseek.ID, deepseek.NAME, deepseek.SHORT, deepseek.probe, 10),
-    ProviderSpec(grok.ID, grok.NAME, grok.SHORT, grok.probe, 20),
-    ProviderSpec(kimi.ID, kimi.NAME, kimi.SHORT, kimi.probe, 30),
+    ProviderSpec(grok.ID, grok.NAME, grok.SHORT, grok.probe, 20, needs_session_consent=True,
+                 session_app=grok.NAME, session_server="xAI"),
+    ProviderSpec(kimi.ID, kimi.NAME, kimi.SHORT, kimi.probe, 30, needs_session_consent=True,
+                 session_app=kimi.NAME, session_server="Kimi"),
     ProviderSpec("claude", "Claude", "Claude", generic.claude, 40),
     ProviderSpec("glm", "GLM 智谱清言", "智谱清言", generic.glm, 50),
     ProviderSpec("qwen", "Qwen 通义", "通义千问", generic.qwen, 60),
@@ -36,6 +38,40 @@ LOG = logging.getLogger("vram_radar")
 # The taskbar strip lays out at most this many apps legibly (three columns
 # of two rows); the Models menu disables further ticks at the limit.
 MAX_SELECTED = 6
+
+# Providers able to read quota with their app's saved login (opt-in only).
+# Generic providers can join later by setting ``needs_session_consent``.
+SESSION_CONSENT_IDS = tuple(spec.id for spec in PROVIDERS if spec.needs_session_consent)
+_SESSION_CONSENT: set[str] = set()
+_CONSENT_LOCK = threading.Lock()
+
+
+def normalize_session_consent(value) -> tuple[str, ...]:
+    """``{id: true}`` map (or a list of ids) -> consented ids in registry
+    order.  Anything malformed, unknown ids and providers without the
+    capability all mean *no consent* (the migration-safe default)."""
+    if isinstance(value, dict):
+        wanted = {key for key, granted in list(value.items())[:64] if isinstance(key, str) and granted is True}
+    elif isinstance(value, (list, tuple)):
+        wanted = {key for key in value[:64] if isinstance(key, str)}
+    else:
+        return ()
+    return tuple(provider_id for provider_id in SESSION_CONSENT_IDS if provider_id in wanted)
+
+
+def set_session_consent(values) -> None:
+    consented = normalize_session_consent(values)
+    with _CONSENT_LOCK:
+        _SESSION_CONSENT.clear()
+        _SESSION_CONSENT.update(consented)
+
+
+def session_consent(provider_id: str) -> bool:
+    """Whether the user allowed ``provider_id`` to send a read-only quota
+    query using its app's saved login.  Any such network request must be
+    gated on this; until then providers stay local-only."""
+    with _CONSENT_LOCK:
+        return provider_id in _SESSION_CONSENT
 
 
 def normalize_selection(values) -> tuple[str, ...]:
@@ -122,6 +158,11 @@ class ProviderMonitor:
                 self.worker = threading.Thread(target=self._run, daemon=True, name="usage-provider-monitor")
                 self.worker.start()
             self.wake.set()
+
+    def set_session_consent(self, values) -> None:
+        """Publish the profile's consent map to the providers (no rescan:
+        today consent does not change what a probe does)."""
+        set_session_consent(values)
 
     def refresh(self) -> None:
         with self.lock:
