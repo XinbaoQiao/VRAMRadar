@@ -134,6 +134,68 @@ def strip_margin(strip_scale: float) -> int:
 RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
 
 
+# 图标 mode: icon size (px at the strip's 100 % scale) and the clear gap
+# between an icon and its value in px at 100 % *display* scale.
+ICON_PX = 15
+ICON_GAP = 8
+
+
+def strip_icon_px(strip_scale: float, factor: float = 1.0) -> int:
+    """15 px at 1x: fits a 20 px row with even padding."""
+    return max(10, round(round(ICON_PX * strip_scale) * factor))
+
+
+def icon_gap_px(strip_scale: float, factor: float = 1.0) -> int:
+    import math
+    return max(1, math.ceil(ICON_GAP * strip_scale / STRIP_DENSITY * factor))
+
+
+def set_name_cell(name_label, image, name: str, strip_scale: float, factor: float) -> None:
+    """Name cell: the app icon (图标) or the name text (文字 / no icon)."""
+    from System.Drawing import ContentAlignment
+    from System.Windows.Forms import Padding
+    if name_label.Image is not image:
+        name_label.Image = image
+        name_label.ImageAlign = ContentAlignment.MiddleLeft
+    # 1 px lower: the regular-weight name (and the icon) then share the bold
+    # value's baseline / optical centre instead of sitting ~1 px high.
+    nudge = Padding(0, max(1, round(round(1.5 * strip_scale) * factor)), 0, 0)
+    if name_label.Padding != nudge:
+        name_label.Padding = nudge
+    name_label.Text = "" if image is not None else name
+
+
+def place_columns(used, strip_scale: float, factor: float) -> int:
+    """Lay out (name, value) label pairs, two rows per column; returns the
+    client width.  Icon cells reserve exactly the icon width and keep
+    ``icon_gap_px`` clear before the value; text cells use the tight gap."""
+    from System.Drawing import Point, Size
+    scale = lambda value: round(value * strip_scale)
+    icon_px = strip_icon_px(strip_scale, factor)
+    x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
+    for start in range(0, len(used), 2):
+        group = used[start:start+2]
+        has_icon = any(n.Image is not None and not n.Text for n, _ in group)
+        name_w = max(icon_px if (n.Image is not None and not n.Text) else n.GetPreferredSize(Size(0, 0)).Width
+                     for n, _ in group)
+        between = max(inner, icon_gap_px(strip_scale, factor)) if has_icon else inner
+        value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
+        for row, (name_label, value_label) in enumerate(group):
+            # Rows split the strip height exactly (scale(20)*2 can be 1 px
+            # taller than scale(40), which clipped the lower row).
+            total, top_h = scale(40), scale(40) // 2
+            if len(group) == 1:
+                y, row_h = (total - scale(20)) // 2, scale(20)
+            else:
+                y, row_h = (0, top_h) if row == 0 else (top_h, total - top_h)
+            name_label.Size = Size(name_w, row_h)
+            value_label.Size = Size(value_w, row_h)
+            name_label.Location = Point(x, y)
+            value_label.Location = Point(x + name_w + between, y)
+        x += name_w + between + value_w + gap
+    return x - gap + scale(7*factor)
+
+
 def left_slot(bar, elements, size, margin=6):
     """Choose a spot in the empty area right of the Widgets/weather button and
     left of Start/Search (centered taskbar) or of the first pinned app.
@@ -2190,12 +2252,9 @@ class CodexUsageSurface:
                                 top.Font = fonts[0]
                             if bottom.Font is not fonts[1]:
                                 bottom.Font = fonts[1]
-                        # 图标 mode: the app icon replaces the name -- text
-                        # height, vertically centred; Padding reserves its
-                        # width so the value never overlaps it.
-                        # 15 px at 1x: fits a 20 px row with even padding.
-                        icon_px = max(10, round(scale(15) * factor))
+                        icon_px = strip_icon_px(self._scale, factor)
                         for index, (name_label, _) in enumerate(used):
+                            image = None
                             if icon_paths:
                                 path, pid = icon_paths[index]
                                 try:
@@ -2203,35 +2262,8 @@ class CodexUsageSurface:
                                     image = provider_icon(path, icon_px, cells[index][0])
                                 except Exception:
                                     image = None
-                            else:
-                                image = None
-                            if name_label.Image is not image:
-                                name_label.Image = image
-                                name_label.ImageAlign = ContentAlignment.MiddleLeft
-                            # 1 px lower: the regular-weight name (and the
-                            # icon) then share the bold value's baseline /
-                            # optical centre instead of sitting ~1 px high.
-                            nudge = Padding(0, max(1, round(scale(1.5) * factor)), 0, 0)
-                            if name_label.Padding != nudge:
-                                name_label.Padding = nudge
-                            # No icon available -> fall back to the name.
-                            name_label.Text = "" if image is not None else cells[index][0]
-                        x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
-                        for start in range(0, len(used), 2):
-                            group = used[start:start+2]
-                            # Icon cells reserve exactly the icon width; the
-                            # `inner` gap then keeps the value clear of it.
-                            name_w = max(icon_px if n.Image is not None else n.GetPreferredSize(Size(0, 0)).Width
-                                         for n, _ in group)
-                            value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
-                            for row, (name_label, value_label) in enumerate(group):
-                                y = scale(10) if len(group) == 1 else scale(20)*row
-                                name_label.Size = Size(name_w, scale(20))
-                                value_label.Size = Size(value_w, scale(20))
-                                name_label.Location = Point(x, y)
-                                value_label.Location = Point(x + name_w + inner, y)
-                            x += name_w + inner + value_w + gap
-                        width = x - gap + scale(7*factor)
+                            set_name_cell(name_label, image, cells[index][0], self._scale, factor)
+                        width = place_columns(used, self._scale, factor)
                         if available is None or width <= available:
                             break
                     if available is not None and width > available:
