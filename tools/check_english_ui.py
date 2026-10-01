@@ -112,7 +112,15 @@ def run(language: str = "en") -> dict:
                     if sub is not None and sub.Count:
                         walk(sub, f"{path}/{i}")
 
+            separator_checks = []
+
             def collect():
+                # The greyed "max 4" note sits under its own separator.
+                items = surface._models_menu.DropDownItems
+                index = items.IndexOf(surface._limit_item)
+                if surface._limit_item.Available:
+                    separator_checks.append(index > 0 and items[index - 1].Equals(surface._limit_sep)
+                                            and bool(surface._limit_sep.Available))
                 walk(surface._menu.Items, "menu")
                 form = surface.form
                 for c in form.Controls:
@@ -135,6 +143,7 @@ def run(language: str = "en") -> dict:
                     seen.setdefault(value, "dialog")
             hits = [{"where": where, "text": text[:120]} for text, where in seen.items()
                     if (CJK.search(text) if english else False)]
+            result["limit_separator"] = bool(separator_checks) and all(separator_checks)
             result.update(ok=not hits, strings=len(seen), hits=hits[:40],
                           sample=sorted(t[:40] for t in seen) if "--sample" in sys.argv else [])
             if not english:
