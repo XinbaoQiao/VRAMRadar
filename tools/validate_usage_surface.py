@@ -229,7 +229,7 @@ def main() -> int:
                                                            and surface.form.Height == round(40*surface._scale))
                 invoke(select_weekly)
                 invoke(lambda: assertions.update(text_only_strip=surface._labels[0].Left == round(5*surface._scale)
-                    and all(c[1] in {"usage_background", "usage_icons"} for c in surface._display_choices)))
+                    and all(c[1] in {"usage_background", "usage_labels"} for c in surface._display_choices)))
                 display["codex_time_format"] = "days"
                 invoke(tick)
                 invoke(lambda: assertions.update(unified_decimal_hours_ignore_legacy_preference=(

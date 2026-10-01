@@ -684,6 +684,17 @@ def normalize_usage_session_consent(value: Any) -> tuple[str, ...]:
 USAGE_BACKGROUNDS = ("transparent", "match", "dark", "light", "accent")
 
 
+USAGE_LABELS = ("text", "icons")
+
+
+def normalize_usage_labels(value: Any, legacy_icons: Any = None) -> str:
+    """"text" | "icons"; a profile saved by the short-lived icon toggle
+    (``usage_icons = true``) migrates to "icons"; anything else is "text"."""
+    if isinstance(value, str) and value in USAGE_LABELS:
+        return value
+    return "icons" if legacy_icons is True else "text"
+
+
 def normalize_usage_background(value: Any) -> str:
     """Unknown styles (older/newer releases) fall back to the default."""
     return value if isinstance(value, str) and value in USAGE_BACKGROUNDS else "transparent"
@@ -716,8 +727,9 @@ class Profile:
     usage_session_consent: tuple[str, ...] = ()
     # Taskbar strip background: see usage_surface.BACKGROUND_STYLES.
     usage_background: str = "transparent"
-    # App icons left of each name on the strip (off = the original look).
-    usage_icons: bool = False
+    # How each app is labelled on the strip: "text" (full name, the original
+    # look) or "icons" (the app's icon replaces the name).
+    usage_labels: str = "text"
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -947,7 +959,7 @@ class Profile:
             usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
             usage_session_consent=normalize_usage_session_consent(raw.get("usage_session_consent", {})),
             usage_background=normalize_usage_background(raw.get("usage_background", "transparent")),
-            usage_icons=raw.get("usage_icons") is True,
+            usage_labels=normalize_usage_labels(raw.get("usage_labels"), raw.get("usage_icons")),
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -978,7 +990,7 @@ class Profile:
             "usage_providers": list(self.usage_providers),
             "usage_session_consent": {provider_id: True for provider_id in self.usage_session_consent},
             "usage_background": self.usage_background,
-            "usage_icons": self.usage_icons,
+            "usage_labels": self.usage_labels,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],

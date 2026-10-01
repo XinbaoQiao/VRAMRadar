@@ -1603,12 +1603,12 @@ class CodexUsageSurface:
             item.Click += lambda _s, _e, v=style: save_choice("usage_background", v)
             self._display_choices.append((item, "usage_background", style, zh, en))
         self._display_menu.DropDownItems.Add(ToolStripSeparator())
-        self._icons_title = self._display_menu.DropDownItems.Add("图标")
+        self._icons_title = self._display_menu.DropDownItems.Add("名称显示")
         self._icons_title.Enabled = False
-        for value, zh, en in ((True, "显示图标", "Show icons"), (False, "不显示", "Hide icons")):
+        for value, zh, en in (("text", "文字", "Text"), ("icons", "图标", "Icons")):
             item = self._display_menu.DropDownItems.Add(zh)
-            item.Click += lambda _s, _e, v=value: save_choice("usage_icons", v)
-            self._display_choices.append((item, "usage_icons", value, zh, en))
+            item.Click += lambda _s, _e, v=value: save_choice("usage_labels", v)
+            self._display_choices.append((item, "usage_labels", value, zh, en))
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
         # Multi-provider picker (multi-select, persisted in the Profile).
@@ -1938,11 +1938,12 @@ class CodexUsageSurface:
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
             style = options.get("usage_background")
             style = style if style in BACKGROUND_STYLES else "transparent"
-            show_icons = options.get("usage_icons") is True
-            self._icons_title.Text = "Icons" if english else "图标"
+            show_icons = options.get("usage_labels") == "icons"
+            self._icons_title.Text = "Labels" if english else "名称显示"
             for item, key, value, zh, en in self._display_choices:
                 item.Text = en if language == "en" else zh
-                item.Checked = (style == value) if key == "usage_background" else (show_icons == value)
+                item.Checked = (style == value) if key == "usage_background" else (
+                    ("icons" if show_icons else "text") == value)
             now_mono = time.monotonic()
             theme = theme_settings()
             if (theme != getattr(self, "_theme", None) or style != getattr(self, "_style", None)
@@ -2087,7 +2088,9 @@ class CodexUsageSurface:
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
                 (fg.R, fg.G, fg.B), self._palette[0])))
             for (name_label, value_label), (name, value, color) in zip(self._extra_columns, cells):
-                name_label.Text, value_label.Text = name, compact_value(value, getattr(self, "_fit_level", 0))
+                # 图标 mode: the icon replaces the name (tooltip keeps full names).
+                name_label.Text = "" if show_icons and multi and name_label.Image is not None else name
+                value_label.Text = compact_value(value, getattr(self, "_fit_level", 0))
                 name_label.ForeColor, value_label.ForeColor = muted, color
                 name_label.Visible = value_label.Visible = True
             for name_label, value_label in self._extra_columns[len(cells):]:
@@ -2135,9 +2138,9 @@ class CodexUsageSurface:
                                 top.Font = fonts[0]
                             if bottom.Font is not fonts[1]:
                                 bottom.Font = fonts[1]
-                        # Optional app icon left of each name: text-height,
-                        # vertically centred, drawn by the label (Padding
-                        # keeps the name clear of it; widths include it).
+                        # 图标 mode: the app icon replaces the name -- text
+                        # height, vertically centred; Padding reserves its
+                        # width so the value never overlaps it.
                         icon_px = max(10, round(scale(16) * factor))
                         for index, (name_label, _) in enumerate(used):
                             if icon_paths:
@@ -2152,11 +2155,15 @@ class CodexUsageSurface:
                             if name_label.Image is not image:
                                 name_label.Image = image
                                 name_label.ImageAlign = ContentAlignment.MiddleLeft
-                                name_label.Padding = Padding(icon_px + scale(4 * factor), 0, 0, 0) if image else Padding(0)
+                            # No icon available -> fall back to the name.
+                            name_label.Text = "" if image is not None else cells[index][0]
                         x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
                         for start in range(0, len(used), 2):
                             group = used[start:start+2]
-                            name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
+                            # Icon cells reserve exactly the icon width; the
+                            # `inner` gap then keeps the value clear of it.
+                            name_w = max(icon_px if n.Image is not None else n.GetPreferredSize(Size(0, 0)).Width
+                                         for n, _ in group)
                             value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
                             for row, (name_label, value_label) in enumerate(group):
                                 y = scale(10) if len(group) == 1 else scale(20)*row

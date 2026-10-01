@@ -147,16 +147,18 @@ class MenuTierTests(unittest.TestCase):
 
 
 class StripIconTests(unittest.TestCase):
-    def test_profile_default_off_and_round_trip(self):
+    def test_profile_default_text_migration_and_round_trip(self):
         from vram_radar.models import Profile
         raw = Profile.empty("new").to_dict()
-        self.assertIs(raw["usage_icons"], False)
-        raw.pop("usage_icons")
-        self.assertIs(Profile.from_dict(raw).usage_icons, False)   # older profiles
-        raw["usage_icons"] = "yes"                                 # malformed -> off
-        self.assertIs(Profile.from_dict(raw).usage_icons, False)
-        raw["usage_icons"] = True
-        self.assertIs(Profile.from_dict(Profile.from_dict(raw).to_dict()).usage_icons, True)
+        self.assertEqual(raw["usage_labels"], "text")
+        self.assertNotIn("usage_icons", raw)
+        raw.pop("usage_labels")
+        self.assertEqual(Profile.from_dict(raw).usage_labels, "text")       # older profiles
+        self.assertEqual(Profile.from_dict({**raw, "usage_icons": True}).usage_labels, "icons")  # earlier toggle
+        self.assertEqual(Profile.from_dict({**raw, "usage_icons": False}).usage_labels, "text")
+        self.assertEqual(Profile.from_dict({**raw, "usage_labels": "emoji"}).usage_labels, "text")
+        migrated = Profile.from_dict({**raw, "usage_icons": True}).to_dict()
+        self.assertEqual((migrated["usage_labels"], "usage_icons" in migrated), ("icons", False))
 
     def test_msix_asset_choice(self):
         names = ["Square44x44Logo.png", "Square44x44Logo.scale-200.png",
