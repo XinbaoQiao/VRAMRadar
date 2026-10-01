@@ -398,6 +398,11 @@ class UsageCache:
                 self.next_at = now + min(MAX_BACKOFF, self.interval * (2 ** min(self.failures, 4)))
             return self._view(now)
 
+    def reset(self) -> None:
+        """Next ``get`` queries at once (bypasses interval and backoff)."""
+        with self.lock:
+            self.next_at, self.failures = 0.0, 0
+
     def _view(self, now: float) -> dict:
         view = dict(self.last or {"status": "error"})
         if view.get("status") not in {"ok", "no_credential", "unauthorized"} and self.last_good is not None:

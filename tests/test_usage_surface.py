@@ -161,6 +161,13 @@ class SessionConsentSurfaceTests(unittest.TestCase):
                                                        "providers": dict(states or {})},
                                     save_consent=self.saved, confirm_consent=confirm)
         surface.notify_blocked = self.notices.append
+        self.revoke_asked, self.toasts = [], []
+        def confirm_revoke(name):
+            self.revoke_asked.append(name)
+            return self.revoke_answer
+        self.revoke_answer = True
+        surface.confirm_revoke = confirm_revoke
+        surface.notify_toast = lambda *args: self.toasts.append(args)
         surface._action = lambda callback: callback()  # run synchronously
         return surface
 
@@ -184,28 +191,12 @@ class SessionConsentSurfaceTests(unittest.TestCase):
         self.assertEqual([a for a, _ in self.asked], ["Grok", "Kimi"])
         self.assertEqual(self.notices, [])
 
-    def test_dialog_layout_scales_and_fits_text(self):
-        from vram_radar.usage_surface import dialog_layout
-        normal, big = dialog_layout(1.0, 60), dialog_layout(1.5, 90)
-        self.assertEqual(big["client"][0], 660)
-        self.assertGreaterEqual(big["label"][3], 90)
-        self.assertGreater(big["button_y"], big["label"][1] + big["label"][3])
-        self.assertLessEqual(big["button_y"] + big["button"][1], big["client"][1])
-        self.assertEqual(normal["font_px"], 12)
-        self.assertEqual(big["font_px"], 18)
-
     def test_fresh_profile_has_no_consent(self):
         from vram_radar.models import Profile
         self.assertEqual(Profile.empty("new").usage_session_consent, ())
         raw = Profile.empty("new").to_dict()
         raw.pop("usage_session_consent", None)
         self.assertEqual(Profile.from_dict(raw).usage_session_consent, ())
-
-    def test_dialog_text(self):
-        from vram_radar.usage_surface import consent_text
-        self.assertEqual(consent_text("Grok", "xAI"),
-                         "显存雷达将使用 Grok 在本机保存的登录状态，向 xAI 服务器发送只读的额度查询。"
-                         "登录凭证只在内存中使用，不会保存、记录或上传。每 5 分钟最多查询一次，可随时在菜单中撤销。")
 
     def test_cancel_keeps_local_only_and_saves_nothing(self):
         surface = self.surface(answer=False)
@@ -226,11 +217,33 @@ class SessionConsentSurfaceTests(unittest.TestCase):
         self.assertEqual(self.asked, [])
         self.saved.assert_not_called()
 
-    def test_menu_click_revokes_consented_provider(self):
+    def test_menu_click_revokes_consented_provider_after_confirmation(self):
         surface = self.surface(consented=["grok"])
         surface._consent_clicked("grok")
         self.saved.assert_called_once_with("grok", False)
         self.assertEqual(self.asked, [])
+        self.assertEqual(self.revoke_asked, ["Grok"])
+        self.assertIn("已关闭 Grok", self.toasts[0][0])
+
+    def test_revoke_cancelled_keeps_consent(self):
+        surface = self.surface(consented=["grok"])
+        self.revoke_answer = False
+        surface._consent_clicked("grok")
+        self.saved.assert_not_called()
+        self.assertEqual(self.toasts, [])
+
+    def test_allow_marks_pending_and_shows_reading_notice(self):
+        surface = self.surface(answer=True)
+        self.assertTrue(surface.request_session_consent("grok"))
+        self.assertIn("grok", surface._pending)
+        self.assertEqual(self.toasts[0][0], "正在读取 Grok 额度…")
+        self.assertIn("秒内显示", self.toasts[0][1])
+
+    def test_toast_failure_never_breaks_consent(self):
+        surface = self.surface(answer=True)
+        surface.notify_toast = lambda *args: 1 / 0
+        self.assertTrue(surface.request_session_consent("kimi"))
+        self.saved.assert_called_once_with("kimi", True)
 
     def test_dialog_failure_counts_as_cancel(self):
         surface = self.surface()

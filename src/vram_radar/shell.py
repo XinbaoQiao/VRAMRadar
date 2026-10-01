@@ -1273,7 +1273,11 @@ class AppApi:
                 updated = Profile.from_dict(raw)
             except ConfigError:
                 return {"ok": False, "code": "invalid_usage_session_consent"}
-            return self._persist_local_preferences(updated)
+            result = self._persist_local_preferences(updated)
+        monitor = getattr(self, "_usage_providers", None)
+        if granted and result.get("ok") and hasattr(monitor, "fetch_now"):
+            monitor.fetch_now(provider_id)   # show the value within seconds, not at the next 60 s round
+        return result
 
     def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
         if key not in {"codex_time_format", "usage_background"}:

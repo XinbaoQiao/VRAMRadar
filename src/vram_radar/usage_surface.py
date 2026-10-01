@@ -924,9 +924,12 @@ def concise_tooltip(codex_rows, provider_rows, language: str = "zh-CN") -> str:
     return "\n".join(line for line in lines if line)
 
 
-CONSENT_TITLE = "自动读取额度 · 显存雷达"
-CONSENT_TEXT = ("显存雷达将使用 {app} 在本机保存的登录状态，向 {provider} 服务器发送只读的额度查询。"
-                "登录凭证只在内存中使用，不会保存、记录或上传。每 5 分钟最多查询一次，可随时在菜单中撤销。")
+# Seconds from 允许 to the value on the strip, as measured on the user's PC
+# (immediate fetch, see ProviderMonitor.fetch_now); stated in the dialog.
+CONSENT_ETA_SECONDS = 10
+# The strip shows "查询中" for a just-allowed provider until its first
+# session result arrives (or this many seconds pass).
+PENDING_TIMEOUT = 60
 
 
 def limit_hint_text(limit: int, language: str = "zh-CN") -> str:
@@ -935,8 +938,25 @@ def limit_hint_text(limit: int, language: str = "zh-CN") -> str:
             else f"最多同时显示 {limit} 个，请先取消一个")
 
 
-def consent_text(app: str, provider: str) -> str:
-    return CONSENT_TEXT.format(app=app, provider=provider)
+def auto_read_status(state: dict | None, consented: bool, english: bool = False) -> tuple[str, bool]:
+    """(state label, clickable) of one app in the 自动读取额度 menu."""
+    if consented:
+        if isinstance(state, dict) and state.get("session_relogin"):
+            return ("On · sign in again" if english else "已开启 · 需重新登录"), True
+        return ("On ✓" if english else "已开启 ✓"), True
+    if isinstance(state, dict) and state.get("installed") is False:
+        return ("Not installed" if english else "未安装"), False
+    if isinstance(state, dict) and state.get("signed_in") is False:
+        return ("Sign in first" if english else "需登录"), True
+    return ("Off" if english else "未开启"), True
+
+
+def still_pending(state: dict | None, granted_at: float, now: float, timeout: float = PENDING_TIMEOUT) -> bool:
+    """True while a just-allowed provider has no session result yet."""
+    if now - granted_at > timeout:
+        return False
+    return not (isinstance(state, dict) and state.get("session_quota")
+                and float(state.get("checked_at") or 0) >= granted_at)
 
 
 def consent_precheck(state: dict | None, app: str) -> str | None:
@@ -963,74 +983,23 @@ def windows_dpi_scale(fallback: float = 1.0) -> float:
         return fallback
 
 
-def dialog_layout(scale: float, text_height: int) -> dict:
-    """Pixel layout of the consent/notice dialog at ``scale`` (DPI/96)."""
-    s = lambda v: int(round(v * scale))
-    width, pad = s(440), s(18)
-    label_h = max(s(40), int(text_height) + s(4))
-    button_y = pad + label_h + s(14)
-    button = (s(82), s(28))
-    return {"client": (width, button_y + button[1] + s(14)), "label": (pad, pad, width - 2 * pad, label_h),
-            "button": button, "button_y": button_y, "gap": s(8), "pad": pad, "font_px": max(12, s(12))}
+def windows_consent_dialog(app: str, provider: str, scale: float | None = None, *,
+                           icon_path: str | None = None) -> bool:
+    """Modal 允许/暂不 (UI thread only). True only on 允许."""
+    from . import ui_dialogs
+    spec = ui_dialogs.consent_spec(app, app, CONSENT_ETA_SECONDS)
+    return ui_dialogs.show_dialog(spec, scale=scale, icon_path=icon_path) == "allow"
 
 
-def _windows_dialog(text: str, buttons, scale: float | None) -> bool:
-    """Modal dialog sized explicitly for the monitor scale (no WinForms
-    autoscaling, which left the text clipped/blurry at 150 %)."""
-    from System.Drawing import Font, FontStyle, GraphicsUnit, Point, Size
-    from System.Windows.Forms import (AutoScaleMode, Button, DialogResult, Form, FormBorderStyle,
-                                      FormStartPosition, Label, TextFormatFlags, TextRenderer)
-    scale = scale or windows_dpi_scale()
-    dialog = Form()
-    font = Font("Microsoft YaHei UI", float(max(12, round(12 * scale))), FontStyle.Regular, GraphicsUnit.Pixel)
-    try:
-        dialog.AutoScaleMode = getattr(AutoScaleMode, "None")
-        dialog.Font = font
-        dialog.Text = CONSENT_TITLE
-        dialog.FormBorderStyle = FormBorderStyle.FixedDialog
-        dialog.StartPosition = FormStartPosition.CenterScreen
-        dialog.MaximizeBox = dialog.MinimizeBox = False
-        dialog.ShowInTaskbar = False
-        dialog.TopMost = True
-        probe = dialog_layout(scale, 0)
-        measured = TextRenderer.MeasureText(text, font, Size(probe["label"][2], 0),
-                                            TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl).Height
-        layout = dialog_layout(scale, measured)
-        dialog.ClientSize = Size(*layout["client"])
-        label = Label()
-        label.Text = text
-        label.Location = Point(*layout["label"][:2])
-        label.Size = Size(*layout["label"][2:])
-        dialog.Controls.Add(label)
-        x = layout["client"][0] - layout["pad"]
-        made = []
-        for caption, result in reversed(buttons):
-            button = Button()
-            button.Text = caption
-            button.DialogResult = result
-            button.Size = Size(*layout["button"])
-            x -= layout["button"][0]
-            button.Location = Point(x, layout["button_y"])
-            x -= layout["gap"]
-            dialog.Controls.Add(button)
-            made.insert(0, button)
-        dialog.AcceptButton = made[0]
-        dialog.CancelButton = made[-1]
-        return dialog.ShowDialog() == DialogResult.OK
-    finally:
-        dialog.Dispose()
-        font.Dispose()
+def windows_revoke_dialog(name: str, scale: float | None = None, *, icon_path: str | None = None) -> bool:
+    from . import ui_dialogs
+    return ui_dialogs.show_dialog(ui_dialogs.revoke_spec(name), scale=scale, icon_path=icon_path) == "revoke"
 
 
-def windows_consent_dialog(app: str, provider: str, scale: float | None = None) -> bool:
-    """Modal 确认/取消 dialog (UI thread only). True only on 确认."""
-    from System.Windows.Forms import DialogResult
-    return _windows_dialog(consent_text(app, provider), [("确认", DialogResult.OK), ("取消", DialogResult.Cancel)], scale)
-
-
-def windows_notice_dialog(text: str, scale: float | None = None) -> None:
-    from System.Windows.Forms import DialogResult
-    _windows_dialog(text, [("知道了", DialogResult.Cancel)], scale)
+def windows_notice_dialog(text: str, scale: float | None = None, *, name: str = "",
+                          icon_path: str | None = None) -> None:
+    from . import ui_dialogs
+    ui_dialogs.show_dialog(ui_dialogs.notice_spec(text, name), scale=scale, icon_path=icon_path)
 
 
 class CodexUsageSurface:
@@ -1052,9 +1021,18 @@ class CodexUsageSurface:
         self.rescan = rescan or (lambda: None)
         # Session-based quota reading consent: dialog injectable for tests.
         self.save_consent = save_consent
+        # One design for every popup (ui_dialogs); the icon is the app's own.
+        self._dialog_icon = None
+        self._dialog_name = ""
         self.confirm_consent = confirm_consent or (
-            lambda app, provider: windows_consent_dialog(app, provider, getattr(self, "_scale", None)))
-        self.notify_blocked = lambda text: windows_notice_dialog(text, getattr(self, "_scale", None))
+            lambda app, provider: windows_consent_dialog(app, provider, getattr(self, "_scale", None),
+                                                         icon_path=self._dialog_icon))
+        self.confirm_revoke = lambda name: windows_revoke_dialog(name, getattr(self, "_scale", None),
+                                                                 icon_path=self._dialog_icon)
+        self.notify_blocked = lambda text: windows_notice_dialog(text, getattr(self, "_scale", None),
+                                                                 name=self._dialog_name, icon_path=self._dialog_icon)
+        self.notify_toast = self._show_toast
+        self._pending: dict = {}
         self._extra_columns: list = []
         self.open_settings, self.refresh = open_settings, refresh
         self.open_home = open_home or open_settings
@@ -1101,8 +1079,10 @@ class CodexUsageSurface:
             states = (self.providers() or {}).get("providers") or {}
         except Exception:
             states = {}
-        blocked = consent_precheck(states.get(provider_id) if isinstance(states, dict) else None,
-                                   spec.session_app or spec.name)
+        state = states.get(provider_id) if isinstance(states, dict) else None
+        self._dialog_icon = (state or {}).get("install_path") if isinstance(state, dict) else None
+        self._dialog_name = spec.name
+        blocked = consent_precheck(state, spec.session_app or spec.name)
         if blocked:
             try:
                 self.notify_blocked(blocked)
@@ -1115,18 +1095,54 @@ class CodexUsageSurface:
             logging.getLogger("vram_radar").warning("session consent dialog failed")
             accepted = False
         if accepted:
+            # Strip shows 查询中 until the immediate fetch (save_consent
+            # triggers it) delivers the first value.
+            self._pending[provider_id] = time.time()
             self._action(lambda: self._store_consent(provider_id, True))
+            self._toast(f"正在读取 {spec.name} 额度…", f"约 {CONSENT_ETA_SECONDS} 秒内显示在任务栏", spec.name)
         return accepted
 
     def revoke_session_consent(self, provider_id) -> None:
         if self.save_consent is not None and self._consent_spec(provider_id) is not None:
+            self._pending.pop(provider_id, None)
             self._action(lambda: self._store_consent(provider_id, False))
 
     def _consent_clicked(self, provider_id) -> None:
         if self.has_session_consent(provider_id):
-            self.revoke_session_consent(provider_id)
+            spec = self._consent_spec(provider_id)
+            if spec is None:
+                return
+            try:
+                state = ((self.providers() or {}).get("providers") or {}).get(provider_id)
+            except Exception:
+                state = None
+            self._dialog_icon = state.get("install_path") if isinstance(state, dict) else None
+            try:
+                confirmed = self.confirm_revoke(spec.name) is True
+            except Exception:
+                logging.getLogger("vram_radar").warning("revoke dialog failed")
+                confirmed = False
+            if confirmed:
+                self.revoke_session_consent(provider_id)
+                self._toast(f"已关闭 {spec.name} 的自动读取", "可随时在同一菜单重新开启", spec.name)
         else:
             self.request_session_consent(provider_id)
+
+    def _toast(self, headline, line="", name="") -> None:
+        try:
+            self.notify_toast(headline, line, name)
+        except Exception as exc:
+            logging.getLogger("vram_radar").info("notice unavailable (%s)", type(exc).__name__)
+
+    def _show_toast(self, headline, line="", name="") -> None:
+        from . import ui_dialogs
+        form = self.form
+        anchor = (form.Left, form.Top, form.Right, form.Bottom) if form is not None and form.Visible else None
+        icon = self._dialog_icon if name and name == self._dialog_name else None
+        if not name:
+            icon = sys.executable if getattr(sys, "frozen", False) else None
+        ui_dialogs.show_toast(ui_dialogs.toast_spec(headline, line, name or "显存雷达"), anchor,
+                              scale=getattr(self, "_scale", None), icon_path=icon)
 
     def _store_consent(self, provider_id, granted: bool) -> None:
         try:
@@ -1559,7 +1575,7 @@ class CodexUsageSurface:
                 self._limit_item.Visible = True
                 self._limit_item.Text = text
                 if form.Visible:
-                    tooltip.Show(text, form, 0, -scale(34), 2500)
+                    self._toast(text, "", "")
             except Exception:
                 logging.getLogger("vram_radar").info("model limit hint failed")
 
@@ -1590,18 +1606,25 @@ class CodexUsageSurface:
         self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 4 个")
         self._limit_item.Enabled = False
         self._models_menu.DropDownItems.Add(ToolStripSeparator())
-        self._consent_menu = self._models_menu.DropDownItems.Add("自动读取额度…")
+        self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
+        self._rescan_item.Click += lambda *_: self._action(self.rescan)
+        # 自动读取额度: one row per capable app -- its icon, name and a plain
+        # state on the right (已开启 ✓ / 未开启 / 需登录 / 未安装, greyed).
+        self._consent_menu = menu.Items.Add("自动读取额度")
         self._consent_menu.DropDown.Renderer = renderer
         self._consent_menu.DropDown.SizeChanged += round_menu
         self._consent_items = {}
         for spec in PROVIDERS:
             if spec.needs_session_consent:
                 item = self._consent_menu.DropDownItems.Add(spec.name)
+                item.ShowShortcutKeys = True
                 item.Click += lambda _s, _e, pid=spec.id: self._consent_clicked(pid)
                 self._consent_items[spec.id] = (item, spec)
+        self._consent_menu.DropDownItems.Add(ToolStripSeparator())
+        self._consent_hint = self._consent_menu.DropDownItems.Add("点击开启或关闭 · 只读查询，登录信息不保存")
+        self._consent_hint.Enabled = False
         self._consent_menu.Visible = bool(self._consent_items)
-        self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
-        self._rescan_item.Click += lambda *_: self._action(self.rescan)
+        self._item_icons = {}
         menu.Items.Add(ToolStripSeparator())
         menu.Items.Add(action_items[-1])
         menu_scale = windows_taskbar_dpi()/96
@@ -1612,6 +1635,7 @@ class CodexUsageSurface:
             self._dock_item: ("✓", "固定显示在展开箭头旁", "Keep beside the system tray"),
             self._display_menu: ("☷", "显示设置", "Display options"),
             self._models_menu: ("◉", "显示模型", "Models"),
+            self._consent_menu: ("✦", "自动读取额度", "Read quota automatically"),
             action_items[-1]: ("×", "关闭软件与额度显示", "Close Radar and its widget"),
         }
         for item in descriptions:
@@ -1628,6 +1652,10 @@ class CodexUsageSurface:
             self._window_menu.DropDown.Font = menu.Font
             self._display_menu.DropDown.Font = menu.Font
             self._models_menu.DropDown.Font = menu.Font
+            self._consent_menu.DropDown.Font = menu.Font
+            for drop in (self._models_menu.DropDown, self._consent_menu.DropDown):
+                drop.ImageScalingSize = Size(round(18*menu_scale), round(18*menu_scale))
+            self._item_icons.clear()
             menu.Padding = Padding(round(6*menu_scale))
             for item in descriptions:
                 item.Size = Size(round(205*menu_scale), round(34*menu_scale))
@@ -1775,19 +1803,36 @@ class CodexUsageSurface:
             english = language == "en"
             self._models_menu.Text = "Models" if english else "显示模型"
             self._rescan_item.Text = "Detect again" if english else "重新检测"
-            self._consent_menu.Text = "Read quota automatically…" if english else "自动读取额度…"
+            self._consent_menu.Text = "Read quota automatically" if english else "自动读取额度"
+            self._consent_hint.Text = ("Click to turn on/off · read-only, login never stored" if english
+                                       else "点击开启或关闭 · 只读查询，登录信息不保存")
             consented = overview.get("session_consent") or ()
+            icon_px = round(18*menu_scale)
+            def set_icon(item, spec, pstate):
+                path = pstate.get("install_path") if isinstance(pstate, dict) else None
+                key = (path, icon_px)
+                if self._item_icons.get(item) != key:
+                    self._item_icons[item] = key
+                    try:
+                        from .ui_dialogs import provider_icon
+                        item.Image = provider_icon(path, icon_px, spec.name)
+                    except Exception:
+                        item.Image = None
             for pid, (item, spec) in self._consent_items.items():
-                if pid in consented:
-                    item.Text = (f"Revoke automatic reading · {spec.name}" if english
-                                 else f"撤销自动读取 · {spec.name}")
-                else:
-                    item.Text = f"{spec.name} · Allow…" if english else f"{spec.name} · 允许…"
+                pstate = provider_states.get(pid)
+                label, clickable = auto_read_status(pstate, pid in consented, english)
+                item.Text = spec.name
+                item.ShortcutKeyDisplayString = label
+                item.Enabled = clickable
+                set_icon(item, spec, pstate)
             from .providers import MAX_SELECTED
             full = len(selected) >= MAX_SELECTED
             for pid, (item, spec) in self._model_items.items():
                 pstate = provider_states.get(pid)
-                item.Text = f"{spec.name} · {_provider_status(pstate, english)}"
+                item.Text = spec.name
+                item.ShowShortcutKeys = True
+                item.ShortcutKeyDisplayString = _provider_status(pstate, english)
+                set_icon(item, spec, pstate)
                 item.Checked = pid in selected
                 # Keep unticked items clickable at the limit so a 5th tick can
                 # explain itself (hint) instead of silently doing nothing.
@@ -1921,6 +1966,16 @@ class CodexUsageSurface:
             for spec in others:
                 info = provider_reading(provider_states.get(spec.id),
                                         {"id": spec.id, "name": spec.name, "short": spec.short}, language)
+                granted = self._pending.get(spec.id)
+                if granted is not None:
+                    pstate = provider_states.get(spec.id)
+                    if still_pending(pstate, granted, time.time()):
+                        info = {**info, "value": "Reading" if english else "查询中", "countdown": "",
+                                "low": False, "warning": False}
+                    else:
+                        self._pending.pop(spec.id, None)
+                        logging.getLogger("vram_radar").info(
+                            "auto read %s: first result %.1f s after consent", spec.id, time.time() - granted)
                 provider_rows.append(info)
                 value = info["value"]
                 if re.fullmatch(r"<?\d+(?:\.\d)?h", info["countdown"] or ""):

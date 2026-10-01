@@ -144,6 +144,7 @@ class ProviderMonitor:
         self.worker: threading.Thread | None = None
         self.states: dict[str, dict] = {}
         self.loading = False
+        self.rerun = False
         self.screen_reader = screen_reader
 
     def configure(self, enabled: bool, codex_executable: str = "", selected=None) -> None:
@@ -175,6 +176,20 @@ class ProviderMonitor:
                 self.next_read = 0
                 self.wake.set()
 
+    def fetch_now(self, provider_id: str | None = None) -> None:
+        """Probe immediately, bypassing the force floor and the provider's
+        5-minute/backoff interval -- used once right after consent so the
+        value appears within seconds.  A probe already in flight (still
+        without the consent) is followed by another one."""
+        cache = {"grok": getattr(grok, "CACHE", None), "kimi": getattr(kimi, "CACHE", None)}.get(provider_id)
+        if cache is not None and hasattr(cache, "reset"):
+            cache.reset()
+        with self.lock:
+            self.next_read = 0
+            self.rerun = True
+            self.last_force = time.monotonic()
+            self.wake.set()
+
     def _configure_screen_reader(self) -> None:
         # Grok's usage is only ever on its own screen; read it there (see
         # screen_usage) only while Grok is shown in the strip.
@@ -205,6 +220,7 @@ class ProviderMonitor:
                 selected = self.selected
                 if ready:
                     self.loading = True
+                    self.rerun = False
                 self.wake.clear()
             if not ready:
                 self.wake.wait(min(wait, 60))
@@ -221,7 +237,7 @@ class ProviderMonitor:
                 if isinstance(states, dict):
                     self.states = states
                 self.loading = False
-                self.next_read = time.monotonic() + self.interval
+                self.next_read = time.monotonic() + (0 if self.rerun else self.interval)
 
     def close(self) -> None:
         with self.lock:
