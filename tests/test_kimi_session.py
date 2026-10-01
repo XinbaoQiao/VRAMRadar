@@ -32,8 +32,18 @@ class KimiSessionTests(unittest.TestCase):
         with self.tokens(1_000):
             result = kimi_usage.fetch_usage(self.root, post=post, clock=lambda: 2_000)
         self.assertEqual(result["status"], "unauthorized")
-        self.assertEqual(result["reason"], "expired")
+        self.assertEqual(result["reason"], "access_expired")   # login (refresh exp) still valid
+        self.assertTrue(result["login_valid"])
         post.assert_not_called()
+
+    def test_expired_login_is_relogin(self):
+        plain = json.dumps({"tokens": {"access_token": jwt(1_000), "refresh_token": jwt(1_500)}})
+        with mock.patch.multiple(grok_usage, read_os_crypt_key=mock.Mock(return_value=b"k" * 32),
+                                 _decrypt_v10=mock.Mock(return_value=plain)):
+            result = kimi_usage.fetch_usage(self.root, post=mock.Mock(), clock=lambda: 2_000)
+        self.assertEqual((result["reason"], result["login_valid"]), ("expired", False))
+        out = kimi.apply_session({"facts": []}, result, now=2_000)
+        self.assertEqual(out["headline"]["zh"], "需重新登录")
 
     def test_valid_token_calls_only_the_two_read_only_methods(self):
         calls = []
@@ -106,6 +116,64 @@ class KimiSessionTests(unittest.TestCase):
         now[0] = 599; cache.get(self.root)
         self.assertEqual(fetch.call_count, 1)  # backoff doubled the wait after an error
         self.assertEqual(kimi_usage.TIMEOUT_SECONDS, 10)
+
+
+REAL_SUB = {"subscription": {"subscriptionId": "secret-id", "goods": {"id": "gid", "title": "Adagio",
+            "membershipLevel": "LEVEL_FREE"}, "currentEndTime": "2026-10-03T03:22:15.544045Z", "active": True},
+            "balances": [{"id": "bid", "feature": "FEATURE_OMNI", "unit": "UNIT_CREDIT", "amountUsedRatio": 0,
+                          "expireTime": "2026-10-03T03:22:15.544045Z"}]}
+REAL_STATS = {"subscriptionBalance": {"id": "bid", "feature": "FEATURE_OMNI", "unit": "UNIT_CREDIT",
+                                      "amountUsedRatio": 0.25, "expireTime": "2026-10-03T03:22:15.544045Z"}}
+
+
+class KimiParserTests(unittest.TestCase):
+    def tearDown(self):
+        kimi.LAST["reading"] = kimi.LAST["at"] = None
+
+    def test_real_response_shape(self):
+        parsed = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
+        self.assertEqual(parsed["used_percent"], 25.0)   # stats balance wins
+        self.assertEqual(parsed["plan"], "Adagio")
+        self.assertIs(parsed["is_member"], False)
+        self.assertAlmostEqual(parsed["reset_at"], 1790997735.5, delta=1)
+        self.assertNotIn("secret-id", json.dumps(parsed))
+        self.assertNotIn("bid", json.dumps(parsed))
+        self.assertEqual(kimi_usage.parse_usage(REAL_SUB, {})["used_percent"], 0.0)
+        self.assertIsNone(kimi_usage.parse_usage({}, {}))
+        self.assertEqual(kimi_usage._used_percent(1), 100.0)
+        self.assertEqual(kimi_usage._used_percent(37), 37.0)
+
+    def test_session_beats_log_status_and_shows_quota(self):
+        log_state = {"headline": {"zh": "可用", "en": "OK"}, "subline": {"zh": "记录 09-03", "en": ""},
+                     "stale": True, "facts": []}
+        reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
+        now = 1790997735 - 36 * 3600
+        out = kimi.apply_session(log_state, reading, now=now)
+        self.assertEqual(out["headline"]["zh"], "已用 25%")
+        self.assertEqual(out["subline"]["zh"], "36.0h")
+        self.assertIn("重置", out["brief"]["zh"])
+        self.assertFalse(out["stale"])
+
+    def test_access_expired_keeps_last_reading(self):
+        reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
+        kimi.apply_session({"facts": []}, reading, now=1_000)
+        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        self.assertEqual(out["headline"]["zh"], "已用 25%")
+        self.assertTrue(out["subline"]["zh"].startswith("读于"))
+        kimi.LAST["reading"] = None
+        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        self.assertEqual(out["headline"]["zh"], "待刷新")
+
+    def test_new_token_file_bypasses_backoff(self):
+        sig = [(1, 1)]
+        fetch = mock.Mock(return_value={"status": "unauthorized"})
+        now = [0.0]
+        cache = grok_usage.UsageCache(fetch, clock=lambda: now[0], signature=lambda root: sig[0])
+        cache.get(Path(".")); now[0] = 10; cache.get(Path("."))
+        self.assertEqual(fetch.call_count, 1)
+        sig[0] = (2, 1)   # Kimi wrote a fresh token
+        cache.get(Path("."))
+        self.assertEqual(fetch.call_count, 2)
 
 
 if __name__ == "__main__":

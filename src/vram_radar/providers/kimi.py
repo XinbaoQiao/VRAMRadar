@@ -42,17 +42,92 @@ def _session_usage(data) -> dict | None:
         return {"status": "error"}
 
 
+LAST = {"reading": None, "at": None}   # last good session reading (non-secret fields only)
+
+
+def _hours_label(reset, now):
+    if not isinstance(reset, (int, float)) or reset <= now:
+        return None
+    hours = (reset - now) / 3600
+    return f"{hours:.1f}h" if hours >= 0.1 else "<0.1h"
+
+
+def _show_reading(state: dict, reading: dict, now: float, *, read_at: float | None = None) -> dict:
+    used = reading.get("used_percent")
+    exhausted = bool(reading.get("exhausted")) or bool(reading.get("overdrawn")) or bool(reading.get("send_blocked"))
+    if isinstance(used, (int, float)):
+        value = f"{used:.0f}%"
+        state["headline"] = pair(f"已用 {value}", f"{value} used")
+        brief_zh, brief_en = f"已用 {value}", f"{value} used"
+    else:
+        state["headline"] = pair("已用尽", "Exhausted") if exhausted else pair("可用", "OK")
+        brief_zh, brief_en = ("额度已用尽", "Quota exhausted") if exhausted else ("额度未用尽", "Quota not exhausted")
+    reset = reading.get("reset_at")
+    if isinstance(reset, (int, float)) and reset > now:
+        stamp = time.strftime("%m-%d %H:%M", time.localtime(reset))
+        brief_zh += f" · {stamp} 重置"
+        brief_en += f" · resets {stamp}"
+        state["reset_at"] = reset
+    member = reading.get("is_member")
+    plan = reading.get("plan") or ""
+    tier_zh = "会员" if member else "免费版" if member is False else ""
+    tier_en = "member" if member else "free plan" if member is False else ""
+    if plan or tier_zh:
+        brief_zh += " · " + " ".join(x for x in (plan, tier_zh) if x)
+        brief_en += " · " + " ".join(x for x in (plan, tier_en) if x)
+    if read_at is None:
+        state["subline"] = pair(_hours_label(reset, now) or "自动读取", _hours_label(reset, now) or "auto")
+        state["brief"] = pair(brief_zh + "（自动读取）", brief_en + " (auto)")
+        state["stale"] = False
+    else:
+        when = time.strftime("%H:%M" if now - read_at < 86400 else "%m-%d %H:%M", time.localtime(read_at))
+        state["subline"] = pair(f"读于 {when}", f"read {when}")
+        state["brief"] = pair(brief_zh + f"（{when} 读取；打开 Kimi 即可刷新）",
+                              brief_en + f" (read {when}; open Kimi to refresh)")
+        state["stale"] = True
+    state["low"] = exhausted or (isinstance(used, (int, float)) and used >= 90)
+    state["quota_available"] = True
+    state["quota_source"] = "session"
+    return state
+
+
 def apply_session(state: dict, session: dict | None, now: float | None = None) -> dict:
-    """Merge a live membership reading; an expired login reads as re-login."""
+    """Merge a live membership reading; it takes precedence over the
+    log-derived status.  An expired *login* reads as re-login; an expired
+    short-lived access token with a valid login keeps the last reading."""
     if not session:
         return state
     now = time.time() if now is None else now
     status = session.get("status")
+    if status == "ok":
+        fetched = session.get("fetched_at") if isinstance(session.get("fetched_at"), (int, float)) else now
+        LAST["reading"], LAST["at"] = dict(session), fetched
+        stale = bool(session.get("stale_error"))   # cache served the last good reading
+        state = _show_reading(state, session, now, read_at=fetched if stale else None)
+        state["session_quota"] = "ok"
+        state["facts"].insert(0, pair("额度经你授权，使用 Kimi 本机登录只读查询获取（新登录立即读取，否则每 5 分钟最多一次）",
+                                      "Quota read with your consent via Kimi's local login, read-only (immediately after a new sign-in, else at most every 5 min)"))
+        return state
+    if status == "unauthorized" and session.get("login_valid"):
+        state["session_quota"] = "waiting_app"
+        if LAST["reading"]:
+            state = _show_reading(state, LAST["reading"], now, read_at=LAST["at"])
+        else:
+            state["headline"] = pair("待刷新", "Pending")
+            state["subline"] = pair("打开 Kimi", "open Kimi")
+            state["brief"] = pair("Kimi 登录有效；Kimi 未运行，打开 Kimi 后自动读取额度",
+                                  "Kimi sign-in is valid; open Kimi and the quota is read automatically")
+            state["quota_available"] = False
+        state["facts"].insert(0, pair("Kimi 的访问凭据只在 Kimi 运行时续期；打开 Kimi 后会立即重新读取",
+                                      "Kimi renews its access credential only while running; opening Kimi triggers an immediate re-read"))
+        return state
     if status == "unauthorized":
+        LAST["reading"] = LAST["at"] = None
         state["headline"] = pair("需重新登录", "Sign in again")
         state["subline"] = pair("打开 Kimi 一次", "open Kimi once")
         state["brief"] = pair("需重新登录（打开 Kimi 一次）", "Sign in again (open Kimi once)")
         state["session_quota"], state["session_relogin"] = "expired", True
+        state["quota_available"] = False
         expired = session.get("expired_at")
         when = time.strftime("%m-%d %H:%M", time.localtime(expired)) if isinstance(expired, (int, float)) else ""
         state["facts"].insert(0, pair("自动读取额度失败：Kimi 登录已过期" + (f"（{when}）" if when else "")
@@ -60,31 +135,11 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
                                       "Automatic quota read failed: Kimi sign-in expired" + (f" ({when})" if when else "")
                                       + "; open Kimi once to renew or sign in"))
         return state
-    if status != "ok":
-        return state
-    exhausted = bool(session.get("exhausted")) or bool(session.get("overdrawn")) or bool(session.get("send_blocked"))
-    member = session.get("is_member")
-    tier_zh = "会员" if member else "免费版" if member is False else ""
-    tier_en = "member" if member else "free plan" if member is False else ""
-    state["headline"] = pair("已用尽", "Exhausted") if exhausted else pair("可用", "OK")
-    reset = session.get("reset_at")
-    if isinstance(reset, (int, float)) and reset > now:
-        hours = (reset - now) / 3600
-        label = f"{hours:.1f}h" if hours >= 0.1 else "<0.1h"
-        state["subline"] = pair(label, label)
-        state["reset_at"] = reset
-    else:
-        state["subline"] = pair("自动读取", "auto")
-    state["brief"] = pair(("额度已用尽" if exhausted else "额度未用尽") + (f" · {tier_zh}" if tier_zh else "") + "（自动读取）",
-                          ("Quota exhausted" if exhausted else "Quota not exhausted") + (f" · {tier_en}" if tier_en else "") + " (auto)")
-    state["low"] = exhausted
-    state["stale"] = False
-    state["quota_available"] = True
-    state["quota_source"] = "session"
-    state["session_quota"] = "ok"
-    state["facts"].insert(0, pair("额度经你授权，使用 Kimi 本机登录只读查询获取（每 5 分钟最多一次）",
-                                  "Quota read with your consent via Kimi's local login, read-only (at most every 5 min)"))
+    if LAST["reading"]:   # network hiccup: keep the last real reading
+        state = _show_reading(state, LAST["reading"], now, read_at=LAST["at"])
     return state
+
+
 STALE_SECONDS = 6 * 3600
 _LINE = re.compile(r"^\[(\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d)(?:\.\d+)?\].*?\[SubscriptionManager\]\S*\s+"
                    r"refreshed\((sub|stats)\):\s*(.*)$")

@@ -57,28 +57,38 @@ def jwt_expiry(token: str) -> float | None:
 
 def read_access(root: Path) -> tuple[str | None, float | None]:
     """(access token, expiry) from Kimi's encrypted token store, in memory."""
+    token, expiry, _ = read_tokens(root)
+    return token, expiry
+
+
+def read_tokens(root: Path) -> tuple[str | None, float | None, float | None]:
+    """(access token, its expiry, refresh-token expiry).  The refresh token
+    itself is only inspected for its ``exp`` claim and never returned or used
+    (Kimi rotates it; we never run the refresh flow)."""
     path = root / TOKEN_STORE
     try:
         with open(path, "rb") as handle:
             data = handle.read(MAX_STORE_BYTES + 1)
         if len(data) > MAX_STORE_BYTES:
-            return None, None
+            return None, None, None
         document = json.loads(data.decode("utf-8", "replace"))
         stored = document.get("data") if isinstance(document, dict) else None
         if document.get("encryption") != "safeStorage.v1" or not isinstance(stored, str):
-            return None, None
+            return None, None, None
         key = grok_usage.read_os_crypt_key(root)
         plain = grok_usage._decrypt_v10(key, stored) if key else None
         del key
         tokens = json.loads(plain).get("tokens") if plain else None
         del plain
         token = tokens.get("access_token") if isinstance(tokens, dict) else None
-        del tokens  # the refresh token is dropped unread
+        refresh = tokens.get("refresh_token") if isinstance(tokens, dict) else None
+        refresh_expiry = jwt_expiry(refresh) if isinstance(refresh, str) else None
+        del tokens, refresh  # the refresh token itself is never kept
         if not isinstance(token, str) or token.count(".") != 2:
-            return None, None
-        return token, jwt_expiry(token)
+            return None, None, refresh_expiry
+        return token, jwt_expiry(token), refresh_expiry
     except (OSError, ValueError, AttributeError, TypeError):
-        return None, None
+        return None, None, None
 
 
 def _pick(payload, keys, depth=0, found=None):
@@ -121,22 +131,64 @@ def _as_time(value):
     return None
 
 
-def parse_usage(subscription, stats) -> dict | None:
-    """Only the fields Kimi itself logs; anything unknown is ignored."""
-    sub = _pick(subscription, _SUB_KEYS)
-    st = _pick(stats, _STATS_KEYS)
-    if not sub and not st:
+def _omni_balance(payload):
+    """The FEATURE_OMNI credit balance from either response (or None)."""
+    if not isinstance(payload, dict):
         return None
-    level = sub.get("level")
-    ratio = sub.get("omni_ratio")
+    candidates = []
+    if isinstance(payload.get("subscriptionBalance"), dict):
+        candidates.append(payload["subscriptionBalance"])
+    if isinstance(payload.get("balances"), list):
+        candidates.extend(b for b in payload["balances"][:20] if isinstance(b, dict))
+    omni = [b for b in candidates if b.get("feature") in (None, "FEATURE_OMNI")]
+    return (omni or candidates or [None])[0]
+
+
+def _used_percent(ratio):
+    """``amountUsedRatio`` is a 0..1 fraction; tolerate a 0..100 percentage."""
     try:
-        ratio = float(ratio) if ratio is not None and not isinstance(ratio, bool) else None
+        value = float(ratio)
     except (TypeError, ValueError):
-        ratio = None
-    return {"status": "ok", "level": str(level)[:20] if level is not None else None,
-            "is_member": _as_bool(sub.get("is_member")), "exhausted": _as_bool(sub.get("exhausted")),
-            "omni_ratio": ratio, "reset_at": _as_time(sub.get("reset_at")),
-            "overdrawn": _as_bool(st.get("overdrawn")), "send_blocked": _as_bool(st.get("send_blocked"))}
+        return None
+    if value != value or value < 0:
+        return None
+    return min(100.0, value * 100 if value <= 1 else value)
+
+
+def parse_usage(subscription, stats) -> dict | None:
+    """Non-secret quota fields from GetSubscription / GetSubscriptionStats.
+
+    Real shape (Kimi 3.2.4): ``subscription.goods.{title, membershipLevel}``,
+    ``subscription.currentEndTime``, ``balances[]`` and
+    ``subscriptionBalance`` with ``{feature, unit, amountUsedRatio,
+    expireTime}``.  IDs are never read.  Older/log-style keys are a fallback.
+    """
+    balance = _omni_balance(stats) or _omni_balance(subscription)
+    sub = subscription.get("subscription") if isinstance(subscription, dict) else None
+    sub = sub if isinstance(sub, dict) else {}
+    goods = sub.get("goods") if isinstance(sub.get("goods"), dict) else {}
+    used = _used_percent(balance.get("amountUsedRatio")) if balance else None
+    reset = None
+    if balance:
+        reset = _as_time(balance.get("expireTime")) or _as_time(
+            (balance.get("upcomingExpiration") or {}).get("timestamp") if isinstance(balance.get("upcomingExpiration"), dict) else None)
+    reset = reset or _as_time(sub.get("currentEndTime"))
+    level = goods.get("membershipLevel")
+    legacy_sub, legacy_stats = _pick(subscription, _SUB_KEYS), _pick(stats, _STATS_KEYS)
+    if used is None and not sub and not legacy_sub and not legacy_stats:
+        return None
+    if level is None and legacy_sub.get("level") is not None:
+        level = legacy_sub.get("level")
+    member = (level not in ("LEVEL_FREE", "LEVEL_UNSPECIFIED") if isinstance(level, str) and level.startswith("LEVEL_")
+              else _as_bool(legacy_sub.get("is_member")))
+    exhausted = (used >= 100) if used is not None else _as_bool(legacy_sub.get("exhausted"))
+    title = goods.get("title")
+    return {"status": "ok", "used_percent": used, "reset_at": reset or _as_time(legacy_sub.get("reset_at")),
+            "plan": str(title)[:24] if isinstance(title, str) else None,
+            "level": str(level)[:24] if level is not None else None, "is_member": member,
+            "exhausted": exhausted, "active": _as_bool(sub.get("active")),
+            "overdrawn": _as_bool(legacy_stats.get("overdrawn")),
+            "send_blocked": _as_bool(legacy_stats.get("send_blocked"))}
 
 
 def _post(method: str, token: str, backend: str = BACKEND):
@@ -160,12 +212,16 @@ def _post(method: str, token: str, backend: str = BACKEND):
 def fetch_usage(root: Path, backend: str = BACKEND, *, post=_post, clock=time.time) -> dict:
     """{"status": "ok"|"no_credential"|"unauthorized"|"error", ...}; never
     logs the token or a response body."""
-    token, expiry = read_access(root)
+    token, expiry, refresh_expiry = read_tokens(root)
     if not token:
         return {"status": "no_credential"}
     try:
         if expiry is not None and expiry <= clock() + EXPIRY_SKEW:
-            return {"status": "unauthorized", "reason": "expired", "expired_at": expiry}
+            # Kimi's access token lives ~15 min and is renewed by Kimi itself
+            # while it runs.  A still-valid login only needs Kimi opened.
+            login_valid = refresh_expiry is not None and refresh_expiry > clock()
+            return {"status": "unauthorized", "reason": "expired" if not login_valid else "access_expired",
+                    "expired_at": expiry, "login_valid": login_valid}
         replies = {}
         for method in METHODS:
             status, payload = post(method, token, backend)
