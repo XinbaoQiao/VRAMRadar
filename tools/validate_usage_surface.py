@@ -39,6 +39,12 @@ def main() -> int:
                                 display_options=lambda: dict(display), save_display=save_display,
                                 disable=lambda: state.update(enabled=False), quit_application=lambda: None)
     result = {"ok": False, "synthetic_only": True, "remote_connections": 0, "platform": sys.platform}
+    # Never take the user's foreground: the menu's tray-style
+    # SetForegroundWindow(owner) is recorded instead of performed.
+    foreground_requests = []
+    if sys.platform == "win32":
+        from vram_radar.usage_surface import _dll
+        _dll("user32").SetForegroundWindow = lambda hwnd: foreground_requests.append(hwnd) or 0
     timeout = threading.Timer(45, window.destroy)
 
     def wait_for(predicate):
@@ -190,25 +196,48 @@ def main() -> int:
                     assertions["submenu_attaches_on_both_screen_edges"] = all(s["gap"] <= 2 for s in samples)
                 invoke(check_submenu)
                 def outside_focus_check():
-                    from System.Windows.Forms import Form
-                    other = Form()
-                    other.Text = "Synthetic outside-click target"
-                    other.ShowInTaskbar = False
-                    other.Show()
+                    # The user clicking another window changes this thread's
+                    # active window; WinForms' ModalMenuFilter notices that on
+                    # the next pumped message and closes the menu chain.
+                    # Reproduce it thread-locally with SetActiveWindow (never
+                    # the foreground: the old Form.Activate() variant needed
+                    # real foreground rights, which a background validator or
+                    # a locked session never has, so it always failed).
+                    from System.Windows.Forms import Application as WinApp, Form, FormBorderStyle, FormStartPosition
+                    u32 = ctypes.WinDLL("user32")
+                    u32.SetActiveWindow.argtypes = [ctypes.c_void_p]
+                    u32.SetActiveWindow.restype = ctypes.c_void_p
+                    u32.GetActiveWindow.restype = u32.GetForegroundWindow.restype = ctypes.c_void_p
+                    u32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+                    u32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+                    before = len(foreground_requests)
+                    owner = int(surface.form.Handle.ToInt64())
+                    u32.SetActiveWindow(owner)        # what the granted SetForegroundWindow(owner) leaves behind
                     surface._menu.Show(Point(100, 200))
                     surface._display_menu.ShowDropDown()
-                    other.Activate()
-                    return other
-                other_forms = []
-                invoke(lambda: other_forms.append(outside_focus_check()))
-                time.sleep(0.15)
-                def inspect_dismissal():
-                    assertions["outside_activation_closes_parent_and_submenu"] = (
-                        not surface._menu.Visible and not surface._display_menu.DropDown.Visible)
-                    other_forms[0].Close()
-                    other_forms[0].Dispose()
+                    opened = surface._menu.Visible and surface._display_menu.DropDown.Visible
+                    other = Form()
+                    other.ShowInTaskbar = False
+                    other.StartPosition = FormStartPosition.Manual
+                    other.FormBorderStyle = getattr(FormBorderStyle, "None")
+                    other.Location = Point(-20000, -20000)
+                    other_handle = int(other.Handle.ToInt64())
+                    u32.ShowWindow(other_handle, 4)   # SW_SHOWNOACTIVATE, off-screen
+                    u32.SetActiveWindow(other_handle)
+                    u32.PostMessageW(other_handle, 0, None, None)   # WM_NULL: pump once
+                    WinApp.DoEvents()
+                    closed = not surface._menu.Visible and not surface._display_menu.DropDown.Visible
+                    foreground = u32.GetForegroundWindow()
+                    other.Close()
+                    other.Dispose()
                     surface._menu.Close()
-                invoke(inspect_dismissal)
+                    return {"opened": opened, "closed": closed,
+                            "owner_foreground_requested": len(foreground_requests) > before,
+                            "foreground_untouched": foreground not in (owner, other_handle)}
+                outside = []
+                invoke(lambda: outside.append(outside_focus_check()))
+                result["outside_dismissal"] = outside[0]
+                assertions["outside_activation_closes_parent_and_submenu"] = all(outside[0].values())
                 from unittest.mock import patch
                 for bright, background, foreground in [(True, (243, 243, 243), (28, 28, 28)),
                                                         (False, (32, 32, 32), (240, 240, 240))]:
