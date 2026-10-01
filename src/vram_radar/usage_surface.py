@@ -943,6 +943,24 @@ PENDING_TIMEOUT = 60
 AUTO_READ_FOOTER = ("只读，不保存登录", "Read-only, no login kept")
 
 
+def menu_tier(state: dict | None, chosen: bool) -> int:
+    """Row tier in the provider menus: 0 chosen (ticked / auto-read on),
+    1 detected (installed, running, needs login, or not probed yet),
+    2 not detected (greyed, at the bottom)."""
+    if chosen:
+        return 0
+    if isinstance(state, dict) and not state.get("installed"):
+        return 2
+    return 1
+
+
+def tiered(ids, chosen, states) -> list[tuple[int, str]]:
+    """(tier, id) in tier order; the fixed registry order is kept inside a
+    tier (stable sort)."""
+    rows = [(menu_tier(states.get(pid) if isinstance(states, dict) else None, pid in chosen), pid) for pid in ids]
+    return sorted(rows, key=lambda row: row[0])
+
+
 def limit_menu_text(limit: int, language: str = "zh-CN") -> str:
     return f"Up to {limit} shown" if language == "en" else f"最多显示 {limit} 个"
 
@@ -1629,9 +1647,11 @@ class CodexUsageSurface:
             self._model_items[spec.id] = (item, spec)
         self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 4 个")
         self._limit_item.Enabled = False
-        self._models_menu.DropDownItems.Add(ToolStripSeparator())
+        self._models_tail_sep = ToolStripSeparator()
+        self._models_menu.DropDownItems.Add(self._models_tail_sep)
         self._rescan_item = self._models_menu.DropDownItems.Add("重新检测")
         self._rescan_item.Click += lambda *_: self._action(self.rescan)
+        self._menu_order, self._menu_separators = {}, {}
         # 自动读取额度: one row per capable app -- its icon, name and a plain
         # state on the right (已开启 ✓ / 未开启 / 需登录 / 未安装, greyed).
         self._consent_menu = menu.Items.Add("自动读取额度")
@@ -1644,7 +1664,10 @@ class CodexUsageSurface:
                 item.ShowShortcutKeys = True
                 item.Click += lambda _s, _e, pid=spec.id: self._consent_clicked(pid)
                 self._consent_items[spec.id] = (item, spec)
-        self._consent_menu.DropDownItems.Add(ToolStripSeparator())
+        self._consent_tail_sep = ToolStripSeparator()
+        self._consent_menu.DropDownItems.Add(self._consent_tail_sep)
+        self._consent_rescan = self._consent_menu.DropDownItems.Add("重新检测")
+        self._consent_rescan.Click += lambda *_: self._action(self.rescan)
         self._consent_hint = self._consent_menu.DropDownItems.Add(AUTO_READ_FOOTER[0])
         self._consent_hint.Enabled = False
         self._consent_menu.Visible = bool(self._consent_items)
@@ -1856,6 +1879,47 @@ class CodexUsageSurface:
                 item.ShowShortcutKeys = True
                 item.ShortcutKeyDisplayString = _provider_status(pstate, english)
                 set_icon(item, spec, pstate)
+            # Rows in tiers (chosen, detected, not detected), fixed order
+            # inside a tier.  Re-arranged only when the tiers change; ticks
+            # pause while the menu is open, so rows never jump under the mouse.
+            def arrange(name, items, rows, tail):
+                key = tuple(rows)
+                if self._menu_order.get(name) == key:
+                    return
+                self._menu_order[name] = key
+                pool = self._menu_separators.setdefault(name, [])
+                collection = items
+                collection.Clear()
+                used, last = 0, None
+                for tier, item in rows:
+                    if last is not None and tier != last:
+                        if used >= len(pool):
+                            pool.append(ToolStripSeparator())
+                        collection.Add(pool[used])
+                        used += 1
+                    collection.Add(item)
+                    last = tier
+                for item in tail:
+                    collection.Add(item)
+            model_rows = [(tier, self._model_items[pid][0]) for tier, pid in
+                          tiered(list(self._model_items), set(selected), provider_states)]
+            arrange("models", self._models_menu.DropDownItems, model_rows,
+                    [self._limit_item, self._models_tail_sep, self._rescan_item])
+            consent_rows = [(tier, self._consent_items[pid][0]) for tier, pid in
+                            tiered(list(self._consent_items), set(consented), provider_states)]
+            arrange("consent", self._consent_menu.DropDownItems, consent_rows,
+                    [self._consent_tail_sep, self._consent_rescan, self._consent_hint])
+            for rescan_item in (self._rescan_item, self._consent_rescan):
+                rescan_item.Text = "Detect again" if english else "重新检测"
+                fore = menu.ForeColor
+                glyph_key = ("↻", icon_px, int(fore.R), int(fore.G), int(fore.B))
+                if self._item_icons.get(rescan_item) != glyph_key:
+                    self._item_icons[rescan_item] = glyph_key
+                    try:
+                        from .ui_dialogs import glyph_icon
+                        rescan_item.Image = glyph_icon("↻", icon_px, (fore.R, fore.G, fore.B))
+                    except Exception:
+                        rescan_item.Image = None
                 item.Checked = pid in selected
                 # Keep unticked items clickable at the limit so a 5th tick can
                 # explain itself (hint) instead of silently doing nothing.

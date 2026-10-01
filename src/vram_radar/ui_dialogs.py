@@ -256,6 +256,32 @@ def letter_tile(name: str, px: int, accent=None):
     return bitmap
 
 
+def glyph_icon(glyph: str, px: int, rgb=(26, 26, 26)):
+    """Menu icon drawn from a symbol (e.g. "↻") at exactly px x px, cached;
+    same face as the owner-drawn top-level menu icons."""
+    key = ("glyph", glyph, int(px), tuple(rgb))
+    if key in _ICONS:
+        return _ICONS[key]
+    from System.Drawing import (Bitmap, Color, Font, FontStyle, Graphics, GraphicsUnit, RectangleF, SolidBrush,
+                                StringAlignment, StringFormat)
+    from System.Drawing.Text import TextRenderingHint
+    bitmap = Bitmap(px, px)
+    graphics = Graphics.FromImage(bitmap)
+    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+    font = Font("Segoe UI Symbol", max(6.0, px * 0.8), FontStyle.Regular, GraphicsUnit.Pixel)
+    brush = SolidBrush(Color.FromArgb(*rgb))
+    fmt = StringFormat()
+    fmt.Alignment = fmt.LineAlignment = StringAlignment.Center
+    try:
+        graphics.Clear(Color.Transparent)
+        graphics.DrawString(glyph, font, brush, RectangleF(0, 0, px, px), fmt)
+    finally:
+        for item in (font, brush, fmt, graphics):
+            item.Dispose()
+    _ICONS[key] = bitmap
+    return bitmap
+
+
 def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile."""
     key = (str(path or ""), int(px), name)

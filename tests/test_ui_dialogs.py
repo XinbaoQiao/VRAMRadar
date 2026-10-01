@@ -124,5 +124,26 @@ class MenuWidthTests(unittest.TestCase):
         from vram_radar import tray
         self.assertIs(tray._WindowRect, wintypes.RECT)
 
+
+class MenuTierTests(unittest.TestCase):
+    def test_three_tiers_keep_registry_order(self):
+        from vram_radar.usage_surface import tiered
+        ids = ["codex", "deepseek", "grok", "kimi", "claude", "glm", "qwen", "yuanbao"]
+        states = {"codex": {"installed": True}, "deepseek": {"installed": True}, "grok": {"installed": True},
+                  "kimi": {"installed": True, "signed_in": False}, "claude": {"installed": False},
+                  "glm": {"installed": False}, "qwen": {"installed": False, "code": "leftover_data"},
+                  "yuanbao": {"installed": True}}
+        rows = tiered(ids, {"grok", "codex"}, states)
+        self.assertEqual([pid for _, pid in rows],
+                         ["codex", "grok", "deepseek", "kimi", "yuanbao", "claude", "glm", "qwen"])
+        self.assertEqual([t for t, _ in rows], [0, 0, 1, 1, 1, 2, 2, 2])
+
+    def test_unprobed_counts_as_detected_and_sort_is_stable(self):
+        from vram_radar.usage_surface import tiered
+        rows = tiered(["grok", "kimi"], set(), {})
+        self.assertEqual(rows, [(1, "grok"), (1, "kimi")])
+        self.assertEqual(tiered(["grok", "kimi"], set(), {}), rows)
+        self.assertEqual(tiered(["grok", "kimi"], {"kimi"}, {"grok": {"installed": False}}), [(0, "kimi"), (2, "grok")])
+
 if __name__ == "__main__":
     unittest.main()
