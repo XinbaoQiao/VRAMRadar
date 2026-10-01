@@ -881,6 +881,10 @@ def run_remote(
     identities_only: bool = False,
     accept_new_host_key: bool = False,
 ) -> str:
+    if server.backend == "local":
+        raise ConnectorFailure(
+            "local_ssh_unavailable", "本地 GPU 监控不使用 SSH", retryable=False, state="misconfigured",
+        )
     if stdin_data is not None and len(stdin_data) > MAX_REMOTE_STDIN_BYTES:
         raise ConnectorFailure(
             "request_too_large",
@@ -2921,6 +2925,10 @@ def query_server(
     password: str | None = None,
     identities_only: bool = False,
 ) -> dict[str, Any]:
+    if server.backend == "local":
+        from .local_gpu import query_local_gpu
+
+        return query_local_gpu(server)
     if server.backend == "direct_ssh":
         return query_direct_ssh(server, password=password, identities_only=identities_only)
     if server.backend == "slurm_ssh":

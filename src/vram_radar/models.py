@@ -8,7 +8,7 @@ from typing import Any
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SAFE_SLURM_MODULE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/@:-]{0,255}$")
-SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh"})
+SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh", "local"})
 SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
 SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
 SUPPORTED_SAVED_VIEW_FILTERS = frozenset({"all", "available", "tasks", "issues"})
@@ -308,8 +308,13 @@ class ServerProfile:
             raise ConfigError(f"server {server_id} backend must be one of {sorted(SUPPORTED_BACKENDS)}")
         alias = require_optional_ssh_token(raw.get("ssh_alias", ""), f"server {server_id} ssh_alias")
         host = require_optional_ssh_token(raw.get("host", ""), f"server {server_id} host")
-        if not alias and not host:
+        if backend != "local" and not alias and not host:
             raise ConfigError(f"server {server_id} requires ssh_alias or host")
+        if backend == "local" and any(raw.get(key) for key in (
+            "ssh_alias", "host", "username", "identity_file", "ssh_config_file", "auth_ref",
+            "slurm_module", "slurm_bin_directory", "slurm_init_script", "auto_detect_backend",
+        )):
+            raise ConfigError(f"server {server_id} local monitoring does not use SSH settings")
         port = raw.get("port", 22)
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise ConfigError(f"server {server_id} port must be between 1 and 65535")

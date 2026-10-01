@@ -67,6 +67,11 @@ The interface starts with available VRAM and server state. Nodes, tasks, process
 
 ### Everyday workflow
 
+To monitor this computer's NVIDIA GPU, add a server in Settings and choose
+**Local NVIDIA GPU**. No SSH address or credentials are needed. Radar reads
+memory, GPU utilization and temperature once per configured refresh interval;
+it does not start compute tasks. Local mode requires `nvidia-smi` from the NVIDIA driver.
+
 | Capability | What you can do |
 |---|---|
 | Server navigation | Search and filter servers, keep favorites close, and pause monitoring when needed. |

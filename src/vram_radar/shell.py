@@ -1319,6 +1319,8 @@ class AppApi:
             server = next((item for item in self.profile.servers if item.id == normalized_id), None)
         if server is None:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
+        if server.backend == "local":
+            return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
         details = ssh_copy_details(server)
         argv = list(details.argv)
         command = _powershell_join(argv) if sys.platform == "win32" else shlex.join(argv)
@@ -1356,6 +1358,8 @@ class AppApi:
             server = next((item for item in self.profile.servers if item.id == normalized_id), None)
         if server is None:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
+        if server.backend == "local":
+            return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
         argv = ssh_login_argv(server)
         try:
             if sys.platform == "win32":
@@ -2653,7 +2657,7 @@ class AppApi:
             # dashboard, so a successful test cannot leave a stale error card.
             payload = self.service.probe_server(normalized_id)
         except ConnectorFailure as exc:
-            collection_failure = exc.code in {
+            collection_failure = server.backend != "local" and exc.code in {
                 "command_missing",
                 "parse_failed",
                 "config_invalid",
@@ -2743,7 +2747,7 @@ class AppApi:
             stages.append(
                 {
                     "id": "collection" if collection_failure else "connection",
-                    "label": "资源读取" if collection_failure else "SSH 连接",
+                    "label": "本地 GPU" if server.backend == "local" else ("资源读取" if collection_failure else "SSH 连接"),
                     "state": "failed",
                     "message": str(exc),
                 }
@@ -2835,9 +2839,9 @@ class AppApi:
             [
                 {
                     "id": "connection",
-                    "label": "SSH 连接",
+                    "label": "本地 GPU" if server.backend == "local" else "SSH 连接",
                     "state": "passed",
-                    "message": "SSH 连接和身份验证成功",
+                    "message": "本地 GPU 读取成功" if server.backend == "local" else "SSH 连接和身份验证成功",
                 },
                 {
                     "id": "collection",

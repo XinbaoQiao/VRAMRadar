@@ -1145,7 +1145,11 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("show_other_user_commands: true", self.javascript)
         self.assertIn("Slurm：显示其他用户的任务名、状态与时间", self.javascript)
         self.assertIn("调度器视图不读取完整 shell 命令", self.javascript)
-        self.assertNotIn("server-command-setting').hidden", self.javascript)
+        # Task privacy remains available on both remote backends; the local
+        # telemetry-only backend has no remote tasks or SSH configuration.
+        self.assertIn("const local = backend === 'local';", self.javascript)
+        self.assertIn("server-command-setting').hidden = local", self.javascript)
+        self.assertNotIn("server-command-setting').hidden = slurm", self.javascript)
         self.assertIn("show_other_user_commands", self.javascript)
         self.assertIn(".server-command-setting", self.styles)
 

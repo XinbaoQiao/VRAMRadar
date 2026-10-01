@@ -276,7 +276,7 @@ const stateLabel = state => ({
   connecting: '正在配置中', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
   security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '监控已暂停'
 })[state] || state;
-const backendLabel = backend => backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
+const backendLabel = backend => backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
 const taskStateLabel = state => ({
   PENDING: '排队中', RUNNING: '运行中', COMPLETING: '收尾中', CONFIGURING: '准备中', SUSPENDED: '已暂停',
   COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消', TIMEOUT: '超时', OUT_OF_MEMORY: '任务内存不足'
@@ -481,7 +481,7 @@ function capacityTape(summary) {
 }
 
 function renderSummary(summary) {
-  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">SSH 已认证 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span>块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
+  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">连接就绪 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span>块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
 }
 
 function setRefreshClock(text, active = false) {
@@ -1812,6 +1812,7 @@ function renderDirectoryRootBar(serverId, state) {
 }
 
 function renderDirectoryModule(server) {
+  if (server.backend === 'local') return '';
   const account = accountForServer(server);
   const state = directoryTrees.get(server.server_id);
   if (!account.home_directory && state?.status !== 'loaded') return '';
@@ -2081,6 +2082,9 @@ function renderError(server) {
 }
 
 function renderConfiguring(server) {
+  if (server.backend === 'local') {
+    return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在读取本地 GPU</div><div class="configuring-copy">只读显存、GPU 利用率和温度；不会启动计算任务。</div></div></div>`;
+  }
   const backend = server.backend === 'slurm_ssh' ? 'Slurm 调度器' : 'GPU 监控组件';
   return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在配置并验证服务器</div><div class="configuring-copy">正在连接 SSH、检查 ${escapeHtml(backend)}并读取第一份 GPU 数据；完成前不会显示为错误。</div></div></div>`;
 }
@@ -2131,8 +2135,8 @@ function renderServerQuickActions(server) {
   const favorite = favoriteServerIds.has(serverId);
   const pinned = pinnedServerIds.has(serverId);
   const enabled = serverIsEnabled(serverId);
-  const copySsh = api?.get_ssh_command ? `<button class="button compact-button copy-server-ssh" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="复制 SSH 命令" title="复制 SSH 命令">${icon('copy')}<span>复制 SSH</span></button>` : '';
-  const openTerminal = api?.open_terminal
+  const copySsh = server.backend !== 'local' && api?.get_ssh_command ? `<button class="button compact-button copy-server-ssh" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="复制 SSH 命令" title="复制 SSH 命令">${icon('copy')}<span>复制 SSH</span></button>` : '';
+  const openTerminal = server.backend !== 'local' && api?.open_terminal
     ? `<button class="button compact-button open-terminal" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="打开服务器终端" title="打开终端">${icon('terminal')}<span>打开终端</span></button>`
     : '';
   return `<div class="server-quick-actions"><button class="button compact-button pin-server${pinned ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${pinned}" aria-label="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668') : localizedText('\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668')}" title="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}">${icon('pin')}<span>${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}</span></button><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
@@ -4040,7 +4044,7 @@ function serverDraftFromValue(server = {}, options = {}) {
   return {
     ...server,
     backend: server.auto_detect_backend ? 'auto' : (server.backend || 'auto'),
-    _detected_backend: server.backend === 'slurm_ssh' ? 'slurm_ssh' : 'direct_ssh',
+    _detected_backend: server.backend === 'local' ? 'local' : server.backend === 'slurm_ssh' ? 'slurm_ssh' : 'direct_ssh',
     _original_id: server.id || '',
     _original_ssh_alias: server.ssh_alias || '',
     _imported_candidate: options.importedCandidate === true,
@@ -4456,6 +4460,17 @@ function addServerEditor(server = {}, options = {}) {
   refreshKeyMode();
   const refreshCapabilities = () => {
     const backend = editor.querySelector('[data-field="backend"]').value;
+    const local = backend === 'local';
+    ['ssh_alias', 'host'].forEach(field => {
+      editor.querySelector(`[data-field="${field}"]`).closest('label').hidden = local;
+    });
+    editor.querySelector('.primary-help').hidden = local;
+    editor.querySelector('.ssh-key-setup').hidden = local;
+    editor.querySelector('.server-command-setting').hidden = local;
+    editor.querySelector('.server-editor-more-body > .editor-help').hidden = local;
+    editor.querySelector('.server-editor-more-body').querySelectorAll('label').forEach(label => {
+      if (!label.querySelector('[data-field="id"]')) label.hidden = local;
+    });
     const slurm = backend === 'slurm_ssh' || (backend === 'auto' && values._detected_backend === 'slurm_ssh');
     editor.querySelectorAll('[data-slurm-environment]').forEach(field => { field.hidden = !slurm; });
     editor.querySelector('[data-command-summary-help]').textContent = slurm
@@ -4538,7 +4553,7 @@ function invalidServerDraft() {
     const serverIdKey = serverId.toLowerCase();
     if (seenIds.has(serverIdKey)) return {index, field: 'id', message: '服务器 ID 与前面的服务器重复（不区分大小写）'};
     seenIds.add(serverIdKey);
-    if (!String(draft.ssh_alias || '').trim() && !String(draft.host || '').trim()) {
+    if (draft.backend !== 'local' && !String(draft.ssh_alias || '').trim() && !String(draft.host || '').trim()) {
       return {index, field: 'ssh_alias', message: 'OpenSSH 别名与主机地址至少填写一个'};
     }
     const port = Number(draft.port || 22);
@@ -4789,6 +4804,10 @@ function collectProfile() {
     const existingId = draft._original_id || value('id');
     const existing = currentProfile?.servers?.find(item => item.id === existingId);
     const selectedBackend = value('backend');
+    if (selectedBackend === 'local') {
+      return {id: value('id'), display_name: value('display_name'), backend: 'local',
+        enabled: draft.enabled !== false, connect_timeout_seconds: 5};
+    }
     const server = {
       id: value('id'), display_name: value('display_name'), backend: selectedBackend === 'auto' ? (draft._detected_backend || existing?.backend || 'direct_ssh') : selectedBackend, ssh_alias: value('ssh_alias'),
       host: value('host'), port: Number(value('port') || 22), username: value('username'), identity_file: value('identity_file'),
