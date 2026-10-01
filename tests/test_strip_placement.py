@@ -141,3 +141,10 @@ class WidestWeatherTests(unittest.TestCase):
         self.assertEqual(self.run_reading(layout, 121, own=own, now=0), 237)     # cannot see past the strip
         self.assertEqual(self.run_reading(layout, 150, own=(255, 1538, 476, 1589), now=5), 150)  # real width
         self.assertEqual(layout._weather_seen, [(5, 150)])
+
+
+class StripMarginTests(unittest.TestCase):
+    def test_margin_follows_real_display_scale(self):
+        from vram_radar.usage_surface import strip_margin, taskbar_scale
+        self.assertEqual(strip_margin(taskbar_scale(144, None)), 18)   # 150 %
+        self.assertEqual(strip_margin(taskbar_scale(96, None)), 12)    # 100 %

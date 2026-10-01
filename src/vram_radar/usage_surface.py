@@ -124,6 +124,13 @@ LEFT_BOUND_IDS = ("WidgetsButton",)
 # Minimum clear gap (px at 100 %) between the strip and the weather text on
 # its left / Start (or Search) on its right.
 STRIP_MARGIN = 12
+# The strip draws at 85 % of the taskbar's DPI scale (``taskbar_scale``).
+STRIP_DENSITY = 0.85
+
+
+def strip_margin(strip_scale: float) -> int:
+    """STRIP_MARGIN in physical px at the real display scale (18 px at 150 %)."""
+    return max(1, round(STRIP_MARGIN * strip_scale / STRIP_DENSITY))
 RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
 
 
@@ -555,7 +562,7 @@ SHELL_OVERLAY_CLASSES = frozenset({
 
 
 def taskbar_scale(dpi, geometry):
-    preferred = max(0.6, dpi / 96 * 0.85)
+    preferred = max(0.6, dpi / 96 * STRIP_DENSITY)
     return min(preferred, max(0.6, (geometry[0][3]-geometry[0][1]-6)/40)) if geometry else preferred
 
 
@@ -1406,7 +1413,7 @@ class CodexUsageSurface:
                 size = (form.Width, form.Height)
                 own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
                 elements = self._layout.elements(bar_handle, bar, own)
-                target = self._placer.propose(docked_target(bar, tray, elements, size, scale(STRIP_MARGIN), scale(4)))
+                target = self._placer.propose(docked_target(bar, tray, elements, size, strip_margin(self._scale), scale(4)))
                 self._slot = target[0]
                 x, y = docked_point(bar, target, size[0])
                 if (form.Left, form.Top) != (x, y):
@@ -2161,7 +2168,7 @@ class CodexUsageSurface:
                 if self._placement == "taskbar" and geometry:
                     elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
                                                      (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
-                    gap_area = left_gap(geometry[0], elements, scale(STRIP_MARGIN)) if elements else None
+                    gap_area = left_gap(geometry[0], elements, strip_margin(self._scale)) if elements else None
                     available = gap_area[1] - gap_area[0] if gap_area else None
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
                     if show_icons else None
@@ -2201,6 +2208,12 @@ class CodexUsageSurface:
                             if name_label.Image is not image:
                                 name_label.Image = image
                                 name_label.ImageAlign = ContentAlignment.MiddleLeft
+                            # 1 px lower: the regular-weight name (and the
+                            # icon) then share the bold value's baseline /
+                            # optical centre instead of sitting ~1 px high.
+                            nudge = Padding(0, max(1, round(scale(1.5) * factor)), 0, 0)
+                            if name_label.Padding != nudge:
+                                name_label.Padding = nudge
                             # No icon available -> fall back to the name.
                             name_label.Text = "" if image is not None else cells[index][0]
                         x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
