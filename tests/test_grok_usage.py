@@ -208,5 +208,28 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(kept["quota_source"], "session")
 
 
+class ProbeHeadlineTests(unittest.TestCase):
+    def tearDown(self):
+        grok.SESSION["enabled"] = False
+        set_session_consent(())
+
+    def test_session_reading_survives_signin_headline(self):
+        """Regression: the sign-in/run headline must not overwrite a live
+        consented session reading at the end of probe()."""
+        from vram_radar.providers.base import Environment
+        grok.SESSION["enabled"] = True
+        with patch.object(grok, "_session_usage",
+                          return_value={"status": "ok", "used_percent": 8, "reset_at": 1760000000}):
+            state = grok.probe(Environment())
+        self.assertEqual(state["quota_source"], "session")
+        self.assertEqual(state["headline"]["zh"], "已用 8%")
+
+    def test_signin_headline_used_when_no_session(self):
+        from vram_radar.providers.base import Environment
+        grok.SESSION["enabled"] = False
+        state = grok.probe(Environment())
+        self.assertNotEqual(state.get("quota_source"), "session")
+
+
 if __name__ == "__main__":
     unittest.main()

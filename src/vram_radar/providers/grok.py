@@ -176,6 +176,9 @@ def probe(env: Environment) -> dict:
         headline = pair("已安装", "Installed") if state["installed"] else pair("未安装", "Missing")
     if state["signed_in"] is not None and state["running"] is False:
         state["facts"].append(pair("登录状态来自上次运行", "Sign-in state is from the last run"))
-    state["headline"] = headline
-    state["subline"] = running_pair(state["running"])
+    # A successful consented session read is the primary headline; only fall
+    # back to sign-in/run state when there is no live usage to show.
+    if state.get("quota_source") != "session":
+        state["headline"] = headline
+        state["subline"] = running_pair(state["running"])
     return state
