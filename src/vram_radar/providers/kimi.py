@@ -322,8 +322,13 @@ def probe(env: Environment, *, now: float | None = None) -> dict:
                                    f"From Kimi's own log, recorded {when}" + (" (refreshes only while Kimi runs)" if stale else "")))
         reset = state.get("reset_at")
         if reset and reset > now and not stale:
-            hours = (reset - now) / 3600
-            state["subline"] = pair(f"{hours:.1f}h" if hours >= 0.1 else "<0.1h", f"{hours:.1f}h" if hours >= 0.1 else "<0.1h")
+            # Minimal strip: the bare time until the allowance resets.
+            label = _hours_label(reset, now)
+            if exhausted:
+                state["subline"] = pair(label, label)   # 已用尽 + time until it resets
+            else:
+                state["headline"] = pair(label, label)
+                state["subline"] = running_pair(state["running"])
         elif stale:
             state["subline"] = pair(f"记录 {time.strftime('%m-%d', time.localtime(as_of))}" if as_of else "旧记录",
                                     f"As of {time.strftime('%m-%d', time.localtime(as_of))}" if as_of else "Old data")
