@@ -268,7 +268,7 @@ def glyph_icon(glyph: str, px: int, rgb=(26, 26, 26)):
     bitmap = Bitmap(px, px)
     graphics = Graphics.FromImage(bitmap)
     graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
-    font = Font("Segoe UI Symbol", max(6.0, px * 0.8), FontStyle.Regular, GraphicsUnit.Pixel)
+    font = Font("Segoe UI Symbol", max(6.0, px * 1.0), FontStyle.Bold, GraphicsUnit.Pixel)
     brush = SolidBrush(Color.FromArgb(*rgb))
     fmt = StringFormat()
     fmt.Alignment = fmt.LineAlignment = StringAlignment.Center

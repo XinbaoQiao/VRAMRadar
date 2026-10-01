@@ -1879,6 +1879,10 @@ class CodexUsageSurface:
                 item.ShowShortcutKeys = True
                 item.ShortcutKeyDisplayString = _provider_status(pstate, english)
                 set_icon(item, spec, pstate)
+                item.Checked = pid in selected
+                # Keep unticked items clickable at the limit so a 5th tick can
+                # explain itself (hint) instead of silently doing nothing.
+                item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
             # Rows in tiers (chosen, detected, not detected), fixed order
             # inside a tier.  Re-arranged only when the tiers change; ticks
             # pause while the menu is open, so rows never jump under the mouse.
@@ -1920,10 +1924,6 @@ class CodexUsageSurface:
                         rescan_item.Image = glyph_icon("↻", icon_px, (fore.R, fore.G, fore.B))
                     except Exception:
                         rescan_item.Image = None
-                item.Checked = pid in selected
-                # Keep unticked items clickable at the limit so a 5th tick can
-                # explain itself (hint) instead of silently doing nothing.
-                item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
             self._limit_item.Visible = full
             self._limit_item.Text = limit_menu_text(MAX_SELECTED, language)
             self._background_title.Text = "Background" if english else "背景"
