@@ -11,8 +11,22 @@ def jwt(exp):
     return f"{enc({'alg': 'HS256'})}.{enc({'exp': exp, 'typ': 'access'})}.sig"
 
 
+def isolate_last(test):
+    """Point the persisted Kimi reading at a temp file for one test."""
+    folder = tempfile.TemporaryDirectory()
+    test.addCleanup(folder.cleanup)
+    path = Path(folder.name) / "kimi-quota.json"
+    patcher = mock.patch.object(kimi, "_last_path", lambda: path)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    kimi.LAST.update(reading=None, at=None, loaded=False)
+    test.addCleanup(lambda: kimi.LAST.update(reading=None, at=None, loaded=False))
+    return path
+
+
 class KimiSessionTests(unittest.TestCase):
     def setUp(self):
+        isolate_last(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "bridge-store").mkdir()
@@ -127,8 +141,21 @@ REAL_STATS = {"subscriptionBalance": {"id": "bid", "feature": "FEATURE_OMNI", "u
 
 
 class KimiParserTests(unittest.TestCase):
-    def tearDown(self):
-        kimi.LAST["reading"] = kimi.LAST["at"] = None
+    def setUp(self):
+        self.last_path = isolate_last(self)
+
+    def test_last_reading_survives_restart_until_reset(self):
+        reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
+        kimi.apply_session({"facts": []}, reading, now=1_000)
+        saved = json.loads(self.last_path.read_text(encoding="utf-8"))
+        self.assertEqual(set(saved["reading"]) - set(kimi._KEEP), set())
+        self.assertNotIn("bid", self.last_path.read_text(encoding="utf-8"))
+        kimi.LAST.update(reading=None, at=None, loaded=False)   # app restart
+        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        self.assertEqual(out["headline"]["zh"], "已用 25%")
+        kimi.LAST.update(reading=None, at=None, loaded=False)
+        late = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=1790997735 + 10)
+        self.assertEqual(late["headline"]["zh"], "待刷新")   # quota window already reset
 
     def test_real_response_shape(self):
         parsed = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
@@ -161,6 +188,7 @@ class KimiParserTests(unittest.TestCase):
         self.assertEqual(out["headline"]["zh"], "已用 25%")
         self.assertTrue(out["subline"]["zh"].startswith("读于"))
         kimi.LAST["reading"] = None
+        self.last_path.unlink()
         out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
         self.assertEqual(out["headline"]["zh"], "待刷新")
 

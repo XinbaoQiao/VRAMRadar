@@ -15,8 +15,10 @@ They are as fresh as the last time Kimi itself was running.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import re
 import time
+from pathlib import Path
 
 from . import grok_usage, kimi_usage
 from .base import (Environment, base_state, detect_install, newest_mtime, pair, read_json,
@@ -42,7 +44,55 @@ def _session_usage(data) -> dict | None:
         return {"status": "error"}
 
 
-LAST = {"reading": None, "at": None}   # last good session reading (non-secret fields only)
+LAST = {"reading": None, "at": None, "loaded": False}   # last good reading (non-secret fields only)
+_KEEP = {"used_percent": (int, float), "reset_at": (int, float), "plan": str, "level": str,
+         "is_member": bool, "exhausted": bool, "overdrawn": bool, "send_blocked": bool}
+
+
+def _last_path():
+    from ..storage import storage_paths
+    return Path(storage_paths().cache) / "kimi-quota.json"
+
+
+def _save_last(reading: dict, at: float, path=None) -> None:
+    """Persist only the non-secret quota fields so a restart while Kimi is
+    closed (its access token lives ~15 min) still shows the last value."""
+    try:
+        from ..storage import atomic_write_text
+        keep = {k: reading.get(k) for k, kinds in _KEEP.items()
+                if isinstance(reading.get(k), kinds) and not (kinds is not bool and isinstance(reading.get(k), bool))}
+        atomic_write_text(path or _last_path(), json.dumps({"at": float(at), "reading": keep}))
+    except Exception:
+        pass
+
+
+def _load_last(path=None) -> None:
+    if LAST["loaded"]:
+        return
+    LAST["loaded"] = True
+    try:
+        target = path or _last_path()
+        if target.stat().st_size > 4096:
+            return
+        data = json.loads(target.read_text(encoding="utf-8"))
+        reading = {k: v for k, v in (data.get("reading") or {}).items()
+                   if k in _KEEP and isinstance(v, _KEEP[k])}
+        at = data.get("at")
+        if reading and isinstance(at, (int, float)):
+            LAST["reading"], LAST["at"] = {"status": "ok", **reading}, float(at)
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+
+
+def _usable_last(now: float) -> dict | None:
+    """The stored reading, unless its quota window has already reset."""
+    reading = LAST["reading"]
+    if not reading:
+        return None
+    reset = reading.get("reset_at")
+    if isinstance(reset, (int, float)) and reset <= now:
+        return None
+    return reading
 
 
 def _hours_label(reset, now):
@@ -102,6 +152,8 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
     if status == "ok":
         fetched = session.get("fetched_at") if isinstance(session.get("fetched_at"), (int, float)) else now
         LAST["reading"], LAST["at"] = dict(session), fetched
+        if not session.get("stale_error"):
+            _save_last(session, fetched)
         stale = bool(session.get("stale_error"))   # cache served the last good reading
         state = _show_reading(state, session, now, read_at=fetched if stale else None)
         state["session_quota"] = "ok"
@@ -110,7 +162,8 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
         return state
     if status == "unauthorized" and session.get("login_valid"):
         state["session_quota"] = "waiting_app"
-        if LAST["reading"]:
+        _load_last()
+        if _usable_last(now):
             state = _show_reading(state, LAST["reading"], now, read_at=LAST["at"])
         else:
             state["headline"] = pair("待刷新", "Pending")
@@ -135,7 +188,8 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
                                       "Automatic quota read failed: Kimi sign-in expired" + (f" ({when})" if when else "")
                                       + "; open Kimi once to renew or sign in"))
         return state
-    if LAST["reading"]:   # network hiccup: keep the last real reading
+    _load_last()
+    if _usable_last(now):   # network hiccup: keep the last real reading
         state = _show_reading(state, LAST["reading"], now, read_at=LAST["at"])
     return state
 
