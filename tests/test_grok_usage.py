@@ -200,9 +200,9 @@ class ApplyTests(unittest.TestCase):
     def test_ok_sets_strip_label_and_tooltip(self):
         state = grok._apply_session(self._state(), {"status": "ok", "used_percent": 66,
                                                     "reset_at": 1760000000})
-        self.assertEqual(state["headline"]["zh"], "已用 66%")
+        self.assertEqual(state["headline"]["zh"], "34%")
         self.assertEqual(state["quota_source"], "session")
-        self.assertIn("自动读取", state["brief"]["zh"])
+        self.assertIn("重置", state["brief"]["zh"])
         # A later screen reading does not clobber the consented session reading.
         kept = grok.overlay(state, None)
         self.assertEqual(kept["quota_source"], "session")
@@ -222,7 +222,7 @@ class ProbeHeadlineTests(unittest.TestCase):
                           return_value={"status": "ok", "used_percent": 8, "reset_at": 1760000000}):
             state = grok.probe(Environment())
         self.assertEqual(state["quota_source"], "session")
-        self.assertEqual(state["headline"]["zh"], "已用 8%")
+        self.assertEqual(state["headline"]["zh"], "92%")
 
     def test_signin_headline_used_when_no_session(self):
         from vram_radar.providers.base import Environment

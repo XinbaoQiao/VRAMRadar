@@ -99,42 +99,46 @@ def _hours_label(reset, now):
     if not isinstance(reset, (int, float)) or reset <= now:
         return None
     hours = (reset - now) / 3600
+    if hours >= 100:
+        return f"{hours:.0f}h"
     return f"{hours:.1f}h" if hours >= 0.1 else "<0.1h"
 
 
 def _show_reading(state: dict, reading: dict, now: float, *, read_at: float | None = None) -> dict:
+    """Strip: the bare usable amount -- time until the allowance resets (free
+    and paid plans alike), 已用尽 when used up.  Tooltip: usage + reset."""
     used = reading.get("used_percent")
-    exhausted = bool(reading.get("exhausted")) or bool(reading.get("overdrawn")) or bool(reading.get("send_blocked"))
-    if isinstance(used, (int, float)):
-        value = f"{used:.0f}%"
-        state["headline"] = pair(f"已用 {value}", f"{value} used")
-        brief_zh, brief_en = f"已用 {value}", f"{value} used"
-    else:
-        state["headline"] = pair("已用尽", "Exhausted") if exhausted else pair("可用", "OK")
-        brief_zh, brief_en = ("额度已用尽", "Quota exhausted") if exhausted else ("额度未用尽", "Quota not exhausted")
+    exhausted = (bool(reading.get("exhausted")) or bool(reading.get("overdrawn"))
+                 or bool(reading.get("send_blocked")) or (isinstance(used, (int, float)) and used >= 100))
     reset = reading.get("reset_at")
+    hours = _hours_label(reset, now)
+    if exhausted:
+        state["headline"] = pair("已用尽", "Used up")
+    elif reading.get("active") is False and not reading.get("is_member") and used is None:
+        state["headline"] = pair("无额度", "None")
+    elif hours:
+        state["headline"] = pair(hours, hours)
+    elif isinstance(used, (int, float)):
+        state["headline"] = pair(f"{100 - used:.0f}%", f"{100 - used:.0f}%")
+    else:
+        state["headline"] = pair("可用", "OK")
+    brief_zh = f"已用 {used:.0f}%" if isinstance(used, (int, float)) else ("已用尽" if exhausted else "可用")
+    brief_en = f"{used:.0f}% used" if isinstance(used, (int, float)) else ("used up" if exhausted else "available")
     if isinstance(reset, (int, float)) and reset > now:
         stamp = time.strftime("%m-%d %H:%M", time.localtime(reset))
         brief_zh += f" · {stamp} 重置"
         brief_en += f" · resets {stamp}"
         state["reset_at"] = reset
-    member = reading.get("is_member")
-    plan = reading.get("plan") or ""
-    tier_zh = "会员" if member else "免费版" if member is False else ""
-    tier_en = "member" if member else "free plan" if member is False else ""
-    if plan or tier_zh:
-        brief_zh += " · " + " ".join(x for x in (plan, tier_zh) if x)
-        brief_en += " · " + " ".join(x for x in (plan, tier_en) if x)
     if read_at is None:
-        state["subline"] = pair(_hours_label(reset, now) or "自动读取", _hours_label(reset, now) or "auto")
-        state["brief"] = pair(brief_zh + "（自动读取）", brief_en + " (auto)")
+        state["subline"] = pair("自动读取", "auto")
         state["stale"] = False
     else:
         when = time.strftime("%H:%M" if now - read_at < 86400 else "%m-%d %H:%M", time.localtime(read_at))
         state["subline"] = pair(f"读于 {when}", f"read {when}")
-        state["brief"] = pair(brief_zh + f"（{when} 读取；打开 Kimi 即可刷新）",
-                              brief_en + f" (read {when}; open Kimi to refresh)")
+        brief_zh += f"（{when} 读取）"
+        brief_en += f" (read {when})"
         state["stale"] = True
+    state["brief"] = pair(brief_zh, brief_en)
     state["low"] = exhausted or (isinstance(used, (int, float)) and used >= 90)
     state["quota_available"] = True
     state["quota_source"] = "session"
@@ -176,7 +180,7 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
         return state
     if status == "unauthorized":
         LAST["reading"] = LAST["at"] = None
-        state["headline"] = pair("需重新登录", "Sign in again")
+        state["headline"] = pair("需登录", "Sign in")
         state["subline"] = pair("打开 Kimi 一次", "open Kimi once")
         state["brief"] = pair("需重新登录（打开 Kimi 一次）", "Sign in again (open Kimi once)")
         state["session_quota"], state["session_relogin"] = "expired", True

@@ -13,6 +13,7 @@ and ``rows.sessionStats``), which we aggregate as local usage.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import time
 
 from . import deepseek_balance
@@ -106,6 +107,38 @@ def summarize_sessions(folder: Path) -> dict:
     return dict(summary)
 
 
+def short_money(amount, currency: str) -> str:
+    """Strip amount: "¥6.00" -> "¥6", "$66.50" stays."""
+    return re.sub(r"\.00$", "", money(amount, currency))
+
+
+def balance_labels(wallets, shown):
+    """(headline, brief).  The strip shows only the usable total (paid and
+    gift money are both spendable, so they are not told apart there); the
+    tooltip adds the paid/gift split.  An empty account reads 无余额."""
+    kinds: dict[str, dict] = {}
+    for wallet in wallets:
+        bucket = kinds.setdefault(wallet["currency"], {"topped_up": 0, "granted": 0})
+        bucket[wallet["kind"] if wallet["kind"] in bucket else "topped_up"] += wallet["amount"]
+    funded = [c for c, b in kinds.items() if b["topped_up"] + b["granted"] != 0]
+    if not funded:
+        return pair("无余额", "Empty"), pair("余额为 0（充值与赠送均为 0）", "Balance 0 (paid and gift both 0)")
+    if len(funded) > 1:
+        text = " + ".join(short_money(kinds[c]["topped_up"] + kinds[c]["granted"], c) for c in funded)
+        return pair(text, text), pair("余额 " + text, "Balance " + text)
+    currency = funded[0]
+    paid, gift = kinds[currency]["topped_up"], kinds[currency]["granted"]
+    total = short_money(paid + gift, currency)
+    if paid and gift:
+        split_zh = f"充值 {short_money(paid, currency)} + 赠送 {short_money(gift, currency)}"
+        split_en = f"paid {short_money(paid, currency)} + gift {short_money(gift, currency)}"
+    elif gift:
+        split_zh, split_en = "赠送余额", "gift balance"
+    else:
+        split_zh, split_en = "充值余额", "paid balance"
+    return pair(total, total), pair(f"{total}（{split_zh}）", f"{total} ({split_en})")
+
+
 def probe(env: Environment) -> dict:
     detection = detect_install(
         env, uninstall=[r"^DeepSeek\b"], processes=["deepseek harness.exe", "deepseek.exe"],
@@ -160,7 +193,8 @@ def probe(env: Environment) -> dict:
                                    (" · last refresh failed, showing previous value" if note else "")))
         total_zero = all(v == 0 for v in sums.values())
         state["low"] = total_zero
-        state["headline"] = pair(" + ".join(shown) or "¥0.00", " + ".join(shown) or "¥0.00")
+        headline, brief = balance_labels(balance.get("wallets", []), shown)
+        state["headline"], state["brief"] = headline, brief
         state["subline"] = pair(f"{format_tokens(total)} tok", f"{format_tokens(total)} tok")
         return state
     reason = (balance or {}).get("status")

@@ -102,7 +102,7 @@ class GrokScreen(unittest.TestCase):
         self.assertEqual(plain["headline"]["zh"], "已登录")
         seen = grok.overlay(dict(state, facts=[]), {"percent_used": 23.0, "reset_text": "Resets in 3 days",
                                                     "seen_at": 10_000 - 60}, now=10_000)
-        self.assertEqual(seen["headline"]["zh"], "已用 23%")
+        self.assertEqual(seen["headline"]["zh"], "77%")
         self.assertTrue(seen["brief"]["zh"].startswith("已用 23% · Resets in 3 days"))
         old = grok.overlay(dict(state, facts=[]), {"percent_used": 23.0, "seen_at": 0}, now=8 * 86400 + 1)
         self.assertEqual(old["headline"]["zh"], "已登录")

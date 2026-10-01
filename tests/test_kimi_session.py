@@ -57,7 +57,7 @@ class KimiSessionTests(unittest.TestCase):
             result = kimi_usage.fetch_usage(self.root, post=mock.Mock(), clock=lambda: 2_000)
         self.assertEqual((result["reason"], result["login_valid"]), ("expired", False))
         out = kimi.apply_session({"facts": []}, result, now=2_000)
-        self.assertEqual(out["headline"]["zh"], "需重新登录")
+        self.assertEqual(out["headline"]["zh"], "需登录")
 
     def test_valid_token_calls_only_the_two_read_only_methods(self):
         calls = []
@@ -97,12 +97,12 @@ class KimiSessionTests(unittest.TestCase):
     def test_apply_session_relogin_and_ok(self):
         state = {"headline": {"zh": "可用", "en": "OK"}, "facts": []}
         out = kimi.apply_session(state, {"status": "unauthorized", "reason": "expired", "expired_at": 1.0})
-        self.assertEqual(out["headline"]["zh"], "需重新登录")
+        self.assertEqual(out["headline"]["zh"], "需登录")
         self.assertEqual(out["brief"]["zh"], "需重新登录（打开 Kimi 一次）")
         ok = kimi.apply_session({"facts": []}, {"status": "ok", "exhausted": False, "reset_at": 7200 + 100},
                                 now=100)
-        self.assertEqual(ok["headline"]["zh"], "可用")
-        self.assertEqual(ok["subline"]["zh"], "2.0h")
+        self.assertEqual(ok["headline"]["zh"], "2.0h")
+        self.assertEqual(ok["subline"]["zh"], "自动读取")
         self.assertEqual(ok["quota_source"], "session")
 
     def test_session_gated_by_consent_and_selection(self):
@@ -152,7 +152,7 @@ class KimiParserTests(unittest.TestCase):
         self.assertNotIn("bid", self.last_path.read_text(encoding="utf-8"))
         kimi.LAST.update(reading=None, at=None, loaded=False)   # app restart
         out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
-        self.assertEqual(out["headline"]["zh"], "已用 25%")
+        self.assertRegex(out["headline"]["zh"], r"^\d+h$")
         kimi.LAST.update(reading=None, at=None, loaded=False)
         late = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=1790997735 + 10)
         self.assertEqual(late["headline"]["zh"], "待刷新")   # quota window already reset
@@ -176,8 +176,8 @@ class KimiParserTests(unittest.TestCase):
         reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
         now = 1790997735 - 36 * 3600
         out = kimi.apply_session(log_state, reading, now=now)
-        self.assertEqual(out["headline"]["zh"], "已用 25%")
-        self.assertEqual(out["subline"]["zh"], "36.0h")
+        self.assertEqual(out["headline"]["zh"], "36.0h")    # bare time until the allowance resets
+        self.assertEqual(out["brief"]["zh"].split(" · ")[0], "已用 25%")
         self.assertIn("重置", out["brief"]["zh"])
         self.assertFalse(out["stale"])
 
@@ -185,7 +185,7 @@ class KimiParserTests(unittest.TestCase):
         reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
         kimi.apply_session({"facts": []}, reading, now=1_000)
         out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
-        self.assertEqual(out["headline"]["zh"], "已用 25%")
+        self.assertRegex(out["headline"]["zh"], r"^\d+h$")
         self.assertTrue(out["subline"]["zh"].startswith("读于"))
         kimi.LAST["reading"] = None
         self.last_path.unlink()

@@ -67,6 +67,25 @@ class StripFitTests(unittest.TestCase):
         self.assertEqual(compact_value("¥6.05", 2), "¥6.05")
         self.assertEqual(compact_value("可用", 2), "可用")
 
+    def test_minimal_strip_labels(self):
+        from decimal import Decimal as D
+        from vram_radar.providers import kimi
+        from vram_radar.providers.deepseek import balance_labels
+        w = lambda kind, amount, cur="CNY": {"currency": cur, "kind": kind, "amount": D(amount)}
+        head, brief = balance_labels([w("granted", "6.00"), w("topped_up", "0")], [])
+        self.assertEqual((head["zh"], brief["zh"]), ("¥6", "¥6（赠送余额）"))
+        head, brief = balance_labels([w("granted", "10.00"), w("topped_up", "56.00")], [])
+        self.assertEqual((head["zh"], brief["zh"]), ("¥66", "¥66（充值 ¥56 + 赠送 ¥10）"))
+        self.assertEqual(balance_labels([w("topped_up", "66.00", "USD")], [])[0]["zh"], "$66")
+        self.assertEqual(balance_labels([w("granted", "0")], [])[0]["zh"], "无余额")
+        now = 1_000_000
+        ok = kimi._show_reading({"facts": []}, {"used_percent": 0, "is_member": False, "reset_at": now + 36.3 * 3600}, now)
+        self.assertEqual(ok["headline"]["zh"], "36.3h")
+        self.assertEqual(ok["brief"]["zh"].split(" · ")[0], "已用 0%")
+        self.assertEqual(kimi._show_reading({"facts": []}, {"used_percent": 100}, now)["headline"]["zh"], "已用尽")
+        self.assertEqual(kimi._show_reading({"facts": []}, {"is_member": False}, now)["headline"]["zh"], "可用")
+        self.assertEqual(kimi._show_reading({"facts": []}, {"active": False, "is_member": False}, now)["headline"]["zh"], "无额度")
+
     def test_font_never_below_ninety_percent(self):
         self.assertEqual(FIT_PLAN[0], (1.0, 0))
         self.assertGreaterEqual(min(factor for factor, _ in FIT_PLAN), 0.9)

@@ -68,7 +68,8 @@ def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict
     stamp = time.strftime("%H:%M" if now - seen < 86400 else "%m-%d %H:%M", time.localtime(seen))
     value = f"{used:.0f}%"
     reset = (reading.get("reset_text") or "").strip()
-    state["headline"] = pair(f"已用 {value}", f"{value} used")
+    left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
+    state["headline"] = pair(left, left)
     state["subline"] = pair(f"读于 {stamp}", f"read {stamp}")
     state["brief"] = pair(f"已用 {value}" + (f" · {reset}" if reset else "") + f"（{stamp} 读取）",
                           f"{value} used" + (f" · {reset}" if reset else "") + f" (read {stamp})")
@@ -112,10 +113,11 @@ def _apply_session(state: dict, session: dict) -> dict:
     value = f"{used:.0f}%"
     reset_at = session.get("reset_at")
     reset_zh, reset_en = _reset_labels(reset_at)
-    state["headline"] = pair(f"已用 {value}", f"{value} used")
+    left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
+    state["headline"] = pair(left, left)
     state["subline"] = pair(reset_zh or "自动读取", reset_en or "auto")
-    brief_zh = f"已用 {value}" + (f" · {reset_zh}" if reset_zh else "") + "（自动读取）"
-    brief_en = f"{value} used" + (f" · {reset_en}" if reset_en else "") + " (auto)"
+    brief_zh = f"已用 {value}" + (f" · {reset_zh}" if reset_zh else "")
+    brief_en = f"{value} used" + (f" · {reset_en}" if reset_en else "")
     state["brief"] = pair(brief_zh, brief_en)
     state["low"] = used >= 90
     state["quota_available"] = True

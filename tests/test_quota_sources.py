@@ -130,7 +130,8 @@ class DeepSeekBalanceTests(unittest.TestCase):
                 finally:
                     deepseek.NETWORK["enabled"] = False
         self.assertIsNone(off["balance"])
-        self.assertEqual(on["headline"]["en"], "¥6.00")
+        self.assertEqual(on["headline"]["en"], "¥6")      # gift money counts as usable, no qualifier
+        self.assertEqual(on["brief"]["zh"], "¥6（赠送余额）")
         self.assertIn("Granted ¥6.00", " ".join(f["en"] for f in on["facts"]))
         self.assertTrue(on["quota_available"])
         self.assertNotIn(TOKEN, repr(on))
