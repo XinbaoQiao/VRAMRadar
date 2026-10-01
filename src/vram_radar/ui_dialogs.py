@@ -69,8 +69,17 @@ def palette(dark: bool, accent=None) -> dict:
 
 # -- content specs (pure) -------------------------------------------------
 
-def consent_spec(app: str, name: str | None = None, eta_seconds: int = 10, icon=None) -> dict:
+def consent_spec(app: str, name: str | None = None, eta_seconds: int = 10, icon=None,
+                 language: str = "zh-CN") -> dict:
     name = name or app
+    if language == "en":
+        return {"kind": "dialog", "icon": icon, "icon_name": name,
+                "headline": f"Let VRAM Radar read your {name} quota automatically?",
+                "lines": [f"Uses {app}'s sign-in on this PC for a read-only quota check",
+                          "Login data stays in memory only; never saved or uploaded",
+                          "Turn it off anytime under right-click > Read quota automatically"],
+                "note": f"Shows on the taskbar within about {eta_seconds} s, then updates every 5 minutes",
+                "buttons": [("allow", "Allow", True), ("cancel", "Not now", False)], "cancel": "cancel"}
     return {"kind": "dialog", "icon": icon, "icon_name": name,
             "headline": f"允许显存雷达自动读取 {name} 额度？",
             "lines": [f"使用 {app} 在本机的登录状态，只读查询额度",
@@ -80,7 +89,14 @@ def consent_spec(app: str, name: str | None = None, eta_seconds: int = 10, icon=
             "buttons": [("allow", "允许", True), ("cancel", "暂不", False)], "cancel": "cancel"}
 
 
-def revoke_spec(name: str, icon=None) -> dict:
+def revoke_spec(name: str, icon=None, language: str = "zh-CN") -> dict:
+    if language == "en":
+        return {"kind": "dialog", "icon": icon, "icon_name": name,
+                "headline": f"Stop reading {name} quota automatically?",
+                "lines": [f"The taskbar stops querying {name} and shows local status only",
+                          "You can turn it back on from the same menu anytime"],
+                "note": "",
+                "buttons": [("revoke", "Turn off", True), ("cancel", "Cancel", False)], "cancel": "cancel"}
     return {"kind": "dialog", "icon": icon, "icon_name": name,
             "headline": f"关闭 {name} 的自动读取？",
             "lines": [f"任务栏不再查询 {name} 额度，只显示本机状态", "之后可随时在同一菜单重新开启"],
@@ -88,15 +104,18 @@ def revoke_spec(name: str, icon=None) -> dict:
             "buttons": [("revoke", "关闭", True), ("cancel", "取消", False)], "cancel": "cancel"}
 
 
-def notice_spec(text: str, name: str = "", icon=None) -> dict:
+def notice_spec(text: str, name: str = "", icon=None, language: str = "zh-CN") -> dict:
     """A one-button notice from a short message: the first sentence becomes
-    the headline, the rest the body ("未检测到 Kimi。请先…" -> two parts)."""
+    the headline, the rest the body ("未检测到 Kimi。请先…" -> two parts;
+    English splits on ". ")."""
+    import re
     text = str(text or "").strip()
-    head, _, rest = text.partition("。")
-    lines = [part.strip() for part in rest.split("。") if part.strip()]
+    parts = [part.strip() for part in (re.split(r"(?<=\.)\s+", text) if language == "en" else text.split("。"))
+             if part.strip()]
+    head, lines = (parts[0], parts[1:]) if parts else ("", [])
     return {"kind": "dialog", "icon": icon, "icon_name": name or head,
             "headline": head, "lines": lines, "note": "",
-            "buttons": [("ok", "知道了", True)], "cancel": "ok"}
+            "buttons": [("ok", "OK" if language == "en" else "知道了", True)], "cancel": "ok"}
 
 
 def toast_spec(headline: str, line: str = "", name: str = "", icon=None) -> dict:
@@ -385,15 +404,54 @@ def _load_image(path: str):
         with_file.Dispose()
 
 
+ICON_FILL = 0.86
+_BOXES: dict = {}
+
+
+def art_box(source, threshold: int = 40):
+    """(left, top, right, bottom) of the visible art (alpha > threshold), cached."""
+    key = id(source)
+    if key in _BOXES:
+        return _BOXES[key]
+    from System import Array, Byte
+    from System.Drawing import Rectangle
+    from System.Drawing.Imaging import ImageLockMode, PixelFormat
+    from System.Runtime.InteropServices import Marshal
+    w, h = source.Width, source.Height
+    data = source.LockBits(Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
+    try:
+        arr = Array.CreateInstance(Byte, data.Stride * h)
+        Marshal.Copy(data.Scan0, arr, 0, len(arr))
+        stride = data.Stride
+    finally:
+        source.UnlockBits(data)
+    buf = bytes(arr)
+    rows = [y for y in range(h) if any(buf[y * stride + x * 4 + 3] > threshold for x in range(w))]
+    if not rows:
+        box = (0, 0, w, h)
+    else:
+        cols = [x for x in range(w) if any(buf[y * stride + x * 4 + 3] > threshold for y in range(rows[0], rows[-1] + 1))]
+        box = (cols[0], rows[0], cols[-1] + 1, rows[-1] + 1)
+    _BOXES[key] = box
+    return box
+
+
+def icon_art_px(px: int) -> int:
+    """Side of the art inside a px tile: ~86 %, always >= 1 px clear per side."""
+    return max(1, min(px - 2, round(px * ICON_FILL)))
+
+
 def fit_icon(source, px: int, pad: int = 1):
-    """``source`` scaled (aspect kept, high-quality area filtering) into a
-    transparent px x px bitmap with ``pad`` clear pixels on every side, so
-    the art is never cut by the square or touches the cell edge."""
+    """The visible art of ``source`` (cropped to its alpha box) scaled with
+    high-quality area filtering, aspect kept, to ~86 % of a transparent
+    px x px tile and centred -- many app logos (the Codex or ChatGPT knot) are
+    drawn edge to edge, which looked cut off at strip sizes."""
     from System.Drawing import Bitmap, Graphics, GraphicsUnit, Rectangle
     from System.Drawing.Drawing2D import CompositingQuality, InterpolationMode, PixelOffsetMode, SmoothingMode, WrapMode
     from System.Drawing.Imaging import ImageAttributes, PixelFormat
-    inner = max(1, px - 2 * pad)
-    w, h = source.Width, source.Height
+    inner = icon_art_px(px) if pad else px
+    bx = art_box(source)
+    w, h = bx[2] - bx[0], bx[3] - bx[1]
     k = inner / max(w, h)
     dw, dh = max(1, round(w * k)), max(1, round(h * k))
     out = Bitmap(px, px, PixelFormat.Format32bppArgb)
@@ -405,21 +463,41 @@ def fit_icon(source, px: int, pad: int = 1):
         g.CompositingQuality = CompositingQuality.HighQuality
         g.SmoothingMode = SmoothingMode.HighQuality
         attrs.SetWrapMode(WrapMode.TileFlipXY)   # no fade/cut at the source edges
-        g.DrawImage(source, Rectangle((px - dw) // 2, (px - dh) // 2, dw, dh), 0, 0, w, h, GraphicsUnit.Pixel, attrs)
+        g.DrawImage(source, Rectangle((px - dw) // 2, (px - dh) // 2, dw, dh), bx[0], bx[1], w, h, GraphicsUnit.Pixel, attrs)
     finally:
         attrs.Dispose()
         g.Dispose()
     return out
 
 
+# Official artwork copied (unmodified) from the installed app into our assets,
+# used instead of the app's own files when those are hard to read or vary:
+# Codex desktop package (MSIX)  assets\Square44x44Logo.targetsize-256_altform-(light)unplated.png
+# (flat knot, complete, but drawn edge to edge -> fit_icon adds the margin).
+BUNDLED_ICONS = {"codex": ("openai-light.png", "openai-dark.png"), "chatgpt": ("openai-light.png", "openai-dark.png")}
+
+
+def bundled_icon_path(name: str, light: bool | None = None) -> str | None:
+    files = BUNDLED_ICONS.get((name or "").strip().lower())
+    if not files:
+        return None
+    light = taskbar_light() if light is None else light
+    path = os.path.join(os.path.dirname(__file__), "assets", "provider-icons", files[0 if light else 1])
+    return path if os.path.isfile(path) else None
+
+
 def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile."""
-    key = (str(path or ""), int(px), name)
+    bundled = bundled_icon_path(name)
+    key = (str(bundled or path or ""), int(px), name)
     if key in _ICONS:
         return _ICONS[key]
     bitmap = None
     try:
-        source = icon_source(path)
+        source = _SOURCES.get(bundled) if bundled in _SOURCES else None
+        if bundled and source is None:
+            source = _SOURCES[bundled] = _load_image(bundled)
+        source = source if bundled else icon_source(path)
         if source is not None:
             bitmap = fit_icon(source, int(px))
     except Exception as exc:

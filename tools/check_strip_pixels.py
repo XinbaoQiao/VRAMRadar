@@ -20,7 +20,7 @@ from System.Windows.Forms import Application, Form, FormBorderStyle, FormStartPo
 from System.Runtime.InteropServices import Marshal
 from vram_radar.usage_surface import (STRIP_DENSITY, compact_value, place_columns, set_name_cell, strip_icon_px,
                                       FIT_PLAN)
-from vram_radar.ui_dialogs import icon_source, letter_tile, provider_icon
+from vram_radar.ui_dialogs import art_box, bundled_icon_path, icon_art_px, icon_source, letter_tile, provider_icon, _load_image
 
 
 def alpha_bbox(bmp, threshold=40):
@@ -144,15 +144,22 @@ def run(save=None):
                                    or (name_label.Image is not None and name_label.Image.Width > name_label.Width)
                                    or (name_label.Image is not None and name_label.Image.Height > name_label.Height))
                         edge_ink = bool(vi) and max(vi) >= vr[2] - 1
-                        if mode == "icons" and name_label.Image is not None and paths.get(name):
+                        if mode == "icons" and name_label.Image is not None:
+                            # The tile itself: no opaque pixel on its border rows/columns.
+                            ib = alpha_bbox(name_label.Image)
+                            iw = name_label.Image.Width
+                            if ib and (ib[0] == 0 or ib[1] == 0 or ib[2] == iw or ib[3] == name_label.Image.Height):
+                                failures.append(f"{key} {name}: icon art touches its tile border {ib} in {iw}px")
+                        if mode == "icons" and name_label.Image is not None and (paths.get(name) or bundled_icon_path(name)):
                             # Icon art vs a reference downscale of the 256 px source: the
                             # drawn extent must match (nothing cut at the square) and keep
                             # >= 1 px clear of the cell edges.
-                            source = icon_source(paths.get(name))
-                            sb = alpha_bbox(source) if source is not None else None
+                            bundled = bundled_icon_path(name, light=(theme == "light"))
+                            source = _load_image(bundled) if bundled else icon_source(paths.get(name))
+                            sb = art_box(source) if source is not None else None
                             box = ink_box(buf, stride, bg, nr)
                             if sb and box:
-                                k = (px - 2) / max(source.Width, source.Height)
+                                k = icon_art_px(px) / max(sb[2] - sb[0], sb[3] - sb[1])
                                 ew, eh = (sb[2] - sb[0]) * k, (sb[3] - sb[1]) * k
                                 aw, ah = box[2] - box[0], box[3] - box[1]
                                 if abs(aw - ew) > 2 or abs(ah - eh) > 2:
