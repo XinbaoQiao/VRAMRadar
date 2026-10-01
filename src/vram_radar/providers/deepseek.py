@@ -1,25 +1,36 @@
 """DeepSeek Harness (``dsh``) desktop.
 
-Evidence (real install, v0.2.0-rc.2): it is a bring-your-own-key harness.
-The API key lives in ``$DSH_HOME/.credentials.yaml`` (default ``~/.dsh``); the
-app never queries an account balance itself (no balance endpoint in its
-bundle), so there is no quota to mirror without using the key, which we never
-read.  It does keep per-session token accounting in
+Evidence (real install, v0.2.0-rc.2): after DeepSeek sign-in the app stores a
+platform grant in ``$DSH_HOME/.credentials.yaml`` (default ``~/.dsh``) and
+reads the account wallet with a read-only ``GET /api/v0/users/get_user_summary``
+(package ``@deepseek-ai/dsh-deepseek-account-platform``).  ``deepseek_balance``
+mirrors exactly that query (or the public ``GET /user/balance`` for a plain
+API-key record) with conservative polling; the secret never leaves that module.
+It also keeps per-session token accounting in
 ``storages/session_projcache/sessions/*.json`` (``rows.tokenUsage.val.totals``
-and ``rows.sessionStats``), which we aggregate as real local usage.
+and ``rows.sessionStats``), which we aggregate as local usage.
 """
 from __future__ import annotations
 
 from pathlib import Path
 import time
 
+from . import deepseek_balance
 from .base import (Environment, base_state, detect_install, format_tokens, newest_mtime, nonempty_file, pair,
                    read_json, running_pair, safe_stat)
 
-ID, NAME, SHORT = "deepseek", "DeepSeek", "DS"
+ID, NAME, SHORT = "deepseek", "DeepSeek", "DeepSeek"
 MAX_SESSIONS = 400
 TOKEN_KEYS = ("uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens")
 _cache: dict[str, tuple[tuple, dict]] = {}
+BALANCE = deepseek_balance.BalanceCache()
+# Network balance reads are enabled by the monitor (never by tests/imports).
+NETWORK = {"enabled": False}
+
+
+def money(amount, currency: str) -> str:
+    symbol = {"CNY": "¥", "USD": "$"}.get(currency, currency + " ")
+    return f"{symbol}{amount.quantize(deepseek_balance.Decimal('0.01'))}"
 
 
 def _count(value) -> int:
@@ -107,8 +118,8 @@ def probe(env: Environment) -> dict:
     credentials = home / ".credentials.yaml"
     configured = nonempty_file(credentials)  # existence and size only; never opened
     state["signed_in"] = True if configured else (False if home.exists() else None)
-    state["facts"].append(pair("已配置 API 凭据文件（内容未读取）" if configured else "未发现 API 凭据文件",
-                               "API credential file present (not read)" if configured else "No API credential file"))
+    state["facts"].append(pair("已登录 DeepSeek（凭据由 DeepSeek Harness 保存）" if configured else "未发现 DeepSeek 凭据",
+                               "Signed in to DeepSeek (credential kept by DeepSeek Harness)" if configured else "No DeepSeek credential"))
     summary = summarize_sessions(home / "storages" / "session_projcache" / "sessions")
     state["usage"] = summary
     state["last_used"] = summary["last_prompt"] or newest_mtime(
@@ -120,13 +131,58 @@ def probe(env: Environment) -> dict:
     if summary["today_tokens"]:
         state["facts"].append(pair(f"今日 {format_tokens(summary['today_tokens'])} tokens",
                                    f"Today {format_tokens(summary['today_tokens'])} tokens"))
-    state["facts"].append(pair("DeepSeek Harness 使用自带 API Key，余额只在 DeepSeek 平台，本地无额度数据",
-                               "DeepSeek Harness uses your own API key; balance lives on the DeepSeek platform, not locally"))
-    state["quota_reason"] = "byok_no_local_balance"
+    balance = None
+    if configured and NETWORK["enabled"]:
+        stat = safe_stat(credentials)
+        balance = BALANCE.get(home, (stat.st_mtime_ns, stat.st_size) if stat else None)
+    state["balance"] = None
+    if balance and balance.get("status") == "ok":
+        sums = deepseek_balance.totals(balance.get("wallets", []))
+        order = sorted(sums, key=lambda c: (c != "CNY", c))
+        # Compact strip value: currencies that hold money (all shown in the tooltip).
+        shown = [money(sums[c], c) for c in order if sums[c] != 0] or [money(sums[order[0]], order[0])] if order else []
+        state["balance"] = {c: str(sums[c]) for c in order}
+        state["quota_available"] = True
+        state["quota_reason"] = ""
+        for wallet in balance.get("wallets", []):
+            label = ("赠送余额", "Granted") if wallet["kind"] == "granted" else ("充值余额", "Topped up")
+            state["facts"].append(pair(f"{label[0]} {money(wallet['amount'], wallet['currency'])}",
+                                       f"{label[1]} {money(wallet['amount'], wallet['currency'])}"))
+        fetched = balance.get("fetched_at")
+        when = time.strftime("%H:%M", time.localtime(fetched)) if fetched else "?"
+        source = "DeepSeek 平台账户" if balance.get("source") == "platform" else "DeepSeek API"
+        source_en = "DeepSeek platform account" if balance.get("source") == "platform" else "DeepSeek API"
+        note = ""
+        if balance.get("stale_error"):
+            note = "（最近一次刷新失败，显示上次结果）"
+        state["facts"].append(pair(f"余额来自{source}（只读查询，{when} 更新）{note}",
+                                   f"Balance from {source_en} (read-only, updated {when})" +
+                                   (" · last refresh failed, showing previous value" if note else "")))
+        total_zero = all(v == 0 for v in sums.values())
+        state["low"] = total_zero
+        state["headline"] = pair(" + ".join(shown) or "¥0.00", " + ".join(shown) or "¥0.00")
+        state["subline"] = pair(f"{format_tokens(total)} tok", f"{format_tokens(total)} tok")
+        return state
+    reason = (balance or {}).get("status")
+    if reason == "unauthorized":
+        state["signed_in"] = False
+        state["facts"].append(pair("DeepSeek 登录已失效，请在 DeepSeek Harness 中重新登录",
+                                   "DeepSeek sign-in expired; sign in again in DeepSeek Harness"))
+    elif reason in {"network", "unavailable", "rate_limited"}:
+        state["facts"].append(pair("暂时无法读取 DeepSeek 余额（网络或服务不可用，稍后自动重试）",
+                                   "DeepSeek balance temporarily unavailable (will retry later)"))
+    elif configured and not NETWORK["enabled"]:
+        state["facts"].append(pair("余额查询未启用", "Balance query not enabled"))
+    elif not configured:
+        state["facts"].append(pair("未登录 DeepSeek 账户，无法读取余额",
+                                   "Not signed in to a DeepSeek account; balance unavailable"))
+    state["quota_reason"] = reason or "no_credential"
     if home.exists() or state["installed"]:
         state["headline"] = pair(f"{format_tokens(total)} tok", f"{format_tokens(total)} tok")
     else:
         state["headline"] = pair("未安装", "Missing")
-    state["subline"] = running_pair(state["running"]) if state["running"] else (
-        pair("已配置", "Configured") if configured else pair("未配置", "No key") if home.exists() else running_pair(state["running"]))
+    state["subline"] = (pair("需登录", "Sign in") if reason == "unauthorized" else
+                        running_pair(state["running"]) if state["running"] else
+                        pair("已配置", "Configured") if configured else
+                        pair("未配置", "No key") if home.exists() else running_pair(state["running"]))
     return state

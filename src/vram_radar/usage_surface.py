@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import sys
 import threading
 import time
@@ -92,6 +93,111 @@ def taskbar_anchor(bar, tray, size):
     return max(bar[0], tray[0]-width-gap), bar[1]+(bar[3]-bar[1]-height)//2
 
 
+# Taskbar elements that bound the empty "left" area on Windows 11.  Explorer
+# exposes them through UI Automation with stable AutomationIds; coordinates
+# are physical pixels for a per-monitor-DPI-aware caller.
+LEFT_BOUND_IDS = ("WidgetsButton",)
+RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
+
+
+def left_slot(bar, elements, size, margin=6):
+    """Choose a spot in the empty area right of the Widgets/weather button and
+    left of Start/Search (centered taskbar) or of the first pinned app.
+
+    ``elements`` maps AutomationId -> (left, top, right, bottom).  Returns
+    ``(x, y)`` or ``None`` when the gap cannot hold ``size`` without overlap
+    (e.g. left-aligned icons with Widgets next to Start); callers then fall
+    back to ``taskbar_anchor``.  Vertical taskbars are not supported here.
+    """
+    width, height = size
+    left_edge = bar[0] + margin
+    for key in LEFT_BOUND_IDS:
+        rect = elements.get(key)
+        if rect and rect[2] > rect[0] and bar[0] <= rect[0] < bar[2]:
+            left_edge = max(left_edge, rect[2] + margin)
+    candidates = [rect[0] for key, rect in elements.items()
+                  if (key in RIGHT_BOUND_IDS or key == "first_app") and rect and rect[2] > rect[0]
+                  and rect[0] >= left_edge - margin and rect[0] <= bar[2]]
+    widgets = elements.get("WidgetsButton")
+    if widgets and widgets[0] > (bar[0] + bar[2]) / 2:
+        return None  # Widgets on the right (left-aligned layout); no left gap
+    right_edge = min(candidates) - margin if candidates else None
+    if right_edge is None or right_edge - left_edge < width:
+        return None
+    y = bar[1] + (bar[3] - bar[1] - height) // 2
+    return left_edge, y
+
+
+class TaskbarLayout:
+    """Cached UI Automation reader for the primary taskbar's buttons.
+
+    Lookups are cheap (~15 ms) but are throttled anyway and invalidated when
+    the taskbar window handle or size changes (Explorer restart, DPI/scale or
+    alignment change).  Any failure returns an empty mapping so callers fall
+    back to the classic tray anchor; nothing here can raise into the UI loop.
+    """
+
+    def __init__(self, interval: float = 5.0):
+        self.interval = interval
+        self._key = None
+        self._at = 0.0
+        self._elements: dict = {}
+        self._ready = None
+
+    def _load(self):
+        if self._ready is None:
+            try:
+                from System.Reflection import Assembly
+                for name in ("UIAutomationClient", "UIAutomationTypes"):
+                    Assembly.Load(name + ", Version=4.0.0.0, Culture=neutral, PublicKeyToken=" "31bf3856ad364e35")
+                self._ready = True
+            except Exception:
+                logging.getLogger("vram_radar").info("taskbar UI Automation unavailable")
+                self._ready = False
+        return self._ready
+
+    def elements(self, taskbar_handle: int, bar) -> dict:
+        now = time.monotonic()
+        key = (int(taskbar_handle or 0), tuple(bar))
+        if key == self._key and now - self._at < self.interval:
+            return self._elements
+        self._key, self._at, self._elements = key, now, {}
+        if not taskbar_handle or not self._load():
+            return self._elements
+        try:
+            from System import IntPtr
+            from System.Windows.Automation import (AutomationElement, OrCondition, PropertyCondition,
+                                                   TreeScope, ControlType)
+            root = AutomationElement.FromHandle(IntPtr(int(taskbar_handle)))
+            conditions = [PropertyCondition(AutomationElement.AutomationIdProperty, value)
+                          for value in (*LEFT_BOUND_IDS, *RIGHT_BOUND_IDS)]
+            found = {}
+            for element in root.FindAll(TreeScope.Descendants, OrCondition(*conditions)):
+                rect = element.Current.BoundingRectangle
+                if rect.IsEmpty or rect.Width <= 0:
+                    continue
+                found[element.Current.AutomationId] = (int(rect.Left), int(rect.Top),
+                                                       int(rect.Right), int(rect.Bottom))
+            if not any(k in found for k in RIGHT_BOUND_IDS):
+                # Start hidden by policy/tools: use the first task button.
+                buttons = root.FindAll(TreeScope.Descendants, PropertyCondition(
+                    AutomationElement.ControlTypeProperty, ControlType.Button))
+                lefts = [(int(b.Current.BoundingRectangle.Left), int(b.Current.BoundingRectangle.Top),
+                          int(b.Current.BoundingRectangle.Right), int(b.Current.BoundingRectangle.Bottom))
+                         for b in buttons if b.Current.AutomationId not in LEFT_BOUND_IDS
+                         and not b.Current.BoundingRectangle.IsEmpty]
+                if lefts:
+                    found["first_app"] = min(lefts)
+            self._elements = found
+        except Exception as exc:
+            logging.getLogger("vram_radar").info("taskbar layout read failed (%s)", type(exc).__name__)
+            self._elements = {}
+        return self._elements
+
+    def invalidate(self):
+        self._key = None
+
+
 def taskbar_scale(dpi, geometry):
     preferred = max(0.6, dpi / 96 * 0.85)
     return min(preferred, max(0.6, (geometry[0][3]-geometry[0][1]-6)/40)) if geometry else preferred
@@ -107,33 +213,108 @@ def windows_taskbar_dpi(fallback=96):
     return user32.GetDpiForWindow(user32.FindWindowW("Shell_TrayWnd", None)) or fallback
 
 
-def windows_taskbar_palette():
-    """Follow the shell theme, including its optional system accent color."""
-    import winreg
-    light, accent = False, False
+def theme_settings():
+    """Personalization flags; missing values fall back to the Windows defaults."""
+    values = {"SystemUsesLightTheme": 0, "AppsUseLightTheme": 1, "EnableTransparency": 1, "ColorPrevalence": 0}
     try:
+        import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
-            light = bool(winreg.QueryValueEx(key, "SystemUsesLightTheme")[0])
-            try:
-                accent = bool(winreg.QueryValueEx(key, "ColorPrevalence")[0])
-            except OSError:
-                pass
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            for name in values:
+                try:
+                    values[name] = int(winreg.QueryValueEx(key, name)[0])
+                except (OSError, ValueError, TypeError):
+                    pass
     except OSError:
         pass
-    background = (243, 243, 243) if light else (32, 32, 32)
-    if accent and not light:
+    return values
+
+
+def _luminance(rgb):
+    return sum(v*w for v, w in zip(rgb, (.2126, .7152, .0722)))
+
+
+def sample_taskbar_color(bar, exclude=None, near=None):
+    """Median colour of a few taskbar pixels away from icons/text, or None.
+
+    Reads the composited screen (works with Mica/acrylic/transparency, light
+    or dark, accent colour on) instead of guessing.  ``exclude`` is our own
+    window rectangle so we never sample ourselves.
+    """
+    try:
+        import ctypes
+        user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+        user32.GetDC.restype = ctypes.c_void_p
+        user32.GetDC.argtypes = [ctypes.c_void_p]
+        user32.ReleaseDC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        gdi32.GetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+        gdi32.GetPixel.restype = ctypes.c_uint32
+        dc = user32.GetDC(None)
+        if not dc:
+            return None
+        try:
+            left, top, right, bottom = bar
+            height = bottom - top
+            samples = []
+            if near:
+                # Translucent (Mica/acrylic) taskbars vary along their length:
+                # match the pixels immediately beside the widget.
+                points = [(x, int(top + (height - 1) * fy)) for x in (near[0] - 3, near[2] + 3, near[2] + 8)
+                          for fy in (0.08, 0.3, 0.5, 0.7, 0.92) if left <= x < right]
+            else:
+                points = [(int(left + (right - left - 1) * fx), int(top + (height - 1) * fy))
+                          for fx in (0.005, 0.25, 0.5, 0.62, 0.75, 0.995) for fy in (0.06, 0.94)]
+            for x, y in points:
+                    if exclude and exclude[0] <= x < exclude[2] and exclude[1] <= y < exclude[3]:
+                        continue
+                    value = gdi32.GetPixel(dc, x, y)
+                    if value == 0xFFFFFFFF:
+                        continue
+                    samples.append((value & 255, (value >> 8) & 255, (value >> 16) & 255))
+        finally:
+            user32.ReleaseDC(None, dc)
+        if len(samples) < 4:
+            return None
+        samples.sort(key=_luminance)
+        return samples[len(samples) // 2]
+    except Exception:
+        return None
+
+
+def taskbar_palette(settings, sampled=None, accent=None):
+    """Background/foreground/hover/bright tuple for a taskbar strip.
+
+    ``sampled`` (actual taskbar pixels) wins; otherwise the Windows defaults
+    for the system theme (accent colour when ColorPrevalence is on, dark mode).
+    Foreground is chosen for contrast against the final background.
+    """
+    light = bool(settings.get("SystemUsesLightTheme"))
+    if sampled is not None:
+        background = tuple(int(v) for v in sampled)
+    elif accent is not None and settings.get("ColorPrevalence") and not light:
+        background = tuple(int(v) for v in accent)
+    else:
+        background = (238, 238, 238) if light else (28, 28, 28)
+    bright = _luminance(background) > 140
+    foreground = (26, 26, 26) if bright else (245, 245, 245)
+    hover = tuple(max(0, v-18) if bright else min(255, v+24) for v in background)
+    return background, foreground, hover, bright
+
+
+def windows_taskbar_palette(bar=None, exclude=None, near=None):
+    """Follow the shell theme, sampling the live taskbar when possible."""
+    settings = theme_settings()
+    accent = None
+    if settings.get("ColorPrevalence"):
         try:
             import ctypes
             color, opaque = ctypes.c_uint(), ctypes.c_int()
             if ctypes.windll.dwmapi.DwmGetColorizationColor(ctypes.byref(color), ctypes.byref(opaque)) == 0:
-                background = ((color.value >> 16) & 255, (color.value >> 8) & 255, color.value & 255)
+                accent = ((color.value >> 16) & 255, (color.value >> 8) & 255, color.value & 255)
         except OSError:
             pass
-    bright = sum(v*w for v, w in zip(background, (.2126, .7152, .0722))) > 145
-    foreground = (28, 28, 28) if bright else (240, 240, 240)
-    hover = tuple(max(0, v-15) if bright else min(255, v+20) for v in background)
-    return background, foreground, hover, bright
+    sampled = sample_taskbar_color(bar, exclude, near) if bar else None
+    return taskbar_palette(settings, sampled, accent)
 
 
 def windows_surface_obscured(widget, docked=True):
@@ -281,7 +462,7 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
     name, short = spec.get("name") or spec.get("id", "?"), spec.get("short") or spec.get("id", "?")
     if not state:
         status = _provider_status(None, english)
-        return {"value": f"{short} …", "countdown": status, "low": False, "warning": False,
+        return {"name": short, "value": "…", "countdown": status, "low": False, "warning": False,
                 "detail": f"{name} · {status}"}
     def local(value, fallback=""):
         return value.get(key) or fallback if isinstance(value, dict) else fallback
@@ -309,7 +490,7 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
         if value:
             lines.append("  " + value)
     warning = state.get("state") in {"error", "not_installed"} or bool(state.get("stale"))
-    return {"value": f"{short} {headline}", "countdown": subline or _provider_status(state, english),
+    return {"name": short, "value": headline, "countdown": subline or _provider_status(state, english),
             "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines)}
 
 
@@ -508,10 +689,28 @@ class CodexUsageSurface:
             control.MouseEnter += update_hover
             control.MouseLeave += update_hover
 
+        self._layout = TaskbarLayout()
+        self._slot = "tray"
+        user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+        user32.FindWindowW.restype = wintypes.HWND
+
         def position():
             geometry = windows_taskbar_geometry()
             if self._placement == "taskbar" and geometry:
-                form.Location = Point(*taskbar_anchor(*geometry, (form.Width, form.Height)))
+                bar, tray = geometry
+                size = (form.Width, form.Height)
+                elements = self._layout.elements(user32.FindWindowW("Shell_TrayWnd", None) or 0, bar)
+                spot = left_slot(bar, elements, size, scale(6)) if elements else None
+                if spot is None:
+                    # Left-aligned taskbar: Widgets sits on the right; stay before it.
+                    widgets = elements.get("WidgetsButton") if elements else None
+                    if widgets and widgets[0] > (bar[0]+bar[2])/2 and widgets[0] < tray[0]:
+                        tray = (widgets[0]-scale(4), tray[1], tray[2], tray[3])
+                    spot = taskbar_anchor(bar, tray, size)
+                    self._slot = "tray"
+                else:
+                    self._slot = "left"
+                form.Location = Point(*spot)
                 return
             screen = Screen.FromPoint(Point(*self._position)) if self._position else Screen.PrimaryScreen
             area = screen.Bounds if self._position else screen.WorkingArea
@@ -823,16 +1022,19 @@ class CodexUsageSurface:
         for control in text_controls:
             control.ContextMenuStrip = menu
 
+        self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
+        self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
+
         def make_column():
             pair = []
-            for y in (0, 20):
+            for font in (self._name_font, self._value_font):
                 label = Label()
                 label.AutoSize = False
-                label.Font = self._fonts[0 if y == 0 else 1]
-                label.TextAlign = ContentAlignment.MiddleRight
+                label.Font = font
+                label.TextAlign = ContentAlignment.MiddleLeft
                 label.BackColor = form.BackColor
                 label.ForeColor = menu.ForeColor
-                label.Location = Point(scale(5), scale(y))
+                label.Location = Point(scale(5), 0)
                 label.Size = Size(scale(47), scale(20))
                 label.ContextMenuStrip = menu
                 label.MouseEnter += update_hover
@@ -885,7 +1087,16 @@ class CodexUsageSurface:
             for item, key, value, zh, en in self._display_choices:
                 item.Text = en if language == "en" else zh
                 item.Checked = show_disks == value
-            palette = windows_taskbar_palette()
+            now_mono = time.monotonic()
+            theme = theme_settings()
+            if theme != getattr(self, "_theme", None) or now_mono - getattr(self, "_palette_at", 0) >= 5:
+                self._theme, self._palette_at = theme, now_mono
+                bar_geometry = windows_taskbar_geometry()
+                own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
+                docked = self._placement == "taskbar" and own is not None
+                self._next_palette = windows_taskbar_palette(bar_geometry[0] if bar_geometry else None, own,
+                                                             own if docked else None)
+            palette = getattr(self, "_next_palette", None) or windows_taskbar_palette()
             if palette != getattr(self, "_palette", None):
                 self._palette = palette
                 background, foreground, hover, bright = palette
@@ -897,6 +1108,7 @@ class CodexUsageSurface:
                 track_color = Color.FromArgb(*( (210, 215, 218) if bright else (65, 72, 77) ))
                 warning_color = Color.FromArgb(*( (139, 85, 0) if bright else (224, 176, 100) ))
                 self._labels[0].ForeColor = quota_color
+                track_color = Color.FromArgb(*tuple(max(0, v-28) if bright else min(255, v+32) for v in background))
                 for label in [*text_controls, *(c for pair in self._extra_columns for c in pair)]:
                     label.BackColor = form.BackColor
                 self._models_menu.DropDown.BackColor = form.BackColor
@@ -921,9 +1133,12 @@ class CodexUsageSurface:
                 for y, label in zip((0, 20), text_controls):
                     label.Font = self._fonts[0 if y == 0 else 1]
                     label.Location = Point(scale(5), scale(y))
+                old_cell_fonts = (self._name_font, self._value_font)
+                self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
+                self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
                 for top, bottom in self._extra_columns:
-                    top.Font, bottom.Font = self._fonts[0], self._fonts[1]
-                for old_font in old_fonts:
+                    top.Font, bottom.Font = self._name_font, self._value_font
+                for old_font in (*old_fonts, *old_cell_fonts):
                     old_font.Dispose()
             rows = quota_lines(state, language) if "codex" in selected else []
             self.active = bool(rows or others)
@@ -957,28 +1172,40 @@ class CodexUsageSurface:
                 quota_color = Color.FromArgb(*usage_color(reading["percent"], bright=bright))
                 time_color = Color.FromArgb(*usage_color(reading["remaining_seconds"], bright=bright, waiting=True))
                 self._labels[0].ForeColor = quota_color
-                self._labels[0].Text = ("Cx " if multi else "") + reading["value"]
+                self._labels[0].Text = reading["value"]
                 self._countdowns[0].Text = reading["countdown"]
                 self._countdowns[0].ForeColor = time_color
             else:
                 reading = widget_reading({})
             for label in text_controls:
-                label.Visible = bool(rows)
-            while len(self._extra_columns) < len(others):
-                make_column()
-            neutral = Color.FromArgb(*((0, 98, 150) if bright else (143, 208, 248)))
+                label.Visible = bool(rows) and not multi
+            cells = []
+            if rows and multi:
+                countdown = reading["countdown"]
+                cells.append(("Codex", f"{reading['value']} {countdown}".strip() if countdown != "—" else reading["value"],
+                              quota_color))
             provider_rows = []
-            for (top, bottom), spec in zip(self._extra_columns, others):
+            fg = menu.ForeColor
+            for spec in others:
                 info = provider_reading(provider_states.get(spec.id),
                                         {"id": spec.id, "name": spec.name, "short": spec.short}, language)
                 provider_rows.append(info)
-                top.Text, bottom.Text = info["value"], info["countdown"]
-                top.ForeColor = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
-                                 warning_color if info["warning"] else menu.ForeColor)
-                bottom.ForeColor = warning_color if info["warning"] else neutral
-                top.Visible = bottom.Visible = True
-            for top, bottom in self._extra_columns[len(others):]:
-                top.Visible = bottom.Visible = False
+                value = info["value"]
+                if re.fullmatch(r"<?\d+(?:\.\d)?h", info["countdown"] or ""):
+                    value = f"{value} {info['countdown']}"
+                color = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
+                         warning_color if info["warning"] else fg)
+                cells.append((info["name"], value, color))
+            while len(self._extra_columns) < len(cells):
+                make_column()
+            muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
+                (fg.R, fg.G, fg.B), (form.BackColor.R, form.BackColor.G, form.BackColor.B))))
+            for (name_label, value_label), (name, value, color) in zip(self._extra_columns, cells):
+                name_label.Text, value_label.Text = name, value
+                name_label.ForeColor, value_label.ForeColor = muted, color
+                name_label.Visible = value_label.Visible = True
+            for name_label, value_label in self._extra_columns[len(cells):]:
+                name_label.Visible = value_label.Visible = False
             if not multi:
                 # Keep the gap tight without shrinking type or clipping longer
                 # countdowns (for example 168.0h) and localized status messages.
@@ -990,15 +1217,21 @@ class CodexUsageSurface:
                     label.Location = Point(scale(left_padding), scale(y))
                 form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
             else:
-                columns = ([tuple(text_controls)] if rows else []) + self._extra_columns[:len(others)]
-                x, gap = scale(5), scale(8)
-                for top, bottom in columns:
-                    width = max(scale(40), top.GetPreferredSize(Size(0, 0)).Width,
-                                bottom.GetPreferredSize(Size(0, 0)).Width)
-                    top.Size = bottom.Size = Size(width, scale(20))
-                    top.Location, bottom.Location = Point(x, 0), Point(x, scale(20))
-                    x += width + gap
-                form.ClientSize = Size(x - gap + scale(2), scale(40))
+                # Two provider rows per column: "Name  value", full names.
+                used = self._extra_columns[:len(cells)]
+                x, gap, inner = scale(7), scale(10), scale(4)
+                for start in range(0, len(used), 2):
+                    group = used[start:start+2]
+                    name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
+                    value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
+                    for row, (name_label, value_label) in enumerate(group):
+                        y = scale(10) if len(group) == 1 else scale(20)*row
+                        name_label.Size = Size(name_w, scale(20))
+                        value_label.Size = Size(value_w, scale(20))
+                        name_label.Location = Point(x, y)
+                        value_label.Location = Point(x + name_w + inner, y)
+                    x += name_w + inner + value_w + gap
+                form.ClientSize = Size(x - gap + scale(7), scale(40))
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()

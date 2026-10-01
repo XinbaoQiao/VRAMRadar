@@ -1226,7 +1226,7 @@ class AppApi:
                                     profile.codex_executable)
         monitor = getattr(self, "_usage_providers", None)
         if monitor is not None:
-            monitor.configure(bool(profile.codex_usage_enabled), profile.codex_executable)
+            monitor.configure(bool(profile.codex_usage_enabled), profile.codex_executable, selected)
 
     def get_usage_providers(self, force: bool = False) -> dict[str, Any]:
         """Lock-free read for the native strip's 1 s timer (never probes inline)."""

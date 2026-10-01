@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .base import Detection, Environment, base_state, detect_install, exists, pair, running_pair
 
-ID, NAME, SHORT = "codex", "Codex", "Cx"
+ID, NAME, SHORT = "codex", "Codex", "Codex"
 
 
 def probe(env: Environment, *, executable: str = "") -> dict:

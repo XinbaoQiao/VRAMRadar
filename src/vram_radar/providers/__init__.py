@@ -21,10 +21,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(deepseek.ID, deepseek.NAME, deepseek.SHORT, deepseek.probe, 10),
     ProviderSpec(grok.ID, grok.NAME, grok.SHORT, grok.probe, 20),
     ProviderSpec(kimi.ID, kimi.NAME, kimi.SHORT, kimi.probe, 30),
-    ProviderSpec("claude", "Claude", "Cl", generic.claude, 40),
-    ProviderSpec("glm", "GLM 智谱清言", "GLM", generic.glm, 50),
-    ProviderSpec("qwen", "Qwen 通义", "Qw", generic.qwen, 60),
-    ProviderSpec("yuanbao", "腾讯元宝", "YB", generic.yuanbao, 70),
+    ProviderSpec("claude", "Claude", "Claude", generic.claude, 40),
+    ProviderSpec("glm", "GLM 智谱清言", "智谱清言", generic.glm, 50),
+    ProviderSpec("qwen", "Qwen 通义", "通义千问", generic.qwen, 60),
+    ProviderSpec("yuanbao", "腾讯元宝", "腾讯元宝", generic.yuanbao, 70),
 )
 PROVIDER_IDS = tuple(spec.id for spec in PROVIDERS)
 DEFAULT_PROVIDERS = ("codex",)
@@ -43,8 +43,11 @@ def normalize_selection(values) -> tuple[str, ...]:
 
 
 def probe_all(env: Environment | None = None, *, codex_executable: str = "",
-              specs: tuple[ProviderSpec, ...] = PROVIDERS) -> dict[str, dict]:
+              specs: tuple[ProviderSpec, ...] = PROVIDERS, network: tuple[str, ...] = ()) -> dict[str, dict]:
+    """``network`` lists provider ids allowed to make their read-only status
+    query this round (only providers the user chose to display)."""
     env = env or Environment()
+    deepseek.NETWORK["enabled"] = "deepseek" in network
     results: dict[str, dict] = {}
     # Two passes: folders holding one detected app are also searched for the
     # others, so custom install roots (e.g. D:\Apps\<App>) are found too.
@@ -89,18 +92,20 @@ class ProviderMonitor:
         self.enabled = False
         self.closed = False
         self.codex_executable = ""
+        self.selected: tuple[str, ...] = DEFAULT_PROVIDERS
         self.next_read = 0.0
         self.last_force = 0.0
         self.worker: threading.Thread | None = None
         self.states: dict[str, dict] = {}
         self.loading = False
 
-    def configure(self, enabled: bool, codex_executable: str = "") -> None:
+    def configure(self, enabled: bool, codex_executable: str = "", selected=None) -> None:
         with self.lock:
             if self.closed:
                 return
-            changed = (self.enabled, self.codex_executable) != (enabled, codex_executable)
-            self.enabled, self.codex_executable = enabled, codex_executable
+            selected = normalize_selection(selected) if selected is not None else self.selected
+            changed = (self.enabled, self.codex_executable, self.selected) != (enabled, codex_executable, selected)
+            self.enabled, self.codex_executable, self.selected = enabled, codex_executable, selected
             if not changed:
                 return
             self.next_read = 0
@@ -129,6 +134,7 @@ class ProviderMonitor:
                 wait = max(0.0, self.next_read - time.monotonic()) if self.enabled else 60
                 ready = self.enabled and wait == 0
                 executable = self.codex_executable
+                selected = self.selected
                 if ready:
                     self.loading = True
                 self.wake.clear()
@@ -136,7 +142,10 @@ class ProviderMonitor:
                 self.wake.wait(min(wait, 60))
                 continue
             try:
-                states = self.probe(codex_executable=executable)
+                try:
+                    states = self.probe(codex_executable=executable, network=selected)
+                except TypeError:  # injected test probes without the keyword
+                    states = self.probe(codex_executable=executable)
             except Exception as exc:
                 LOG.warning("usage provider scan failed (%s)", type(exc).__name__)
                 states = None

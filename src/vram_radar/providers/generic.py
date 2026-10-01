@@ -43,7 +43,7 @@ def make_probe(provider_id: str, name: str, short: str, *, uninstall, processes,
 
 
 claude = make_probe(
-    "claude", "Claude", "Cl",
+    "claude", "Claude", "Claude",
     uninstall=[r"^Claude\b", r"Anthropic"], processes=["claude.exe"], executables=["Claude.exe", "claude.exe"],
     packages=[r"^(Claude|Anthropic)"],
     folders=["{localappdata}/AnthropicClaude", "{localappdata}/Programs/Claude", "{localappdata}/Programs/claude-desktop",
@@ -54,7 +54,7 @@ claude = make_probe(
     reason_en="Claude desktop shows usage limits online only; showing install/run state")
 
 glm = make_probe(
-    "glm", "GLM 智谱清言", "GLM",
+    "glm", "GLM 智谱清言", "智谱清言",
     uninstall=[r"智谱", r"清言", r"ChatGLM", r"Zhipu", r"^GLM\b"],
     processes=["智谱清言.exe", "chatglm.exe", "zhipuqingyan.exe", "qingyan.exe", "glm.exe"],
     executables=["智谱清言.exe", "ChatGLM.exe", "zhipuqingyan.exe", "qingyan.exe"],
@@ -65,14 +65,14 @@ glm = make_probe(
     data_dirs=["{appdata}/智谱清言", "{appdata}/zhipuqingyan", "{appdata}/chatglm", "{appdata}/ChatGLM"])
 
 qwen = make_probe(
-    "qwen", "Qwen 通义", "Qw",
+    "qwen", "Qwen 通义", "通义千问",
     uninstall=[r"^Qwen\b", r"通义", r"千问"], processes=["qwen.exe", "tongyi.exe"],
     executables=["Qwen.exe", "qwen.exe", "Tongyi.exe"], packages=[r"Qwen", r"Tongyi"],
     folders=["{localappdata}/Programs/Qwen", "{localappdata}/Programs/qwen", "{programfiles}/Qwen"],
     sibling_names=["Qwen"], data_dirs=["{appdata}/Qwen"])
 
 yuanbao = make_probe(
-    "yuanbao", "腾讯元宝", "YB",
+    "yuanbao", "腾讯元宝", "腾讯元宝",
     uninstall=[r"元宝", r"Yuanbao"], processes=["yuanbao.exe"], executables=["yuanbao.exe", "Yuanbao.exe"],
     packages=[r"Yuanbao"], folders=["{localappdata}/Programs/Yuanbao", "{programfiles}/Yuanbao",
                                     "{programfiles}/Tencent/Yuanbao"],

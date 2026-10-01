@@ -29,12 +29,20 @@ Turning the feature off cancels its pending query. See [Codex usage](docs/subscr
 
 The usage strip's **Models** menu can also show other AI desktop apps found on
 this computer (DeepSeek Harness, Grok, Kimi, Claude, GLM, Qwen, Tencent Yuanbao).
-These probes make no network requests. They read only installation facts
-(uninstall registry entries, registered packages, process names) and small
-non-secret status files or log lines those apps write themselves. Credential
-stores are checked for existence and size only and are never opened, decrypted
-or copied. Results stay in memory; only the list of selected apps is saved. See
-[AI app providers](docs/ai-app-providers.md).
+Detection reads only installation facts (uninstall registry entries, registered
+packages, process names) and small non-secret status files or log lines those
+apps write themselves. Encrypted credential stores (Grok, Kimi) are checked for
+existence and size only and are never opened, decrypted or copied.
+
+One network read exists, and only while **DeepSeek** is selected in the Models
+menu: VRAM Radar repeats the same read-only wallet query DeepSeek Harness makes
+for its own account page (`GET https://platform.deepseek.com/api/v0/users/get_user_summary`,
+or the public `GET https://api.deepseek.com/user/balance` for a plain API key),
+using the sign-in DeepSeek Harness stored in `~/.dsh/.credentials.yaml`. The
+token is read into memory for that single request, sent only to DeepSeek's own
+origin (redirects refused), and never saved, logged or shown. It runs at most
+every 5 minutes, with backoff after errors. Results stay in memory; only the
+list of selected apps is saved. See [AI app providers](docs/ai-app-providers.md).
 
 VRAM Radar does not send server addresses, SSH configuration, credentials,
 remote file listings, GPU status, job data, or application logs to a VRAM Radar

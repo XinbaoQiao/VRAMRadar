@@ -218,7 +218,7 @@ class ProviderProbeTests(unittest.TestCase):
                  "headline": {"zh": "可用", "en": "OK"}, "subline": {"zh": "记录 09-03", "en": "As of 09-03"},
                  "facts": [{"zh": "会员等级 10", "en": "Membership level 10"}], "stale": True, "state": "ready"}
         reading = provider_reading(state, spec, "zh-CN")
-        self.assertEqual((reading["value"], reading["countdown"]), ("Kimi 可用", "记录 09-03"))
+        self.assertEqual((reading["name"], reading["value"], reading["countdown"]), ("Kimi", "可用", "记录 09-03"))
         self.assertTrue(reading["warning"])
         self.assertIn("会员等级 10", reading["detail"])
 
@@ -270,7 +270,7 @@ class ApiTests(unittest.TestCase):
                     self.assertTrue(api.save_usage_providers(["kimi", "bogus"])["ok"])
                     self.assertEqual(api.store.load("test").usage_providers, ("kimi",))
                     configure.assert_called_with(False, "")  # Codex deselected: its app-server is not started
-                    providers.assert_called_with(True, "")
+                    providers.assert_called_with(True, "", ("kimi",))
                     self.assertTrue(api.save_usage_providers(["codex", "kimi"])["ok"])
                     configure.assert_called_with(True, "")
                 overview = api.get_usage_providers()

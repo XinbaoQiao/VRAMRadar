@@ -12,7 +12,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from vram_radar.usage_surface import CodexUsageSurface, windows_taskbar_geometry, taskbar_anchor, taskbar_scale, windows_taskbar_dpi
+from vram_radar.usage_surface import CodexUsageSurface, windows_taskbar_geometry, taskbar_anchor, taskbar_scale, windows_taskbar_dpi, left_slot
 from benchmark_webview_ui import FakeApi, _wait_until_ready
 
 
@@ -97,7 +97,14 @@ def main() -> int:
                         and label.GetPreferredSize(Size(0, 0)).Width <= label.Width for label in text_controls)
                     assertions["no_extra_taskbar_button"] = not surface.form.ShowInTaskbar
                     geometry = windows_taskbar_geometry()
-                    assertions["anchored_before_notification_area"] = bool(geometry) and (surface.form.Left, surface.form.Top) == taskbar_anchor(*geometry, (surface.form.Width, surface.form.Height))
+                    # Docked placement: the empty area right of Widgets/left of Start when it fits,
+                    # otherwise directly before the notification area.
+                    if surface._slot == "left":
+                        elements = surface._layout.elements(__import__("ctypes").windll.user32.FindWindowW("Shell_TrayWnd", None), geometry[0])
+                        assertions["anchored_in_left_taskbar_area"] = (surface.form.Left, surface.form.Top) == left_slot(
+                            geometry[0], elements, (surface.form.Width, surface.form.Height), round(6*surface._scale))
+                    else:
+                        assertions["anchored_before_notification_area"] = bool(geometry) and (surface.form.Left, surface.form.Top) == taskbar_anchor(*geometry, (surface.form.Width, surface.form.Height))
                     assertions["compact_height_fits_taskbar"] = bool(geometry) and surface.form.Height == round(40*taskbar_scale(windows_taskbar_dpi(), geometry)) and surface.form.Height < geometry[0][3]-geometry[0][1]-6
                     surface._drag, surface._drag_origin = (0, 0), (0, 0)
                     original_location = surface.form.Location
@@ -207,6 +214,7 @@ def main() -> int:
                                                         (False, (32, 32, 32), (240, 240, 240))]:
                     with patch("vram_radar.usage_surface.windows_taskbar_palette",
                                return_value=(background, foreground, (60, 60, 60), bright)):
+                        surface._palette_at = 0
                         invoke(tick)
                         assertions["live_theme_light" if bright else "live_theme_dark"] = (
                             surface.form.BackColor.R == background[0] and surface._menu.BackColor == surface.form.BackColor

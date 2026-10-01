@@ -11,11 +11,11 @@ enabled. The Codex quota path is unchanged (local `codex app-server`, every
 Each provider is one module in `src/vram_radar/providers/` exposing
 `probe(env) -> dict`; `providers/__init__.py` holds the registry.
 
-| Provider | Detected from | Status shown | Why no quota % |
+| Provider | Detected from | Status / quota shown | Notes |
 |---|---|---|---|
 | Codex | MSIX `OpenAI.Codex_*`, `find_codex()` CLI | Quota windows (existing) | — |
-| DeepSeek Harness | Uninstall entry, `%LOCALAPPDATA%\Programs\DeepSeek Harness`, process | Local token totals and session count from `~\.dsh\storages\session_projcache\sessions\*.json`; API-credential file present (not read) | It uses your own API key; the balance exists only on the DeepSeek platform and is never queried locally |
-| Grok (Grok Bot) | Uninstall entry, process, known folders | Signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | The app stores no quota/credit data locally |
+| DeepSeek Harness | Uninstall entry, `%LOCALAPPDATA%\Programs\DeepSeek Harness`, process | **Live account balance** (topped-up + granted wallets, CNY/USD), plus local token totals from `~\.dsh\storages\session_projcache\sessions\*.json` | Same read-only `GET /api/v0/users/get_user_summary` the app uses (or public `GET /user/balance` for an API key); every 5 min, backoff on errors, only while selected |
+| Grok (Grok Bot) | Uninstall entry, process, known folders | Signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | Grok's weekly usage comes from a Connect RPC POST (`DashboardService/GetSandUsageStatus`) authenticated by a DPAPI-encrypted token and is kept only in memory; Radar does not decrypt the token or impersonate the app |
 | Kimi | Uninstall entry (`DisplayIcon`), process | Membership level, exhausted / overdrawn / send-blocked and reset time, taken from Kimi's own `logs\main.log` refresh lines; signed in = the encrypted token store exists (not opened) | Kimi fetches quota online with an encrypted token; the log snapshot is only as fresh as Kimi's last run and is marked "As of" when older than 6 h |
 | Claude, GLM 智谱清言, Qwen, 腾讯元宝 | Uninstall entries, MSIX, known folders, processes, sibling folders of other detected apps | Installed / version / running / last data change; "leftover data" when only an old data folder remains | No documented local usage data |
 
@@ -30,8 +30,26 @@ Each provider is one module in `src/vram_radar/providers/` exposing
   errors; a failing probe is isolated and shown as "Probe failed".
 * Locked files are read through a private temporary copy; JSON is size-bounded
   (2 MB) and logs are tail-bounded (4 MB); damaged files read as "unknown".
-* No secrets are decrypted, read, logged or displayed; log lines are parsed for
+* Encrypted secrets are never decrypted; the DeepSeek sign-in token is read
+  only in memory for its read-only wallet GET and never logged or displayed;
+  log lines are parsed for
   a fixed whitelist of fields only; exceptions are logged by type name only.
 * Probes never run on the UI thread; the strip copies an in-memory snapshot.
 * Unknown ids in `usage_providers` (from another release) are ignored, and an
   invalid value falls back to Codex, so a Profile always loads.
+
+## Taskbar placement and theme
+
+* Docked, the strip sits in the empty area of a centered taskbar: right of the
+  Widgets/weather button, left of Start and Search. Their positions come from
+  Explorer's UI Automation tree (`WidgetsButton`, `StartButton`,
+  `SearchButton`) in physical pixels and are re-read every 5 s and whenever
+  the taskbar window or size changes (Explorer restart, scale/DPI change,
+  alignment change). When the gap is too narrow, the taskbar is left-aligned,
+  or UI Automation is unavailable, it falls back to the old spot before the
+  notification area (and before Widgets when Widgets sits on the right).
+* The background is the colour actually painted by the taskbar (median of a
+  few pixels away from icons, refreshed every 5 s and immediately when
+  `SystemUsesLightTheme` / `AppsUseLightTheme` / `EnableTransparency` /
+  `ColorPrevalence` change), falling back to the theme default or accent
+  colour. Text colours are picked for contrast against that background.

@@ -2,9 +2,15 @@
 
 Evidence (checked on a real install, v0.63.0): the app keeps
 ``%APPDATA%/Grok Bot/desktop-status.json`` = {version, pid, appVersion,
-startedAtMs, signedIn}.  Its other local state (``sand-client-persistence``
-blobs, LevelDB) contains UI/transcript slices and encrypted gateway secrets but
-no quota, credit or rate-limit records, so quota is not available locally.
+startedAtMs, signedIn}.  Its weekly usage (``usage_percent`` /
+``next_reset_timestamp_utc``) is fetched on demand by the main process through
+the Connect RPC ``aiserver.v1.DashboardService/GetSandUsageStatus`` (a POST)
+authenticated with an access token kept in Electron safeStorage (DPAPI).  The
+result is only held in memory and never written to disk: its persisted
+``sand-client-persistence`` slices are UI layout, drafts, roster and
+transcripts.  Reproducing the query would require decrypting the app's token
+and impersonating it with a non-GET call, which this project does not do, so
+Grok shows sign-in/run state and explains why quota is unavailable.
 """
 from __future__ import annotations
 
@@ -44,8 +50,10 @@ def probe(env: Environment) -> dict:
         if not state["installed"] and alive:
             state["installed"], state["state"] = True, "ready"
     state["quota_reason"] = "no_local_quota"
-    state["facts"].append(pair("Grok 本地不保存额度/用量数据，只能显示登录与运行状态",
-                               "Grok keeps no quota/usage data locally; showing sign-in and run state"))
+    state["facts"].append(pair("Grok 的周用量只在应用内存中，由加密登录令牌在线获取，本地不落盘；"
+                               "为保护账户，雷达不解密令牌，只显示登录与运行状态",
+                               "Grok fetches weekly usage online with its encrypted sign-in token and never stores it; "
+                               "Radar does not decrypt that token, so it shows sign-in and run state"))
     if state["signed_in"] is True:
         headline = pair("已登录", "Signed in")
     elif state["signed_in"] is False:
