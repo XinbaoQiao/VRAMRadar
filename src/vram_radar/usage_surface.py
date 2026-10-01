@@ -1025,11 +1025,11 @@ class CodexUsageSurface:
         self._dialog_icon = None
         self._dialog_name = ""
         self.confirm_consent = confirm_consent or (
-            lambda app, provider: windows_consent_dialog(app, provider, getattr(self, "_scale", None),
+            lambda app, provider: windows_consent_dialog(app, provider, self._dialog_scale(),
                                                          icon_path=self._dialog_icon))
-        self.confirm_revoke = lambda name: windows_revoke_dialog(name, getattr(self, "_scale", None),
+        self.confirm_revoke = lambda name: windows_revoke_dialog(name, self._dialog_scale(),
                                                                  icon_path=self._dialog_icon)
-        self.notify_blocked = lambda text: windows_notice_dialog(text, getattr(self, "_scale", None),
+        self.notify_blocked = lambda text: windows_notice_dialog(text, self._dialog_scale(),
                                                                  name=self._dialog_name, icon_path=self._dialog_icon)
         self.notify_toast = self._show_toast
         self._pending: dict = {}
@@ -1128,6 +1128,14 @@ class CodexUsageSurface:
         else:
             self.request_session_consent(provider_id)
 
+    def _dialog_scale(self):
+        """Monitor DPI of the strip (dialogs follow the screen, not the
+        taskbar-fitted strip scale); None -> system DPI."""
+        try:
+            return max(1.0, float(self.form.DeviceDpi) / 96) if self.form is not None else None
+        except Exception:
+            return None
+
     def _toast(self, headline, line="", name="") -> None:
         try:
             self.notify_toast(headline, line, name)
@@ -1142,7 +1150,7 @@ class CodexUsageSurface:
         if not name:
             icon = sys.executable if getattr(sys, "frozen", False) else None
         ui_dialogs.show_toast(ui_dialogs.toast_spec(headline, line, name or "显存雷达"), anchor,
-                              scale=getattr(self, "_scale", None), icon_path=icon)
+                              scale=self._dialog_scale(), icon_path=icon)
 
     def _store_consent(self, provider_id, granted: bool) -> None:
         try:
