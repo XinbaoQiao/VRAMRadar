@@ -161,12 +161,19 @@ class TaskbarLayout:
     back to the classic tray anchor; nothing here can raise into the UI loop.
     """
 
-    def __init__(self, interval: float = 5.0):
+    def __init__(self, interval: float = 5.0, retry: float = 1.0):
         self.interval = interval
+        self.retry = min(retry, interval)
         self._key = None
         self._at = 0.0
         self._elements: dict = {}
         self._ready = None
+        # Last usable reading per (taskbar handle, rect).  UI Automation
+        # lookups fail transiently (Explorer busy, Start menu animating);
+        # returning {} then made the strip jump to the tray fallback.
+        self._good_key = None
+        self._good: dict = {}
+        self.failures = 0
 
     def _load(self):
         if self._ready is None:
@@ -180,14 +187,28 @@ class TaskbarLayout:
                 self._ready = False
         return self._ready
 
-    def elements(self, taskbar_handle: int, bar) -> dict:
+    def elements(self, taskbar_handle: int, bar, exclude=None) -> dict:
         now = time.monotonic()
         key = (int(taskbar_handle or 0), tuple(bar))
-        if key == self._key and now - self._at < self.interval:
+        wait = self.retry if self.failures else self.interval
+        if key == self._key and now - self._at < wait:
             return self._elements
-        self._key, self._at, self._elements = key, now, {}
-        if not taskbar_handle or not self._load():
-            return self._elements
+        self._key, self._at = key, now
+        found = self._read(taskbar_handle) if taskbar_handle and self._load() else {}
+        found = exclude_rect(found, exclude)
+        if usable_layout(found):
+            self._good_key, self._good, self.failures = key, found, 0
+            self._elements = found
+        else:
+            self.failures += 1
+            # Same bar rect (also across an Explorer restart, whose new
+            # taskbar needs a few seconds before UIA exposes Start): the
+            # buttons have not moved, so the last good reading still holds.
+            same_bar = self._good_key is not None and self._good_key[1] == key[1]
+            self._elements = self._good if same_bar else {}
+        return self._elements
+
+    def _read(self, taskbar_handle) -> dict:
         try:
             from System import IntPtr
             from System.Windows.Automation import (AutomationElement, OrCondition, PropertyCondition,
@@ -212,14 +233,139 @@ class TaskbarLayout:
                          and not b.Current.BoundingRectangle.IsEmpty]
                 if lefts:
                     found["first_app"] = min(lefts)
-            self._elements = found
+            return found
         except Exception as exc:
             logging.getLogger("vram_radar").info("taskbar layout read failed (%s)", type(exc).__name__)
-            self._elements = {}
-        return self._elements
+            return {}
 
     def invalidate(self):
         self._key = None
+
+
+def exclude_rect(elements, own):
+    """Drop readings that lie inside our own strip window.
+
+    The strip floats over the taskbar; an element reported at our own rect
+    (hit-testing through the overlay, a stale fallback button) would make the
+    gap look occupied and push the strip to the tray side.
+    """
+    if not elements or not own:
+        return elements or {}
+    l, t, r, b = own
+    return {k: v for k, v in elements.items()
+            if not (v and v[0] >= l and v[2] <= r and v[1] >= t and v[3] <= b)}
+
+
+def usable_layout(elements) -> bool:
+    """A reading that can bound the left slot (Start/Search/first app found)."""
+    return bool(elements) and any(elements.get(k) for k in (*RIGHT_BOUND_IDS, "first_app"))
+
+
+def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
+    """``(slot, anchor_x, y)`` for a docked strip.
+
+    ``slot`` is "left" (anchor = left edge of the strip) or "tray"
+    (anchor = right edge the strip must stay left of).  Anchors rather than
+    final x keep a width change from looking like a side switch.
+    """
+    width, height = size
+    y = bar[1] + (bar[3] - bar[1] - height) // 2
+    spot = left_slot(bar, elements, size, margin) if elements else None
+    if spot is not None:
+        return ("left", spot[0], spot[1])
+    right = tray[0]
+    widgets = elements.get("WidgetsButton") if elements else None
+    if widgets and widgets[0] > (bar[0] + bar[2]) / 2 and widgets[0] < tray[0]:
+        right = widgets[0] - widgets_gap
+    return ("tray", right, y)
+
+
+def docked_point(bar, target, width):
+    slot, anchor, y = target
+    return (anchor, y) if slot == "left" else (max(bar[0], anchor - width - 1), y)
+
+
+class PlacementDebouncer:
+    """Commit a new docked target only after ``confirm`` identical readings.
+
+    The first target is applied at once; afterwards a different side or
+    anchor must be seen ``confirm`` ticks in a row, so one odd reading can
+    neither move the strip nor flip it to the other side.
+    """
+
+    def __init__(self, confirm: int = 3, switch_confirm: int = 5, tolerance: int = 2):
+        self.confirm = max(1, int(confirm))
+        self.switch_confirm = max(self.confirm, int(switch_confirm))
+        self.tolerance = max(0, int(tolerance))
+        self.current = None
+        self._pending = None
+        self._count = 0
+
+    def reset(self):
+        self.current, self._pending, self._count = None, None, 0
+
+    def propose(self, target):
+        if self.current is None:
+            self.current = target
+        elif self._near(target, self.current):
+            self._pending, self._count = None, 0
+        else:
+            if self._pending is not None and self._near(target, self._pending):
+                self._count += 1
+            else:
+                self._pending, self._count = target, 1
+            needed = self.switch_confirm if target[0] != self.current[0] else self.confirm
+            if self._count >= needed:
+                self.current, self._pending, self._count = target, None, 0
+        return self.current
+
+    def _near(self, a, b):
+        return a[0] == b[0] and all(abs(int(x) - int(y)) <= self.tolerance for x, y in zip(a[1:], b[1:]))
+
+
+def settle_color(previous, sampled, threshold: int = 12):
+    """Ignore small pixel noise (Mica, hover glow beside the strip)."""
+    if sampled is None:
+        return previous
+    if previous is None:
+        return tuple(sampled)
+    return tuple(previous) if max(abs(int(a) - int(b)) for a, b in zip(previous, sampled)) <= threshold \
+        else tuple(sampled)
+
+
+def windows_needs_topmost(handle) -> bool:
+    """True when our strip lost topmost or Explorer's taskbar sits above it."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u = _dll("user32")
+        u.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+        u.GetWindow.restype = wintypes.HWND
+        u.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+        u.GetWindowLongW.restype = ctypes.c_long
+        if not (u.GetWindowLongW(handle, -20) & 0x8):
+            return True
+        bar = u.FindWindowW("Shell_TrayWnd", None)
+        current = handle
+        for _ in range(128):
+            current = u.GetWindow(current, 3)  # GW_HWNDPREV
+            if not current:
+                return False
+            if bar and current == bar:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+# Shell overlays that cover the screen briefly (Alt+Tab, Task View, Start,
+# notification centre).  They are not fullscreen applications.
+SHELL_OVERLAY_CLASSES = frozenset({
+    "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW", "MultitaskingViewFrame",
+    "XamlExplorerHostIslandWindow", "ForegroundStaging", "Windows.UI.Core.CoreWindow",
+    "TaskListThumbnailWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland",
+    "LockScreenBackstopFrame", "Windows.UI.Input.InputSite.WindowClass",
+})
 
 
 def taskbar_scale(dpi, geometry):
@@ -444,7 +590,7 @@ def windows_surface_obscured(widget, docked=True):
         return False
     name = ctypes.create_unicode_buffer(80)
     u.GetClassNameW(foreground, name, len(name))
-    if name.value in {"Shell_TrayWnd", "Progman", "WorkerW"}:
+    if name.value in SHELL_OVERLAY_CLASSES:
         return False
     pair = bounds(foreground)
     if not pair:
@@ -825,6 +971,12 @@ class CodexUsageSurface:
 
         self._layout = TaskbarLayout()
         self._slot = "tray"
+        self._placer = PlacementDebouncer(confirm=3, switch_confirm=5)
+        self._bar_handle = None
+        self._obscured_ticks = 0
+        self._inactive_ticks = 0
+        self._last_overview = {}
+        self._fit_key = None
         user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
         user32.FindWindowW.restype = wintypes.HWND
 
@@ -832,20 +984,26 @@ class CodexUsageSurface:
             geometry = windows_taskbar_geometry()
             if self._placement == "taskbar" and geometry:
                 bar, tray = geometry
+                bar_handle = int(user32.FindWindowW("Shell_TrayWnd", None) or 0)
+                if bar_handle != self._bar_handle:
+                    # First run or Explorer restart: re-read the layout now but
+                    # keep the committed spot until new readings confirm a move.
+                    self._bar_handle = bar_handle
+                    self._layout.invalidate()
                 size = (form.Width, form.Height)
-                elements = self._layout.elements(user32.FindWindowW("Shell_TrayWnd", None) or 0, bar)
-                spot = left_slot(bar, elements, size, scale(6)) if elements else None
-                if spot is None:
-                    # Left-aligned taskbar: Widgets sits on the right; stay before it.
-                    widgets = elements.get("WidgetsButton") if elements else None
-                    if widgets and widgets[0] > (bar[0]+bar[2])/2 and widgets[0] < tray[0]:
-                        tray = (widgets[0]-scale(4), tray[1], tray[2], tray[3])
-                    spot = taskbar_anchor(bar, tray, size)
-                    self._slot = "tray"
-                else:
-                    self._slot = "left"
-                form.Location = Point(*spot)
+                own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
+                elements = self._layout.elements(bar_handle, bar, own)
+                target = self._placer.propose(docked_target(bar, tray, elements, size, scale(6), scale(4)))
+                self._slot = target[0]
+                x, y = docked_point(bar, target, size[0])
+                if (form.Left, form.Top) != (x, y):
+                    form.Location = Point(x, y)
                 return
+            if self._placement == "taskbar" and self._placer.current is not None:
+                # Taskbar momentarily unreadable (Explorer restarting, DPI
+                # change): stay put instead of jumping to free placement.
+                return
+            self._placer.reset()
             screen = Screen.FromPoint(Point(*self._position)) if self._position else Screen.PrimaryScreen
             area = screen.Bounds if self._position else screen.WorkingArea
             x, y = strip_bounds((area.Left, area.Top, area.Right, area.Bottom),
@@ -1211,8 +1369,9 @@ class CodexUsageSurface:
             show_disks = bool(options.get("codex_show_disks", False))
             try:
                 overview = self.providers() or {}
+                self._last_overview = overview
             except Exception:
-                overview = {}
+                overview = self._last_overview
             selected = [x for x in (overview.get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
             provider_states = overview.get("providers") if isinstance(overview.get("providers"), dict) else {}
             master_enabled = overview.get("enabled", True) is not False
@@ -1255,6 +1414,10 @@ class CodexUsageSurface:
                 docked = self._placement == "taskbar" and own is not None
                 base = windows_taskbar_palette(bar_geometry[0] if bar_geometry else None, own,
                                                own if docked else None)[0]
+                theme_changed = getattr(self, "_base_key", None) != (theme, style, docked)
+                self._base_key = (theme, style, docked)
+                base = tuple(base) if theme_changed else settle_color(getattr(self, "_base", None), base)
+                self._base = base
                 # A colour-keyed strip off the taskbar (free placement) sits on
                 # arbitrary windows; give it a readable surface there.
                 effective = style if docked or style != "transparent" else "dark"
@@ -1308,10 +1471,16 @@ class CodexUsageSurface:
             rows = quota_lines(state, language) if "codex" in selected else []
             self.active = bool(rows or others)
             if not self.active:
-                click_timer.Stop()
-                self._last_click = None
-                form.Hide()
+                # A single empty snapshot (reload, provider rescan) must not
+                # blink the strip; hide only when it stays empty.
+                self._inactive_ticks += 1
+                if self._inactive_ticks >= 3 or not form.Visible:
+                    click_timer.Stop()
+                    self._last_click = None
+                    if form.Visible:
+                        form.Hide()
                 return
+            self._inactive_ticks = 0
             windows = state.get("windows", []) if rows else []
             identities = [window.get("id") or f"{window.get('name')}:{window.get('window_minutes')}:{index}"
                           for index, window in enumerate(windows)]
@@ -1372,6 +1541,7 @@ class CodexUsageSurface:
             for name_label, value_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = False
             if not multi:
+                self._fit_key = None
                 # Keep the gap tight without shrinking type or clipping longer
                 # countdowns (for example 168.0h) and localized status messages.
                 text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
@@ -1388,36 +1558,40 @@ class CodexUsageSurface:
                 used = self._extra_columns[:len(cells)]
                 available = None
                 if self._placement == "taskbar" and geometry:
-                    elements = self._layout.elements(user32.FindWindowW("Shell_TrayWnd", None) or 0, geometry[0])
+                    elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
+                                                     (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
                     gap_area = left_gap(geometry[0], elements, scale(6)) if elements else None
                     available = gap_area[1] - gap_area[0] if gap_area else None
-                for factor in FIT_FACTORS:
-                    fonts = self._fit_fonts.get(factor)
-                    if fonts is None:
-                        fonts = self._fit_fonts[factor] = (
-                            Font("Segoe UI", max(1, round(scale(12)*factor)), FontStyle.Regular, GraphicsUnit.Pixel),
-                            Font("Segoe UI", max(1, round(scale(13)*factor)), FontStyle.Bold, GraphicsUnit.Pixel))
-                    for top, bottom in used:
-                        if top.Font is not fonts[0]:
-                            top.Font = fonts[0]
-                        if bottom.Font is not fonts[1]:
-                            bottom.Font = fonts[1]
-                    x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
-                    for start in range(0, len(used), 2):
-                        group = used[start:start+2]
-                        name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
-                        value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
-                        for row, (name_label, value_label) in enumerate(group):
-                            y = scale(10) if len(group) == 1 else scale(20)*row
-                            name_label.Size = Size(name_w, scale(20))
-                            value_label.Size = Size(value_w, scale(20))
-                            name_label.Location = Point(x, y)
-                            value_label.Location = Point(x + name_w + inner, y)
-                        x += name_w + inner + value_w + gap
-                    width = x - gap + scale(7*factor)
-                    if available is None or width <= available:
-                        break
-                form.ClientSize = Size(width, scale(40))
+                fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale)
+                if fit_key != self._fit_key:
+                    self._fit_key = fit_key
+                    for factor in FIT_FACTORS:
+                        fonts = self._fit_fonts.get(factor)
+                        if fonts is None:
+                            fonts = self._fit_fonts[factor] = (
+                                Font("Segoe UI", max(1, round(scale(12)*factor)), FontStyle.Regular, GraphicsUnit.Pixel),
+                                Font("Segoe UI", max(1, round(scale(13)*factor)), FontStyle.Bold, GraphicsUnit.Pixel))
+                        for top, bottom in used:
+                            if top.Font is not fonts[0]:
+                                top.Font = fonts[0]
+                            if bottom.Font is not fonts[1]:
+                                bottom.Font = fonts[1]
+                        x, gap, inner = scale(7*factor), scale(10*factor), scale(4*factor)
+                        for start in range(0, len(used), 2):
+                            group = used[start:start+2]
+                            name_w = max(n.GetPreferredSize(Size(0, 0)).Width for n, _ in group)
+                            value_w = max(v.GetPreferredSize(Size(0, 0)).Width for _, v in group)
+                            for row, (name_label, value_label) in enumerate(group):
+                                y = scale(10) if len(group) == 1 else scale(20)*row
+                                name_label.Size = Size(name_w, scale(20))
+                                value_label.Size = Size(value_w, scale(20))
+                                name_label.Location = Point(x, y)
+                                value_label.Location = Point(x + name_w + inner, y)
+                            x += name_w + inner + value_w + gap
+                        width = x - gap + scale(7*factor)
+                        if available is None or width <= available:
+                            break
+                    form.ClientSize = Size(width, scale(40))
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()
@@ -1432,23 +1606,41 @@ class CodexUsageSurface:
                 action_items[i].Text = en if language == "en" else zh
             position()
             update_hover()
-            if windows_surface_obscured(handle, self._placement == "taskbar") and not menu.Visible:
+            obscured = windows_surface_obscured(handle, self._placement == "taskbar") and not menu.Visible
+            self._obscured_ticks = self._obscured_ticks + 1 if obscured else 0
+            if obscured and (self._obscured_ticks >= 2 or not form.Visible):
                 cancel_click()
-                form.Hide()
+                if form.Visible:
+                    form.Hide()
                 return
+            shown = False
             if not form.Visible:
                 form.Show()
-            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
-                                           ctypes.c_int, ctypes.c_int, wintypes.UINT]
-            user32.SetWindowPos(handle, -1, 0, 0, 0, 0, 0x0013)
+                shown = True
+            raise_topmost(force=shown)
+
+        def raise_topmost(force=False):
+            if self.closed or not form.Visible:
+                return
+            if force or windows_needs_topmost(handle):
+                user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                               ctypes.c_int, ctypes.c_int, wintypes.UINT]
+                user32.SetWindowPos(handle, -1, 0, 0, 0, 0, 0x0013)
 
         timer = Timer()
         self.timer = timer
         timer.Interval = 1000
         timer.Tick += tick
         self._tick = tick
+        # Explorer raises its taskbar above other topmost windows when it is
+        # clicked; re-assert quickly (cheap z-order walk, no move/resize).
+        z_timer = Timer()
+        self._z_timer = z_timer
+        z_timer.Interval = 250
+        z_timer.Tick += lambda *_: raise_topmost()
         tick()
         timer.Start()
+        z_timer.Start()
 
     def _start_macos(self) -> None:
         if self.closed:
@@ -1532,6 +1724,9 @@ class CodexUsageSurface:
                 if getattr(self, "_click_timer", None) is not None:
                     self._click_timer.Stop()
                     self._click_timer.Dispose()
+                if getattr(self, "_z_timer", None) is not None:
+                    self._z_timer.Stop()
+                    self._z_timer.Dispose()
                 if self.form is not None:
                     self.form.Close()
                     self.form.Dispose()
