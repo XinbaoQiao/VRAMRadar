@@ -20,7 +20,29 @@ from System.Windows.Forms import Application, Form, FormBorderStyle, FormStartPo
 from System.Runtime.InteropServices import Marshal
 from vram_radar.usage_surface import (STRIP_DENSITY, compact_value, place_columns, set_name_cell, strip_icon_px,
                                       FIT_PLAN)
-from vram_radar.ui_dialogs import letter_tile, provider_icon
+from vram_radar.ui_dialogs import icon_source, letter_tile, provider_icon
+
+
+def alpha_bbox(bmp, threshold=40):
+    """(left, top, right, bottom) of pixels with alpha > threshold (exclusive right/bottom)."""
+    buf, stride = pixels(bmp)
+    xs, ys = [], []
+    for y in range(bmp.Height):
+        for x in range(bmp.Width):
+            if buf[y * stride + x * 4 + 3] > threshold:
+                xs.append(x); ys.append(y)
+    return (min(xs), min(ys), max(xs) + 1, max(ys) + 1) if xs else None
+
+
+def ink_box(buf, stride, bg, rect, threshold=40):
+    l, t, r, b = rect
+    xs, ys = [], []
+    for y in range(t, b):
+        for x in range(l, r):
+            i = y * stride + x * 4
+            if abs(buf[i + 2] - bg[0]) + abs(buf[i + 1] - bg[1]) + abs(buf[i] - bg[2]) > threshold:
+                xs.append(x); ys.append(y)
+    return (min(xs), min(ys), max(xs) + 1, max(ys) + 1) if xs else None
 
 DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 THEMES = {"light": ((238, 228, 214), (90, 90, 90), (26, 26, 26), (160, 62, 96)),
@@ -122,7 +144,28 @@ def run(save=None):
                                    or (name_label.Image is not None and name_label.Image.Width > name_label.Width)
                                    or (name_label.Image is not None and name_label.Image.Height > name_label.Height))
                         edge_ink = bool(vi) and max(vi) >= vr[2] - 1
-                        cells.append({"cell": name, "gap": gap, "ink": [min(ni) if ni else None, max(ni) if ni else None,
+                        if mode == "icons" and name_label.Image is not None and paths.get(name):
+                            # Icon art vs a reference downscale of the 256 px source: the
+                            # drawn extent must match (nothing cut at the square) and keep
+                            # >= 1 px clear of the cell edges.
+                            source = icon_source(paths.get(name))
+                            sb = alpha_bbox(source) if source is not None else None
+                            box = ink_box(buf, stride, bg, nr)
+                            if sb and box:
+                                k = (px - 2) / max(source.Width, source.Height)
+                                ew, eh = (sb[2] - sb[0]) * k, (sb[3] - sb[1]) * k
+                                aw, ah = box[2] - box[0], box[3] - box[1]
+                                if abs(aw - ew) > 2 or abs(ah - eh) > 2:
+                                    failures.append(f"{key} {name}: icon extent {aw}x{ah} vs reference {ew:.1f}x{eh:.1f}")
+                                if box[0] < nr[0] + 1 or box[1] < nr[1] + 1 or box[3] > nr[3] - 1:
+                                    failures.append(f"{key} {name}: icon touches cell edge {box} in {nr}")
+                                cells_icon = {"extent": [aw, ah], "reference": [round(ew, 1), round(eh, 1)]}
+                            else:
+                                failures.append(f"{key} {name}: icon not drawn")
+                                cells_icon = None
+                        else:
+                            cells_icon = None
+                        cells.append({"cell": name, "gap": gap, "icon": cells_icon, "ink": [min(ni) if ni else None, max(ni) if ni else None,
                                                                         min(vi) if vi else None, max(vi) if vi else None]})
                         if gap is None or gap < need:
                             failures.append(f"{key} {name}: gap {gap} < {need}")

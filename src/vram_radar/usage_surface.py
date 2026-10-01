@@ -1063,22 +1063,23 @@ PENDING_TIMEOUT = 60
 AUTO_READ_FOOTER = ("只读，不保存登录", "Read-only, no login kept")
 
 
-def menu_tier(state: dict | None, chosen: bool) -> int:
-    """Row tier in the provider menus: 0 chosen (ticked / auto-read on),
-    1 detected (installed, running, needs login, or not probed yet),
-    2 not detected (greyed, at the bottom)."""
-    if chosen:
-        return 0
-    if isinstance(state, dict) and not state.get("installed"):
-        return 2
+def menu_tier(state: dict | None, chosen: bool = False) -> int:
+    """Row tier in the provider menus: 0 running, 1 installed (not running,
+    or not probed yet), 2 everything else (leftover data / not detected,
+    greyed, at the bottom).  ``chosen`` only orders rows inside a tier."""
+    if isinstance(state, dict):
+        if state.get("running") is True:
+            return 0
+        return 1 if state.get("installed") else 2
     return 1
 
 
 def tiered(ids, chosen, states) -> list[tuple[int, str]]:
-    """(tier, id) in tier order; the fixed registry order is kept inside a
-    tier (stable sort)."""
-    rows = [(menu_tier(states.get(pid) if isinstance(states, dict) else None, pid in chosen), pid) for pid in ids]
-    return sorted(rows, key=lambda row: row[0])
+    """(tier, id) in tier order; inside a tier ticked rows come first, then
+    the fixed registry order (stable sort)."""
+    rows = [(menu_tier(states.get(pid) if isinstance(states, dict) else None), pid not in chosen, index, pid)
+            for index, pid in enumerate(ids)]
+    return [(tier, pid) for tier, _, _, pid in sorted(rows)]
 
 
 def limit_menu_text(limit: int, language: str = "zh-CN") -> str:
@@ -2010,8 +2011,8 @@ class CodexUsageSurface:
                 # Keep unticked items clickable at the limit so a 5th tick can
                 # explain itself (hint) instead of silently doing nothing.
                 item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
-            # Rows in tiers (chosen, detected, not detected), fixed order
-            # inside a tier.  Re-arranged only when the tiers change; ticks
+            # Rows in tiers (running, installed, other), ticked first then
+            # fixed order inside a tier.  Re-arranged only when the tiers change; ticks
             # pause while the menu is open, so rows never jump under the mouse.
             def arrange(name, items, rows, tail):
                 key = tuple(rows)

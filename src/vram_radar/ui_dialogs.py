@@ -230,7 +230,9 @@ def icon_candidates(path: str, px: int = 32) -> list[str]:
     if not path:
         return []
     if os.path.isdir(path):
-        logo = msix_logo(path, px, light=taskbar_light())
+        # The largest logo (targetsize-256 has ~1 px margin); the small
+        # hinted sizes put the art right on the square edge.
+        logo = msix_logo(path, max(px, 256), light=taskbar_light())
         return [logo] if logo else []
     folder = os.path.dirname(path)
     out = [path] if path.lower().endswith((".exe", ".ico", ".png")) else []
@@ -343,21 +345,85 @@ def glyph_icon(glyph: str, px: int, rgb=(26, 26, 26)):
     return bitmap
 
 
+ICON_SOURCE_PX = 256
+_SOURCES: dict = {}
+
+
+def icon_source(path: str | None):
+    """Largest available frame of the app's icon (256 px exe/ico frame or
+    the biggest MSIX logo PNG), cached; None when there is none."""
+    key = str(path or "")
+    if key in _SOURCES:
+        return _SOURCES[key]
+    source = None
+    for candidate in icon_candidates(key, ICON_SOURCE_PX):
+        try:
+            if not os.path.isfile(candidate):
+                continue
+            source = (_exe_icon(candidate, ICON_SOURCE_PX) if candidate.lower().endswith(".exe")
+                      else _load_image(candidate))
+            if source is not None:
+                break
+        except Exception as exc:
+            LOG.info("app icon unavailable (%s)", type(exc).__name__)
+    _SOURCES[key] = source
+    return source
+
+
+def _load_image(path: str):
+    from System.Drawing import Bitmap, Icon, Size
+    if path.lower().endswith(".ico"):
+        icon = Icon(path, Size(ICON_SOURCE_PX, ICON_SOURCE_PX))
+        try:
+            return icon.ToBitmap()
+        finally:
+            icon.Dispose()
+    with_file = Bitmap(path)
+    try:
+        return Bitmap(with_file)          # detached copy: no file lock
+    finally:
+        with_file.Dispose()
+
+
+def fit_icon(source, px: int, pad: int = 1):
+    """``source`` scaled (aspect kept, high-quality area filtering) into a
+    transparent px x px bitmap with ``pad`` clear pixels on every side, so
+    the art is never cut by the square or touches the cell edge."""
+    from System.Drawing import Bitmap, Graphics, GraphicsUnit, Rectangle
+    from System.Drawing.Drawing2D import CompositingQuality, InterpolationMode, PixelOffsetMode, SmoothingMode, WrapMode
+    from System.Drawing.Imaging import ImageAttributes, PixelFormat
+    inner = max(1, px - 2 * pad)
+    w, h = source.Width, source.Height
+    k = inner / max(w, h)
+    dw, dh = max(1, round(w * k)), max(1, round(h * k))
+    out = Bitmap(px, px, PixelFormat.Format32bppArgb)
+    g = Graphics.FromImage(out)
+    attrs = ImageAttributes()
+    try:
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality
+        g.CompositingQuality = CompositingQuality.HighQuality
+        g.SmoothingMode = SmoothingMode.HighQuality
+        attrs.SetWrapMode(WrapMode.TileFlipXY)   # no fade/cut at the source edges
+        g.DrawImage(source, Rectangle((px - dw) // 2, (px - dh) // 2, dw, dh), 0, 0, w, h, GraphicsUnit.Pixel, attrs)
+    finally:
+        attrs.Dispose()
+        g.Dispose()
+    return out
+
+
 def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile."""
     key = (str(path or ""), int(px), name)
     if key in _ICONS:
         return _ICONS[key]
     bitmap = None
-    for candidate in icon_candidates(str(path or ""), int(px)):
-        try:
-            if not os.path.isfile(candidate):
-                continue
-            bitmap = _exe_icon(candidate, px) if candidate.lower().endswith(".exe") else _file_icon(candidate, px)
-            if bitmap is not None:
-                break
-        except Exception as exc:
-            LOG.info("app icon unavailable (%s)", type(exc).__name__)
+    try:
+        source = icon_source(path)
+        if source is not None:
+            bitmap = fit_icon(source, int(px))
+    except Exception as exc:
+        LOG.info("app icon unavailable (%s)", type(exc).__name__)
     if bitmap is None:
         try:
             bitmap = letter_tile(name, px, accent)
