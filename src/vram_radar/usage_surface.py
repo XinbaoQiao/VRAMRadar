@@ -8,6 +8,14 @@ import sys
 import threading
 import time
 from typing import Callable
+import os
+
+# Alpha of the strip's hit-test window: WinForms maps Opacity to a byte
+# (int(opacity * 255)), so this is alpha 1/255 -- invisible, yet hit-testable
+# (only alpha 0 / colour-keyed pixels pass clicks through).
+CATCHER_OPACITY = 0.004
+# VRAM_RADAR_PERF=1 logs the strip's UI-thread tick cost once a minute.
+PERF_LOG = os.environ.get("VRAM_RADAR_PERF") == "1"
 
 _DLLS: dict = {}
 
@@ -270,8 +278,13 @@ class TaskbarLayout:
     back to the classic tray anchor; nothing here can raise into the UI loop.
     """
 
-    def __init__(self, interval: float = 5.0, retry: float = 1.0, trim=trim_widgets):
+    def __init__(self, interval: float = 5.0, retry: float = 1.0, trim=trim_widgets, background=False):
         self.interval = interval
+        # background: after the first good reading, refresh on a worker
+        # thread (UIA FindAll + widget pixel scan took 70-300 ms on the UI
+        # thread) and serve the cached reading meanwhile.
+        self.background = background
+        self._worker = None
         self.trim = trim
         self.retry = min(retry, interval)
         self._key = None
@@ -304,6 +317,15 @@ class TaskbarLayout:
         if key == self._key and now - self._at < wait:
             return self._elements
         self._key, self._at = key, now
+        if self.background and self._good_key == key and self._ready:
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._refresh, args=(key, taskbar_handle, exclude),
+                                                daemon=True, name="taskbar-layout")
+                self._worker.start()
+            return self._elements
+        return self._refresh(key, taskbar_handle, exclude)
+
+    def _refresh(self, key, taskbar_handle, exclude) -> dict:
         found = self._read(taskbar_handle) if taskbar_handle and self._load() else {}
         found = exclude_rect(found, exclude)
         if usable_layout(found) and self.trim is not None:
@@ -518,45 +540,47 @@ def _luminance(rgb):
     return sum(v*w for v, w in zip(rgb, (.2126, .7152, .0722)))
 
 
-def sample_taskbar_color(bar, exclude=None, near=None):
+def sample_taskbar_color(bar, exclude=None, near=None, capture=None):
     """Median colour of a few taskbar pixels away from icons/text, or None.
 
     Reads the composited screen (works with Mica/acrylic/transparency, light
     or dark, accent colour on) instead of guessing.  ``exclude`` is our own
     window rectangle so we never sample ourselves.
     """
+    # Per-pixel GetPixel on the screen DC costs ~15 ms each (a DWM readback);
+    # ~15 of them stalled the UI thread for 200-260 ms every 5 s.  Grab the
+    # bounding rows once (one BitBlt per row band) and index into them.
     try:
-        import ctypes
-        user32, gdi32 = _dll("user32"), _dll("gdi32")
-        user32.GetDC.restype = ctypes.c_void_p
-        user32.GetDC.argtypes = [ctypes.c_void_p]
-        user32.ReleaseDC.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        gdi32.GetPixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
-        gdi32.GetPixel.restype = ctypes.c_uint32
-        dc = user32.GetDC(None)
-        if not dc:
-            return None
-        try:
-            left, top, right, bottom = bar
-            height = bottom - top
-            samples = []
-            if near:
-                # Translucent (Mica/acrylic) taskbars vary along their length:
-                # match the pixels immediately beside the widget.
-                points = [(x, int(top + (height - 1) * fy)) for x in (near[0] - 3, near[2] + 3, near[2] + 8)
-                          for fy in (0.08, 0.3, 0.5, 0.7, 0.92) if left <= x < right]
-            else:
-                points = [(int(left + (right - left - 1) * fx), int(top + (height - 1) * fy))
-                          for fx in (0.005, 0.25, 0.5, 0.62, 0.75, 0.995) for fy in (0.06, 0.94)]
-            for x, y in points:
-                    if exclude and exclude[0] <= x < exclude[2] and exclude[1] <= y < exclude[3]:
+        capture = capture or capture_screen
+        left, top, right, bottom = bar
+        height = bottom - top
+        if near:
+            # Translucent (Mica/acrylic) taskbars vary along their length:
+            # match the pixels immediately beside the widget.
+            points = [(x, int(top + (height - 1) * fy)) for x in (near[0] - 3, near[2] + 3, near[2] + 8)
+                      for fy in (0.08, 0.3, 0.5, 0.7, 0.92) if left <= x < right]
+        else:
+            points = [(int(left + (right - left - 1) * fx), int(top + (height - 1) * fy))
+                      for fx in (0.005, 0.25, 0.5, 0.62, 0.75, 0.995) for fy in (0.06, 0.94)]
+        points = [(x, y) for x, y in points
+                  if not (exclude and exclude[0] <= x < exclude[2] and exclude[1] <= y < exclude[3])]
+        samples = []
+        if points:
+            x0, y0 = min(x for x, _ in points), min(y for _, y in points)
+            x1, y1 = max(x for x, _ in points) + 1, max(y for _, y in points) + 1
+            rows = sorted({y for _, y in points}) if not near else [None]
+            for row in rows:
+                ry0, ry1 = (y0, y1) if row is None else (row, row + 1)
+                pixels = capture((x0, ry0, x1, ry1))
+                if not pixels:
+                    continue
+                width = x1 - x0
+                for x, y in points:
+                    if row is not None and y != row:
                         continue
-                    value = gdi32.GetPixel(dc, x, y)
-                    if value == 0xFFFFFFFF:
-                        continue
-                    samples.append((value & 255, (value >> 8) & 255, (value >> 16) & 255))
-        finally:
-            user32.ReleaseDC(None, dc)
+                    offset = ((y - ry0) * width + (x - x0)) * 4
+                    if offset + 2 < len(pixels):
+                        samples.append((pixels[offset + 2], pixels[offset + 1], pixels[offset]))
         if len(samples) < 4:
             return None
         samples.sort(key=_luminance)
@@ -1255,7 +1279,7 @@ class CodexUsageSurface:
             control.MouseEnter += update_hover
             control.MouseLeave += update_hover
 
-        self._layout = TaskbarLayout()
+        self._layout = TaskbarLayout(background=True)
         self._slot = "tray"
         self._placer = PlacementDebouncer(confirm=3, switch_confirm=5)
         self._bar_handle = None
@@ -1367,7 +1391,12 @@ class CodexUsageSurface:
             # explicit right-click so native outside-click dismissal works.
             user32.SetForegroundWindow(handle)
         menu.Opening += activate_menu_owner
-        menu.Closed += lambda *_: user32.PostMessageW(handle, 0, 0, 0)
+        def menu_closed(*_):
+            user32.PostMessageW(handle, 0, 0, 0)
+            if getattr(self, "_tick_deferred", False):
+                self._tick_deferred = False
+                self._tick()
+        menu.Closed += menu_closed
         self._menu_back = form.BackColor
         self._fill = None
         menu.BackColor = form.BackColor
@@ -1632,6 +1661,48 @@ class CodexUsageSurface:
         for control in text_controls:
             control.ContextMenuStrip = menu
 
+        # Colour-keyed pixels (the whole "transparent" background, and the
+        # area around a pill) are click-through: right-clicks between letters
+        # fell to the taskbar.  A practically invisible (alpha 1/255) layered
+        # window directly under the strip takes every click in its rectangle.
+        catcher = Form()
+        self._catcher = catcher
+        catcher.Text = "VRAM Radar strip hit area"
+        catcher.FormBorderStyle = getattr(FormBorderStyle, "None")
+        catcher.StartPosition = FormStartPosition.Manual
+        catcher.ShowInTaskbar = False
+        catcher.TopMost = True
+        catcher.AutoScaleMode = getattr(AutoScaleMode, "None")
+        catcher.BackColor = Color.FromArgb(0, 0, 0)
+        catcher.Opacity = CATCHER_OPACITY
+        catcher_handle = int(catcher.Handle.ToInt64())
+        set_style(catcher_handle, -20, get_style(catcher_handle, -20) | 0x08000000 | 0x00000080)
+        catcher.ContextMenuStrip = menu
+        catcher.MouseDown += mouse_down
+        catcher.MouseMove += mouse_move
+        catcher.MouseUp += mouse_up
+        catcher.MouseEnter += update_hover
+        catcher.MouseLeave += update_hover
+        self._catcher_state = None
+        def sync_catcher(*_):
+            if self.closed:
+                return
+            user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_int, wintypes.UINT]
+            state = (form.Left, form.Top, form.Width, form.Height) if form.Visible else None
+            if state is None:
+                if self._catcher_state is not None:
+                    user32.SetWindowPos(catcher_handle, None, 0, 0, 0, 0, 0x0080 | 0x0010 | 0x0013)
+                self._catcher_state = None
+                return
+            # Directly below the strip (insert-after = strip), never activated.
+            user32.SetWindowPos(catcher_handle, handle, *state, 0x0040 | 0x0010)
+            self._catcher_state = state
+        self._sync_catcher = sync_catcher
+        form.LocationChanged += sync_catcher
+        form.SizeChanged += sync_catcher
+        form.VisibleChanged += sync_catcher
+
         self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
         self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
         self._fit_fonts = {}
@@ -1666,6 +1737,27 @@ class CodexUsageSurface:
             nonlocal quota_color, time_color, track_color, warning_color
             if self.closed:
                 return
+            if menu.Visible:
+                # Menu open: keep the UI thread free for it; refresh on close.
+                self._tick_deferred = True
+                return
+            perf_start = time.perf_counter()
+            try:
+                tick_body()
+            finally:
+                note_tick((time.perf_counter() - perf_start) * 1000)
+
+        def note_tick(elapsed):
+            self._tick_count = getattr(self, "_tick_count", 0) + 1
+            self._tick_total = getattr(self, "_tick_total", 0.0) + elapsed
+            self._tick_max = max(getattr(self, "_tick_max", 0.0), elapsed)
+            if PERF_LOG and self._tick_count % 60 == 0:
+                logging.getLogger("vram_radar").info("surface tick avg %.1f ms max %.1f ms over %d",
+                                                     self._tick_total / self._tick_count, self._tick_max, self._tick_count)
+                self._tick_count, self._tick_total, self._tick_max = 0, 0.0, 0.0
+
+        def tick_body():
+            nonlocal quota_color, time_color, track_color, warning_color
             state = self.snapshot()
             language = self.language()
             options = self.display_options()
@@ -1912,8 +2004,11 @@ class CodexUsageSurface:
             form.AccessibleName = ("Codex · " + rows[index]["label"]) if rows and not multi else (
                 "AI usage" if english else "AI 用量")
             form.AccessibleDescription = tip + "\n" + hint
-            for control in [form, *text_controls, *(c for pair in self._extra_columns for c in pair)]:
-                tooltip.SetToolTip(control, tip)
+            tip_controls = [form, catcher, *text_controls, *(c for pair in self._extra_columns for c in pair)]
+            if (tip, len(tip_controls)) != getattr(self, "_tip_key", None):
+                self._tip_key = (tip, len(tip_controls))
+                for control in tip_controls:
+                    tooltip.SetToolTip(control, tip)
             for i, (zh, en, _) in enumerate(actions):
                 action_items[i].Text = en if language == "en" else zh
             position()
@@ -1932,12 +2027,15 @@ class CodexUsageSurface:
             raise_topmost(force=shown)
 
         def raise_topmost(force=False):
-            if self.closed or not form.Visible:
+            # Never re-assert z-order while the menu is open: it would push
+            # the strip above the popup's owner chain and close/steal it.
+            if self.closed or not form.Visible or menu.Visible:
                 return
             if force or windows_needs_topmost(handle):
                 user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                                ctypes.c_int, ctypes.c_int, wintypes.UINT]
                 user32.SetWindowPos(handle, -1, 0, 0, 0, 0, 0x0013)
+                sync_catcher()
 
         timer = Timer()
         self.timer = timer
@@ -2042,6 +2140,9 @@ class CodexUsageSurface:
                 if self.form is not None:
                     self.form.Close()
                     self.form.Dispose()
+                if getattr(self, "_catcher", None) is not None:
+                    self._catcher.Close()
+                    self._catcher.Dispose()
                 for resource in (getattr(self, "_tooltip", None), getattr(self, "_menu", None), getattr(self, "_window_menu", None)):
                     if resource is not None:
                         resource.Dispose()
