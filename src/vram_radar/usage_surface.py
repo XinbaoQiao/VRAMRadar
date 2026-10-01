@@ -18,6 +18,35 @@ CATCHER_OPACITY = 0.004
 PERF_LOG = os.environ.get("VRAM_RADAR_PERF") == "1"
 
 _DLLS: dict = {}
+_STRUCTS: dict = {}
+
+
+def _struct(name: str):
+    """Win32 structures, defined once.  A ctypes class created inside a
+    function and passed to ``ctypes.POINTER`` is cached by ctypes forever
+    (~5 KB each): the 1 s strip tick leaked ~20 MB/h that way."""
+    cls = _STRUCTS.get(name)
+    if cls is not None:
+        return cls
+    import ctypes
+    from ctypes import wintypes
+    if name == "MonitorInfo":
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT),
+                        ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
+        cls = MonitorInfo
+    elif name == "Header":
+        class Header(ctypes.Structure):
+            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
+                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD),
+                        ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
+                        ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
+                        ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+        cls = Header
+    else:
+        raise KeyError(name)
+    _STRUCTS[name] = cls
+    return cls
 
 
 def _dll(name: str):
@@ -289,12 +318,7 @@ def capture_screen(rect):
         gdi32.DeleteObject.argtypes = [vp]
         gdi32.DeleteDC.argtypes = [vp]
 
-        class Header(ctypes.Structure):
-            _fields_ = [("biSize", wintypes.DWORD), ("biWidth", ctypes.c_long), ("biHeight", ctypes.c_long),
-                        ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD),
-                        ("biCompression", wintypes.DWORD), ("biSizeImage", wintypes.DWORD),
-                        ("biXPelsPerMeter", ctypes.c_long), ("biYPelsPerMeter", ctypes.c_long),
-                        ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
+        Header = _struct("Header")
         gdi32.GetDIBits.argtypes = [vp, vp, wintypes.UINT, wintypes.UINT, vp, ctypes.POINTER(Header), wintypes.UINT]
         screen = user32.GetDC(None)
         if not screen:
@@ -847,9 +871,7 @@ def windows_surface_obscured(widget, docked=True):
     import ctypes
     from ctypes import wintypes
     u = _dll("user32")
-    class MonitorInfo(ctypes.Structure):
-        _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT),
-                    ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
+    MonitorInfo = _struct("MonitorInfo")
     u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
     u.MonitorFromWindow.restype = wintypes.HANDLE
     u.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
@@ -941,8 +963,10 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
     english = language == "en"
     warning = False
     if state.get("state") == "error":
-        countdown = ("Login" if english else "登录") if state.get("code") in {
-            "login_required", "unsupported_account"} else ("Retry" if english else "重试")
+        code = state.get("code")
+        countdown = (("Login" if english else "登录") if code in {"login_required", "unsupported_account"} else
+                     ("Missing" if english else "未安装") if code == "not_installed" else
+                     ("Retry" if english else "重试"))
         warning = True
     elif state.get("stale"):
         countdown, warning = ("Stale" if english else "过期"), True
@@ -1222,6 +1246,30 @@ class CodexUsageSurface:
             except Exception:
                 logging.getLogger("vram_radar").warning("Codex surface action failed")
         threading.Thread(target=invoke, daemon=True, name="codex-surface-action").start()
+
+    # A model toggle is saved on a worker thread; until the saved profile is
+    # visible, a quick second toggle must start from the first one's result
+    # (it used to read the old list and silently undo the first tick, and
+    # could get past the 4-model limit).
+    SELECTION_MEMO_SECONDS = 3.0
+
+    def _current_selection(self) -> list:
+        memo = getattr(self, "_selection_memo", None)
+        if memo is not None and time.monotonic() - memo[0] < self.SELECTION_MEMO_SECONDS:
+            return list(memo[1])
+        try:
+            return [x for x in (self.providers().get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
+        except Exception:
+            return ["codex"]
+
+    def _remember_selection(self, chosen) -> int:
+        if not hasattr(self, "_selection_lock"):
+            self._selection_lock = threading.Lock()
+            self._selection_sequence = 0
+        with self._selection_lock:
+            self._selection_sequence += 1
+            self._selection_memo = (time.monotonic(), list(chosen))
+            return self._selection_sequence
 
     def _lang(self) -> str:
         try:
@@ -1771,7 +1819,7 @@ class CodexUsageSurface:
             from .providers import MAX_SELECTED
             try:
                 text = limit_hint_text(MAX_SELECTED, self.language())
-                self._limit_item.Visible = True
+                self._limit_item.Visible = self._limit_sep.Visible = True
                 self._limit_item.Text = limit_menu_text(MAX_SELECTED, self.language())
                 if form.Visible:
                     self._toast(text, "", "")
@@ -1779,10 +1827,7 @@ class CodexUsageSurface:
                 logging.getLogger("vram_radar").info("model limit hint failed")
 
         def toggle_model(provider_id):
-            try:
-                current = list(self.providers().get("selected") or ["codex"])
-            except Exception:
-                current = ["codex"]
+            current = self._current_selection()
             from .providers import MAX_SELECTED
             if provider_id not in current and len(current) >= MAX_SELECTED:
                 show_limit_hint()  # the strip lays out at most MAX_SELECTED apps legibly
@@ -1790,11 +1835,15 @@ class CodexUsageSurface:
             chosen = [x for x in current if x != provider_id] if provider_id in current else current + [provider_id]
             if not chosen:
                 return  # keep at least one; the strip (and this menu) must stay reachable
+            sequence = self._remember_selection(chosen)
             def save():
-                try:
-                    self._display_error = not bool(self.save_providers and self.save_providers(chosen).get("ok"))
-                except Exception:
-                    self._display_error = True
+                with self._selection_lock:
+                    if sequence != self._selection_sequence:
+                        return  # a newer choice supersedes this one
+                    try:
+                        self._display_error = not bool(self.save_providers and self.save_providers(chosen).get("ok"))
+                    except Exception:
+                        self._display_error = True
             self._action(save)
             if provider_id not in current:
                 self.request_session_consent(provider_id)  # 取消 keeps it ticked, local-only
@@ -1802,6 +1851,10 @@ class CodexUsageSurface:
             item = self._models_menu.DropDownItems.Add(spec.name)
             item.Click += lambda _s, _e, pid=spec.id: toggle_model(pid)
             self._model_items[spec.id] = (item, spec)
+        # Its own separator: the greyed note read as one more model row.
+        self._limit_sep = ToolStripSeparator()
+        self._limit_sep.Visible = False
+        self._models_menu.DropDownItems.Add(self._limit_sep)
         self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 4 个")
         self._limit_item.Enabled = False
         self._models_tail_sep = ToolStripSeparator()
@@ -2011,9 +2064,11 @@ class CodexUsageSurface:
             self._consent_hint.Text = AUTO_READ_FOOTER[1 if english else 0]
             consented = overview.get("session_consent") or ()
             icon_px = round(18*menu_scale)
+            from .ui_dialogs import taskbar_light
+            icon_light = taskbar_light()   # Codex knot / MSIX logos differ per theme
             def set_icon(item, spec, pstate):
                 path = pstate.get("install_path") if isinstance(pstate, dict) else None
-                key = (path, icon_px)
+                key = (path, icon_px, icon_light)
                 if self._item_icons.get(item) != key:
                     self._item_icons[item] = key
                     try:
@@ -2065,7 +2120,7 @@ class CodexUsageSurface:
             model_rows = [(tier, self._model_items[pid][0]) for tier, pid in
                           tiered(list(self._model_items), set(selected), provider_states)]
             arrange("models", self._models_menu.DropDownItems, model_rows,
-                    [self._limit_item, self._models_tail_sep, self._rescan_item])
+                    [self._limit_sep, self._limit_item, self._models_tail_sep, self._rescan_item])
             consent_rows = [(tier, self._consent_items[pid][0]) for tier, pid in
                             tiered(list(self._consent_items), set(consented), provider_states)]
             arrange("consent", self._consent_menu.DropDownItems, consent_rows,
@@ -2081,7 +2136,7 @@ class CodexUsageSurface:
                         rescan_item.Image = glyph_icon("↻", icon_px, (fore.R, fore.G, fore.B))
                     except Exception:
                         rescan_item.Image = None
-            self._limit_item.Visible = full
+            self._limit_item.Visible = self._limit_sep.Visible = full
             self._limit_item.Text = limit_menu_text(MAX_SELECTED, language)
             self._background_title.Text = "Background" if english else "背景"
             self._display_menu.Text = ("Display options" if language == "en" else "显示设置") + (
@@ -2271,7 +2326,7 @@ class CodexUsageSurface:
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
                     if show_icons else None
                 fit_key = (tuple((n, v) for n, v, _ in cells), available, self._scale,
-                           tuple(icon_paths) if icon_paths else None)
+                           tuple(icon_paths) if icon_paths else None, icon_light)
                 if fit_key != self._fit_key:
                     self._fit_key = fit_key
                     for factor, level in FIT_PLAN:
@@ -2394,6 +2449,16 @@ class CodexUsageSurface:
             logging.getLogger("vram_radar").warning("Codex menu-bar display could not start")
 
     def _mac_tick(self) -> None:
+        # Called from an NSTimer: an exception escaping into AppKit is
+        # reported as an Objective-C exception (and can end the app).
+        try:
+            self._mac_tick_body()
+        except Exception as exc:
+            if not getattr(self, "_mac_tick_failed", False):
+                self._mac_tick_failed = True
+                logging.getLogger("vram_radar").warning("menu-bar update failed (%s)", type(exc).__name__)
+
+    def _mac_tick_body(self) -> None:
         if self.closed:
             return
         state = self.snapshot()

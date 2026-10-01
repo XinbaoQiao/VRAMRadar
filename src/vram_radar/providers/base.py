@@ -27,6 +27,34 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
 MAX_JSON_BYTES = 2_000_000
+_STRUCTS: dict = {}
+
+
+def _win_struct(name: str):
+    """Win32 structures, defined once (a per-call ctypes class given to
+    ``ctypes.POINTER`` stays cached by ctypes forever: a slow memory leak)."""
+    cls = _STRUCTS.get(name)
+    if cls is not None:
+        return cls
+    import ctypes
+    from ctypes import wintypes
+    if name == "PROCESSENTRY32W":
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                        ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+        cls = PROCESSENTRY32W
+    elif name == "FixedInfo":
+        class FixedInfo(ctypes.Structure):
+            _fields_ = [("signature", wintypes.DWORD), ("struc", wintypes.DWORD),
+                        ("ms", wintypes.DWORD), ("ls", wintypes.DWORD)]
+        cls = FixedInfo
+    else:
+        raise KeyError(name)
+    _STRUCTS[name] = cls
+    return cls
 MAX_TAIL_BYTES = 4_000_000
 
 
@@ -201,12 +229,7 @@ def list_processes() -> list[Process]:
         import ctypes
         from ctypes import wintypes
 
-        class PROCESSENTRY32W(ctypes.Structure):
-            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
-                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
-                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
-                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
-                        ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+        PROCESSENTRY32W = _win_struct("PROCESSENTRY32W")
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
         kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
@@ -342,9 +365,7 @@ def file_version(path: Path) -> str:
         pointer, length = ctypes.c_void_p(), wintypes.UINT()
         if not version.VerQueryValueW(buffer, "\\", ctypes.byref(pointer), ctypes.byref(length)) or not length.value:
             return ""
-        class FixedInfo(ctypes.Structure):
-            _fields_ = [("signature", wintypes.DWORD), ("struc", wintypes.DWORD),
-                        ("ms", wintypes.DWORD), ("ls", wintypes.DWORD)]
+        FixedInfo = _win_struct("FixedInfo")
         info = ctypes.cast(pointer, ctypes.POINTER(FixedInfo)).contents
         if info.signature != 0xFEEF04BD:
             return ""
@@ -542,8 +563,11 @@ def base_state(spec_id: str, name: str, short: str, detection: Detection) -> dic
 
 def format_tokens(value: float) -> str:
     value = max(0.0, float(value))
-    for limit, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
-        if value >= limit:
+    # Switch unit when the smaller one would *display* 1000: 999 950 is
+    # "1M", not "1000k" (and 999.6 is "1k", not "1000").
+    units = ((1e9, "B"), (1e6, "M"), (1e3, "k"), (1.0, ""))
+    for (limit, suffix), (lower, _) in zip(units, units[1:]):
+        if value >= limit or round(value / lower, 1 if lower > 1 else 0) >= 1000:
             return f"{value / limit:.1f}".rstrip("0").rstrip(".") + suffix
     return f"{value:.0f}"
 

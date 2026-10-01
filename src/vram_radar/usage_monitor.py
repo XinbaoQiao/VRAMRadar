@@ -24,6 +24,13 @@ from .connectors import _terminate_process_tree
 
 REFRESH_SECONDS = 300
 SETUP_RETRY_SECONDS = 15
+# One failed read (network blip, Codex busy/updating) must not blank the
+# strip for a whole interval: keep the last real windows (they turn "stale"
+# on their own after REFRESH_SECONDS + 30) and retry sooner.  Malformed
+# replies and unknown failures still clear the quota (never show data we
+# can no longer vouch for).
+TRANSIENT_CODES = frozenset({"timeout", "disconnected", "service_error"})
+TRANSIENT_RETRY_SECONDS = 60
 MAX_LINE_BYTES = 1_048_576
 
 
@@ -343,13 +350,18 @@ class CodexUsageMonitor:
                 result = {"state": "error", "code": "unavailable", "windows": []}
             with self.lock:
                 if generation == self.generation and not self.closed:
+                    transient = (result.get("state") == "error" and result.get("code") in TRANSIENT_CODES
+                                 and bool(self.state.get("windows")) and bool(self.state.get("fetched_at")))
+                    if transient:
+                        result = {**self.state, "state": "ready", "code": "", "refresh_error": result["code"]}
                     self.state = result
                     self.retry_after = time.monotonic() + 10
                     # Installation/sign-in can finish while Radar stays open.
                     # Detect that promptly without requiring a restart or refresh.
                     recovering = result.get("code") in {"not_installed", "invalid_executable", "start_failed",
                                                         "login_required", "unsupported_account"}
-                    delay = min(self.interval, SETUP_RETRY_SECONDS) if recovering else self.interval
+                    delay = (min(self.interval, SETUP_RETRY_SECONDS) if recovering else
+                             min(self.interval, TRANSIENT_RETRY_SECONDS) if transient else self.interval)
                     self.next_read = time.monotonic() + delay
 
     def close(self) -> None:

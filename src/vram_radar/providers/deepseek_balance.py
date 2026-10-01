@@ -28,6 +28,7 @@ Safety contract:
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+import http.client
 import json
 from pathlib import Path
 import re
@@ -125,7 +126,7 @@ def _get(url: str, headers: dict) -> tuple[int | None, object]:
             return response.status, json.loads(body.decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
         return error.code, None
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError, http.client.HTTPException):
         return None, None
 
 
@@ -231,7 +232,12 @@ class BalanceCache:
                 self.last_good = self.last_good_at = None
             if now < self.next_at and self.last is not None:
                 return self._view(now)
-        result = self.fetch(home)
+        try:
+            result = self.fetch(home)
+        except Exception:  # never let one bad reply fail the DeepSeek probe
+            result = {"status": "network"}
+        if not isinstance(result, dict):
+            result = {"status": "network"}
         with self.lock:
             self.last = result
             if result.get("status") == "ok":

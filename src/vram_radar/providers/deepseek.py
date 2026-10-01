@@ -22,6 +22,7 @@ from .base import (Environment, base_state, detect_install, format_tokens, newes
 
 ID, NAME, SHORT = "deepseek", "DeepSeek", "DeepSeek"
 MAX_SESSIONS = 400
+STALE_BALANCE_SECONDS = 2 * 3600
 TOKEN_KEYS = ("uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens")
 _cache: dict[str, tuple[tuple, dict]] = {}
 BALANCE = deepseek_balance.BalanceCache()
@@ -55,14 +56,22 @@ def _stamp(value) -> float | None:
 
 
 def summarize_sessions(folder: Path) -> dict:
+    files = []
     try:
-        files = [(p, p.stat()) for p in folder.glob("*.json")]
+        for p in folder.glob("*.json"):
+            try:
+                files.append((p, p.stat()))
+            except OSError:   # deleted between listing and stat: skip only this one
+                continue
     except OSError:
         files = []
     files = [item for item in files if item[1].st_size <= 2_000_000]
     files.sort(key=lambda item: item[1].st_mtime, reverse=True)
     files = files[:MAX_SESSIONS]
-    signature = tuple((str(p), s.st_mtime_ns, s.st_size) for p, s in files)
+    midnight = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
+    # The day is part of the key: "today" must roll over at midnight even
+    # when no session file changes.
+    signature = (midnight, tuple((str(p), s.st_mtime_ns, s.st_size) for p, s in files))
     cached = _cache.get(str(folder))
     if cached and cached[0] == signature:
         return dict(cached[1])
@@ -70,7 +79,6 @@ def summarize_sessions(folder: Path) -> dict:
     sessions = active = 0
     last_prompt = None
     today_tokens = 0
-    midnight = time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1))
     for path, stat in files:
         document = read_json(path)
         rows = document.get("record", {}).get("rows") if isinstance(document, dict) and isinstance(document.get("record"), dict) else None
@@ -191,6 +199,9 @@ def probe(env: Environment) -> dict:
         state["facts"].append(pair(f"余额来自{source}（只读查询，{when} 更新）{note}",
                                    f"Balance from {source_en} (read-only, updated {when})" +
                                    (" · last refresh failed, showing previous value" if note else "")))
+        # A balance that could not be refreshed for hours is shown as stale.
+        state["stale"] = bool(balance.get("stale_error") and isinstance(fetched, (int, float))
+                              and time.time() - fetched > STALE_BALANCE_SECONDS)
         total_zero = all(v == 0 for v in sums.values())
         state["low"] = total_zero
         headline, brief = balance_labels(balance.get("wallets", []), shown)

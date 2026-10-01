@@ -4642,6 +4642,24 @@ def _recover_matching_openssh_source(
     return None
 
 
+def profile_recovery_notice(recovery: dict[str, Any], language: str = "zh-CN") -> dict[str, str]:
+    """Startup notice for a profile that had to be repaired (see
+    ``ProfileStore.load_or_recover``); English UI gets no CJK text."""
+    backup = recovery.get("backup") or ""
+    dropped = ", ".join(recovery.get("dropped") or [])
+    if language == "en":
+        message = ("The saved settings file was damaged and has been repaired"
+                   + (f" (reset: {dropped})" if dropped and recovery.get("salvaged") else
+                      "" if recovery.get("salvaged") else " (defaults restored)")
+                   + (f". The original is kept at {backup}" if backup else "") + ".")
+    else:
+        message = ("\u8bbe\u7f6e\u6587\u4ef6\u5df2\u635f\u574f\uff0c\u5df2\u81ea\u52a8\u4fee\u590d"
+                   + (f"\uff08\u5df2\u91cd\u7f6e\uff1a{dropped}\uff09" if dropped and recovery.get("salvaged") else
+                      "" if recovery.get("salvaged") else "\uff08\u5df2\u6062\u590d\u9ed8\u8ba4\u8bbe\u7f6e\uff09")
+                   + (f"\u3002\u539f\u6587\u4ef6\u4fdd\u5b58\u5728 {backup}" if backup else "") + "\u3002")
+    return {"code": "profile_recovered", "severity": "warning", "message": message}
+
+
 def build_runtime(
     profile_id: str,
     home: Path | None,
@@ -4652,11 +4670,16 @@ def build_runtime(
     paths = storage_paths(home)
     logger = configure_logging(paths)
     store = ProfileStore(paths)
-    profile = store.load(profile_id)
+    profile, recovery = store.load_or_recover(profile_id)
     explicit_source = servers_config is not None
     sources: list[Path] = []
     primary_source: Path | None = None
     startup_notices: list[dict[str, str]] = []
+    if recovery is not None:
+        logger.warning("profile %s was invalid (%s); kept %s, dropped %s, original copied to %s",
+                       profile_id, recovery["error"], "valid settings" if recovery["salvaged"] else "defaults",
+                       ",".join(recovery["dropped"]) or "-", recovery["backup"] or "(copy failed)")
+        startup_notices.append(profile_recovery_notice(recovery, profile.ui_language))
 
     try:
         if explicit_source:

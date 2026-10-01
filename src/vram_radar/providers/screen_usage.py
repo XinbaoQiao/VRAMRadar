@@ -82,22 +82,27 @@ class ScreenUsageWatcher:
         if sys.platform != "win32" or os.environ.get("VRAM_RADAR_NO_SCREEN_READ"):
             return
         with self.lock:
-            self._stop.clear()
-            if self._thread is not None and self._thread.is_alive():
+            if self._thread is not None and self._thread.is_alive() and not self._stop.is_set():
                 return
-            self._thread = threading.Thread(target=self._run, daemon=True, name="screen-usage-reader")
+            # Each worker owns its stop event: a stop() quickly followed by
+            # start() (Grok unticked and re-ticked) used to clear the event
+            # while the old worker was exiting -- and no reader ran at all.
+            self._stop = stop = threading.Event()
+            self._thread = threading.Thread(target=self._run, args=(stop,), daemon=True, name="screen-usage-reader")
             self._thread.start()
 
     def stop(self) -> None:
-        self._stop.set()
+        with self.lock:
+            self._stop.set()
 
     def latest(self) -> dict | None:
         with self.lock:
             return dict(self.reading) if self.reading else None
 
     # -- internals -------------------------------------------------------
-    def _run(self) -> None:
-        while not self._stop.wait(self.interval):
+    def _run(self, stop: threading.Event | None = None) -> None:
+        stop = stop or self._stop
+        while not stop.wait(self.interval):
             try:
                 handle = self._foreground_window()
                 if handle:

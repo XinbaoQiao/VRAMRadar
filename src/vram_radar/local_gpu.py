@@ -291,7 +291,15 @@ def combine_windows_counters(adapters, dedicated, shared, engines) -> list[dict[
     return gpus
 
 
-def _dxgi_adapters() -> list[dict[str, Any]]:
+_WIN_TYPES: dict = {}
+
+
+def _win_types() -> dict:
+    """ctypes structures used by the DXGI/PDH readers, defined once.  Classes
+    created per call and passed to ``ctypes.POINTER``/``WINFUNCTYPE`` stay in
+    ctypes' type caches forever (a slow leak on every local GPU poll)."""
+    if _WIN_TYPES:
+        return _WIN_TYPES
     import ctypes
     from ctypes import wintypes
 
@@ -307,6 +315,22 @@ def _dxgi_adapters() -> list[dict[str, Any]]:
                     ("DeviceId", ctypes.c_uint), ("SubSysId", ctypes.c_uint), ("Revision", ctypes.c_uint),
                     ("DedicatedVideoMemory", ctypes.c_size_t), ("DedicatedSystemMemory", ctypes.c_size_t),
                     ("SharedSystemMemory", ctypes.c_size_t), ("AdapterLuid", LUID), ("Flags", ctypes.c_uint)]
+
+    class Value(ctypes.Structure):
+        _fields_ = [("CStatus", wintypes.DWORD), ("doubleValue", ctypes.c_double)]
+
+    class Item(ctypes.Structure):
+        _fields_ = [("szName", ctypes.c_wchar_p), ("FmtValue", Value)]
+
+    _WIN_TYPES.update(GUID=GUID, LUID=LUID, Desc1=Desc1, Value=Value, Item=Item)
+    return _WIN_TYPES
+
+
+def _dxgi_adapters() -> list[dict[str, Any]]:
+    import ctypes
+
+    types = _win_types()
+    GUID, Desc1 = types["GUID"], types["Desc1"]
 
     try:
         dxgi = ctypes.WinDLL("dxgi")
@@ -383,11 +407,7 @@ class _PdhSampler:
         import ctypes
         from ctypes import wintypes
 
-        class Value(ctypes.Structure):
-            _fields_ = [("CStatus", wintypes.DWORD), ("doubleValue", ctypes.c_double)]
-
-        class Item(ctypes.Structure):
-            _fields_ = [("szName", ctypes.c_wchar_p), ("FmtValue", Value)]
+        Item = _win_types()["Item"]
 
         size, count = wintypes.DWORD(0), wintypes.DWORD(0)
         fmt = 0x00000200 | 0x00008000  # PDH_FMT_DOUBLE | PDH_FMT_NOCAP100

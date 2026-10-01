@@ -29,8 +29,10 @@ caller falls back to the on-screen menu reading.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import logging
+import math
 import sys
 import threading
 import time
@@ -266,21 +268,39 @@ def read_access_token(userdata: Path) -> str | None:
 # --------------------------------------------------------------------------
 # Response parsing.
 # --------------------------------------------------------------------------
+MAX_EPOCH = 253402300799   # 9999-12-31
+
+
+def epoch(value) -> float | None:
+    """A finite, plausible epoch-seconds value or None."""
+    try:
+        stamp = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return stamp if math.isfinite(stamp) and 0 < stamp <= MAX_EPOCH else None
+
+
+def iso_epoch(text: str) -> float | None:
+    """RFC3339 / ISO-8601 to epoch seconds.  A timestamp without an offset is
+    UTC (these APIs speak UTC); reading it as local time shifted resets by
+    the user's UTC offset (9 h in Tokyo)."""
+    import datetime
+    try:
+        parsed = datetime.datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        return epoch(parsed.timestamp())
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
 def _reset_ms(value) -> float | None:
     """A protobuf Timestamp as Connect-JSON (RFC3339 string) or {seconds,nanos}."""
     if isinstance(value, str) and value:
-        text = value.strip().replace("Z", "+00:00")
-        try:
-            import datetime
-            return datetime.datetime.fromisoformat(text).timestamp()
-        except ValueError:
-            return None
+        return iso_epoch(value)
     if isinstance(value, dict):
         seconds = value.get("seconds")
-        try:
-            return float(seconds) if seconds is not None else None
-        except (TypeError, ValueError):
-            return None
+        return epoch(seconds) if seconds is not None and not isinstance(seconds, bool) else None
     return None
 
 
@@ -330,7 +350,9 @@ def _post_usage(backend: str, token: str) -> dict:
         if error.code in (401, 403):
             return {"status": "unauthorized"}
         return {"status": "error"}
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException):
+        # HTTPException (IncompleteRead, BadStatusLine...) is not an OSError:
+        # a truncated reply used to escape and fail the whole probe.
         return {"status": "error"}
 
 
@@ -382,7 +404,13 @@ class UsageCache:
                 self.last_good = self.last_good_at = None
             if now < self.next_at and self.last is not None:
                 return self._view(now)
-        result = self.fetch(userdata, backend)
+        try:
+            result = self.fetch(userdata, backend)
+        except Exception as exc:  # crypto/HTTP hiccup: back off like any error
+            LOG.info("session usage read failed (%s)", type(exc).__name__)
+            result = {"status": "error"}
+        if not isinstance(result, dict):
+            result = {"status": "error"}
         with self.lock:
             self.last = result
             status = result.get("status")
@@ -405,8 +433,12 @@ class UsageCache:
 
     def _view(self, now: float) -> dict:
         view = dict(self.last or {"status": "error"})
-        if view.get("status") not in {"ok", "no_credential", "unauthorized"} and self.last_good is not None:
-            view = {**self.last_good, "status": "ok", "stale_error": self.last.get("status")}
+        good = self.last_good
+        reset = good.get("reset_at") if good else None
+        if isinstance(reset, (int, float)) and reset <= now:
+            good = None   # the window has reset since: that old value is wrong now
+        if view.get("status") not in {"ok", "no_credential", "unauthorized"} and good is not None:
+            view = {**good, "status": "ok", "stale_error": self.last.get("status")}
         if self.last_good_at is not None and view.get("status") == "ok":
             view["fetched_at"] = self.last_good_at
         return view

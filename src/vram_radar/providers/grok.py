@@ -23,6 +23,7 @@ says "已登录".
 """
 from __future__ import annotations
 
+import logging
 import time
 
 from . import grok_usage
@@ -30,6 +31,7 @@ from .base import (Environment, base_state, detect_install, newest_mtime, pair, 
                    running_pair, text)
 
 ID, NAME, SHORT = "grok", "Grok", "Grok"
+LOG = logging.getLogger("vram_radar")   # used by _session_usage (was undefined: NameError)
 PROCESSES = ["grok bot.exe", "grok.exe"]
 SCREEN_MAX_AGE = 7 * 86400  # weekly window: older readings are meaningless
 
@@ -120,6 +122,13 @@ def _apply_session(state: dict, session: dict) -> dict:
     brief_en = f"{value} used" + (f" · {reset_en}" if reset_en else "")
     state["brief"] = pair(brief_zh, brief_en)
     state["low"] = used >= 90
+    fetched = session.get("fetched_at")
+    if session.get("stale_error") and isinstance(fetched, (int, float)):
+        # Last refresh failed: keep the last real value, but say when it was read.
+        stamp = time.strftime("%H:%M", time.localtime(fetched))
+        state["subline"] = pair(f"\u8bfb\u53d6 {stamp}", f"read {stamp}")
+        state["brief"] = pair(brief_zh + f"\uff08{stamp} \u8bfb\u53d6\uff09", brief_en + f" (read {stamp})")
+        state["stale"] = time.time() - fetched > 2 * grok_usage.MIN_INTERVAL + 60
     state["quota_available"] = True
     state["quota_source"] = "session"
     state["session_quota"] = "ok"

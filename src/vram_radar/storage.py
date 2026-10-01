@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import shutil
+import time
 from typing import Any
 import tomllib
 import uuid
@@ -37,6 +39,10 @@ def storage_paths(home: Path | None = None) -> StoragePaths:
     )
 
 
+REPLACE_ATTEMPTS = 6
+REPLACE_RETRY_SECONDS = 0.05
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # A fixed ``.tmp`` name lets two independent profile/cache writes trample
@@ -47,7 +53,17 @@ def atomic_write_text(path: Path, text: str) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(text, encoding="utf-8")
-        temporary.replace(path)
+        # Windows refuses the replace while another process (an editor, an
+        # antivirus scan, a backup tool) briefly holds the destination open;
+        # retry for a moment instead of failing the save.
+        for attempt in range(REPLACE_ATTEMPTS):
+            try:
+                temporary.replace(path)
+                break
+            except PermissionError:
+                if attempt == REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(REPLACE_RETRY_SECONDS)
     finally:
         try:
             temporary.unlink(missing_ok=True)
@@ -74,6 +90,31 @@ class ProfileStore:
             raise ConfigError(f"invalid profile TOML: {exc}") from exc
         return Profile.from_dict(raw, expected_id=profile_id)
 
+    def load_or_recover(self, profile_id: str) -> tuple[Profile, dict[str, Any] | None]:
+        """Like ``load``, but a damaged or invalid profile never stops the app
+        (it used to exit silently at startup).  The file is copied aside
+        unchanged (``<id>.toml.invalid-<time>``, not listed as a profile), every setting that still
+        validates is kept, and the caller gets a description for a notice."""
+        try:
+            return self.load(profile_id), None
+        except (ConfigError, OSError) as exc:
+            error = exc
+        path = self.profile_path(profile_id)
+        backup: Path | None = path.with_name(f"{path.name}.invalid-{time.strftime('%Y%m%d-%H%M%S')}")
+        try:
+            shutil.copy2(path, backup)
+        except OSError:
+            backup = None
+        try:
+            with path.open("rb") as handle:
+                raw = tomllib.load(handle)
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            raw = None
+        profile, dropped = salvage_profile(raw, profile_id) if isinstance(raw, dict) else (None, [])
+        return profile or Profile.empty(profile_id), {
+            "error": str(error)[:300], "backup": str(backup) if backup else "",
+            "dropped": dropped, "salvaged": profile is not None}
+
     def save(self, profile: Profile) -> Path:
         path = self.profile_path(profile.id)
         atomic_write_text(path, tomli_w.dumps(profile.to_dict()))
@@ -84,6 +125,45 @@ class ProfileStore:
         if not root.exists():
             return []
         return sorted(path.stem for path in root.glob("*.toml") if path.is_file())
+
+
+def salvage_profile(raw: dict[str, Any], profile_id: str) -> tuple[Profile | None, list[str]]:
+    """Reset the fewest top-level settings that make ``raw`` invalid (one at
+    a time, each back to its default; missing ones are filled in); ``None``
+    when nothing loads."""
+    defaults = Profile.empty(profile_id).to_dict()
+    current, dropped = {**defaults, **raw}, []
+
+    def attempt(candidate):
+        try:
+            return Profile.from_dict(candidate, expected_id=profile_id), ""
+        except ConfigError as exc:
+            return None, str(exc)
+        except (TypeError, ValueError, AttributeError) as exc:
+            return None, f"{type(exc).__name__}: {exc}"
+
+    for _ in range(len(raw) + 1):
+        profile, message = attempt(current)
+        if profile is not None:
+            return profile, dropped
+        def reset(key):
+            candidate = {k: v for k, v in current.items() if k != key}
+            if key in defaults:
+                candidate[key] = defaults[key]
+            return candidate
+
+        culprit = None
+        for key in [k for k in current if k in raw and current[k] != defaults.get(k, object())]:
+            loaded, other = attempt(reset(key))
+            if loaded is not None or other != message:
+                culprit = key
+                if loaded is not None:
+                    break
+        if culprit is None:
+            return None, dropped
+        current = reset(culprit)
+        dropped.append(culprit)
+    return None, dropped
 
 
 class NotificationStateStore:

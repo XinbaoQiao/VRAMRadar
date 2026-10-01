@@ -18,6 +18,7 @@ displayed).  Mirrors grok_usage's safeguards:
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import logging
 import time
@@ -117,17 +118,19 @@ def _as_bool(value):
 
 
 def _as_time(value):
+    """Epoch seconds from ms/s numbers or ISO text (no offset = UTC); None
+    for anything non-finite or implausible."""
     if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
-        return float(value) / (1000 if value > 1e11 else 1)
+        return grok_usage.epoch(float(value) / (1000 if value > 1e11 else 1))
     if isinstance(value, str) and value:
-        from datetime import datetime
+        stamp = grok_usage.iso_epoch(value)
+        if stamp is not None:
+            return stamp
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            number = float(value)
         except ValueError:
-            try:
-                return _as_time(float(value))
-            except ValueError:
-                return None
+            return None
+        return _as_time(number) if number == number else None
     return None
 
 
@@ -205,7 +208,7 @@ def _post(method: str, token: str, backend: str = BACKEND):
         return "ok", json.loads(body.decode("utf-8", "replace"))
     except urllib.error.HTTPError as error:
         return ("unauthorized" if error.code in (401, 403) else "error"), None
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException):
         return "error", None
 
 

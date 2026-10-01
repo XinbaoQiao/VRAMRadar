@@ -53,6 +53,8 @@ class EnglishStringTests(unittest.TestCase):
         self.assertNotIn("error", out)
         self.assertGreater(out["strings"], 60)
         self.assertEqual(out["hits"], [])
+        # The greyed "Up to 4 shown" note has its own separator above it.
+        self.assertTrue(out.get("limit_separator"))
 
 
 if __name__ == "__main__":

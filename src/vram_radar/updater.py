@@ -75,6 +75,32 @@ def _open_asset_response(
         raise
 
 
+STALE_STAGE_SECONDS = 2 * 86400
+
+
+def prune_stale_stages(staging_root: Path, *, max_age: float = STALE_STAGE_SECONDS, now: float | None = None) -> int:
+    """Remove our own old download folders (``<32 hex>``) left behind by an
+    interrupted download or a finished update (an 18 MB ``.part`` stayed for
+    weeks).  Recent ones are kept: an update helper may still be using them."""
+    import re
+    import time
+    now = time.time() if now is None else now
+    removed = 0
+    try:
+        entries = list(staging_root.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if (entry.is_dir() and not entry.is_symlink() and re.fullmatch(r"[0-9a-f]{32}", entry.name)
+                    and now - entry.stat().st_mtime > max_age):
+                shutil.rmtree(entry, ignore_errors=True)
+                removed += not entry.exists()
+        except OSError:
+            continue
+    return removed
+
+
 def download_verified_asset(
     asset: dict[str, Any],
     staging_root: Path,
@@ -102,6 +128,7 @@ def download_verified_asset(
     ):
         raise ValueError("更新文件信息不完整")
 
+    prune_stale_stages(staging_root)
     stage = staging_root / uuid.uuid4().hex
     stage.mkdir(parents=True, exist_ok=False)
     partial = stage / f"{name}.part"

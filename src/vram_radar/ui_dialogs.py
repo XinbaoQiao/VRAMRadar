@@ -371,11 +371,14 @@ _SOURCES: dict = {}
 def icon_source(path: str | None):
     """Largest available frame of the app's icon (256 px exe/ico frame or
     the biggest MSIX logo PNG), cached; None when there is none."""
-    key = str(path or "")
+    folder = str(path or "")
+    # MSIX logos come in light/dark variants: the theme is part of the key,
+    # or a theme switch kept the old (low-contrast) logo until restart.
+    key = folder + ("|light" if taskbar_light() else "|dark") if folder and os.path.isdir(folder) else folder
     if key in _SOURCES:
         return _SOURCES[key]
     source = None
-    for candidate in icon_candidates(key, ICON_SOURCE_PX):
+    for candidate in icon_candidates(folder, ICON_SOURCE_PX):
         try:
             if not os.path.isfile(candidate):
                 continue
@@ -489,7 +492,7 @@ def bundled_icon_path(name: str, light: bool | None = None) -> str | None:
 def provider_icon(path: str | None, px: int, name: str = "", accent=None):
     """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile."""
     bundled = bundled_icon_path(name)
-    key = (str(bundled or path or ""), int(px), name)
+    key = (str(bundled or path or ""), int(px), name, taskbar_light())
     if key in _ICONS:
         return _ICONS[key]
     bitmap = None
