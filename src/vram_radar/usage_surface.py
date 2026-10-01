@@ -121,6 +121,9 @@ def taskbar_anchor(bar, tray, size):
 # exposes them through UI Automation with stable AutomationIds; coordinates
 # are physical pixels for a per-monitor-DPI-aware caller.
 LEFT_BOUND_IDS = ("WidgetsButton",)
+# Minimum clear gap (px at 100 %) between the strip and the weather text on
+# its left / Start (or Search) on its right.
+STRIP_MARGIN = 12
 RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
 
 
@@ -297,6 +300,11 @@ class TaskbarLayout:
         self._good_key = None
         self._good: dict = {}
         self.failures = 0
+        # Widest weather content seen recently: [(monotonic time, right)] per
+        # Widgets button rect, so a wider text ("局部多云", 3-digit temps)
+        # never slides under the strip.
+        self._weather_key = None
+        self._weather_seen: list = []
 
     def _load(self):
         if self._ready is None:
@@ -329,8 +337,10 @@ class TaskbarLayout:
         found = self._read(taskbar_handle) if taskbar_handle and self._load() else {}
         found = exclude_rect(found, exclude)
         if usable_layout(found) and self.trim is not None:
+            raw_widgets = found.get("WidgetsButton")
             try:
                 found = self.trim(found, exclude)
+                found = self.widest_weather(found, raw_widgets, exclude)
             except Exception as exc:  # worker thread: never die silently mid-update
                 logging.getLogger("vram_radar").info("widget trim failed (%s)", type(exc).__name__)
         if usable_layout(found):
@@ -344,6 +354,41 @@ class TaskbarLayout:
             same_bar = self._good_key is not None and self._good_key[1] == key[1]
             self._elements = self._good if same_bar else {}
         return self._elements
+
+    WEATHER_WINDOW = 600.0
+
+    def widest_weather(self, found, raw_widgets, own, now=None) -> dict:
+        """Replace the trimmed Widgets right edge by the widest recent one.
+
+        A reading whose content runs right up to our own strip (the part we
+        cannot scan) may be wider than it looks: it falls back to the full
+        button rect for now (safe) and is not remembered, so the next scan
+        -- with the strip moved clear -- measures the real width.
+        """
+        trimmed = found.get("WidgetsButton") if found else None
+        if not trimmed or not raw_widgets:
+            return found
+        now = time.monotonic() if now is None else now
+        key = (raw_widgets[0], raw_widgets[1], raw_widgets[3])
+        if key != self._weather_key:
+            self._weather_key, self._weather_seen = key, []
+        limit = raw_widgets[2]
+        if own and own[0] < raw_widgets[2] and own[2] > raw_widgets[0] and own[1] < raw_widgets[3] and own[3] > raw_widgets[1]:
+            limit = max(raw_widgets[0], min(raw_widgets[2], own[0]))
+        right = trimmed[2]
+        occluded = limit < raw_widgets[2] and right >= limit - 1
+        if occluded:
+            right = raw_widgets[2]
+        elif right < raw_widgets[2]:
+            self._weather_seen.append((now, right))
+        self._weather_seen = [(t, r) for t, r in self._weather_seen if now - t <= self.WEATHER_WINDOW][-200:]
+        if self._weather_seen:
+            right = max(right, *(r for _, r in self._weather_seen))
+        if right == trimmed[2]:
+            return found
+        out = dict(found)
+        out["WidgetsButton"] = (trimmed[0], trimmed[1], min(raw_widgets[2], right), trimmed[3])
+        return out
 
     def _read(self, taskbar_handle) -> dict:
         try:
@@ -773,7 +818,7 @@ def usage_color(value, *, bright=False, waiting=False):
         return (112, 120, 125) if bright else (160, 168, 173)
     # Berry, coral, amber, jade and ocean blue. Dark/light variants preserve
     # legibility; interpolation makes these anchors a continuous scale.
-    colors = ((175, 76, 109), (184, 108, 84), (158, 130, 67),
+    colors = ((160, 62, 96), (184, 108, 84), (158, 130, 67),
               (51, 139, 120), (55, 125, 163)) if bright else (
               (227, 143, 163), (230, 166, 135), (218, 190, 119),
               (105, 195, 173), (112, 184, 220))
@@ -1361,7 +1406,7 @@ class CodexUsageSurface:
                 size = (form.Width, form.Height)
                 own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
                 elements = self._layout.elements(bar_handle, bar, own)
-                target = self._placer.propose(docked_target(bar, tray, elements, size, scale(6), scale(4)))
+                target = self._placer.propose(docked_target(bar, tray, elements, size, scale(STRIP_MARGIN), scale(4)))
                 self._slot = target[0]
                 x, y = docked_point(bar, target, size[0])
                 if (form.Left, form.Top) != (x, y):
@@ -2116,7 +2161,7 @@ class CodexUsageSurface:
                 if self._placement == "taskbar" and geometry:
                     elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
                                                      (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
-                    gap_area = left_gap(geometry[0], elements, scale(6)) if elements else None
+                    gap_area = left_gap(geometry[0], elements, scale(STRIP_MARGIN)) if elements else None
                     available = gap_area[1] - gap_area[0] if gap_area else None
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
                     if show_icons else None
@@ -2141,7 +2186,8 @@ class CodexUsageSurface:
                         # 图标 mode: the app icon replaces the name -- text
                         # height, vertically centred; Padding reserves its
                         # width so the value never overlaps it.
-                        icon_px = max(10, round(scale(16) * factor))
+                        # 15 px at 1x: fits a 20 px row with even padding.
+                        icon_px = max(10, round(scale(15) * factor))
                         for index, (name_label, _) in enumerate(used):
                             if icon_paths:
                                 path, pid = icon_paths[index]

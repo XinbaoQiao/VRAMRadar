@@ -119,3 +119,25 @@ class StripPlacementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WidestWeatherTests(unittest.TestCase):
+    RAW = (9, 1528, 237, 1600)
+
+    def run_reading(self, layout, right, own, now):
+        found = {"WidgetsButton": (9, 1528, right, 1600), "StartButton": (623, 1528, 691, 1600)}
+        return layout.widest_weather(found, self.RAW, own, now=now)["WidgetsButton"][2]
+
+    def test_keeps_widest_recent_and_expires(self):
+        layout = TaskbarLayout(trim=None)
+        own = (131, 1538, 350, 1589)
+        self.assertEqual(self.run_reading(layout, 150, own=None, now=0), 150)    # "局部多云"
+        self.assertEqual(self.run_reading(layout, 113, own=own, now=10), 150)    # narrower: keep widest
+        self.assertEqual(self.run_reading(layout, 113, own=own, now=700), 113)   # old reading expired
+
+    def test_content_under_strip_is_assumed_full_button_once(self):
+        layout = TaskbarLayout(trim=None)
+        own = (121, 1538, 342, 1589)
+        self.assertEqual(self.run_reading(layout, 121, own=own, now=0), 237)     # cannot see past the strip
+        self.assertEqual(self.run_reading(layout, 150, own=(255, 1538, 476, 1589), now=5), 150)  # real width
+        self.assertEqual(layout._weather_seen, [(5, 150)])

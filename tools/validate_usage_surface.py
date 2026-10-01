@@ -102,7 +102,8 @@ def main() -> int:
                     if surface._slot == "left":
                         elements = surface._layout.elements(__import__("ctypes").windll.user32.FindWindowW("Shell_TrayWnd", None), geometry[0])
                         assertions["anchored_in_left_taskbar_area"] = (surface.form.Left, surface.form.Top) == left_slot(
-                            geometry[0], elements, (surface.form.Width, surface.form.Height), round(6*surface._scale))
+                            geometry[0], elements, (surface.form.Width, surface.form.Height),
+                            round(__import__("vram_radar.usage_surface", fromlist=["STRIP_MARGIN"]).STRIP_MARGIN*surface._scale))
                     else:
                         assertions["anchored_before_notification_area"] = bool(geometry) and (surface.form.Left, surface.form.Top) == taskbar_anchor(*geometry, (surface.form.Width, surface.form.Height))
                     assertions["compact_height_fits_taskbar"] = bool(geometry) and surface.form.Height == round(40*taskbar_scale(windows_taskbar_dpi(), geometry)) and surface.form.Height < geometry[0][3]-geometry[0][1]-6
