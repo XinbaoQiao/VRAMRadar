@@ -42,11 +42,16 @@ class Tooltip(unittest.TestCase):
 
 class SixApps(unittest.TestCase):
     def test_selection_is_capped(self):
-        self.assertEqual(MAX_SELECTED, 6)
-        self.assertEqual(len(normalize_selection(list(PROVIDER_IDS))), 6)
+        self.assertEqual(MAX_SELECTED, 4)
+        self.assertEqual(normalize_selection(list(PROVIDER_IDS)), tuple(PROVIDER_IDS[:4]))
         raw = Profile.empty("t").to_dict()
         raw["usage_providers"] = list(PROVIDER_IDS)
-        self.assertEqual(len(Profile.from_dict(raw).usage_providers), 6)
+        self.assertEqual(Profile.from_dict(raw).usage_providers, tuple(PROVIDER_IDS[:4]))
+
+    def test_limit_hint_text(self):
+        from vram_radar.usage_surface import limit_hint_text
+        self.assertEqual(limit_hint_text(4), "最多同时显示 4 个，请先取消一个")
+        self.assertIn("Up to 4", limit_hint_text(4, "en"))
 
 
 class Backgrounds(unittest.TestCase):

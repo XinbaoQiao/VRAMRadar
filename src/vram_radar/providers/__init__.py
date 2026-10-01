@@ -35,9 +35,10 @@ FORCE_FLOOR_SECONDS = 5
 LOG = logging.getLogger("vram_radar")
 
 
-# The taskbar strip lays out at most this many apps legibly (three columns
-# of two rows); the Models menu disables further ticks at the limit.
-MAX_SELECTED = 6
+# The taskbar strip lays out at most this many apps legibly at the normal
+# taskbar font (two columns of two rows); ticking one more in the Models menu
+# is refused with a short hint.  Saved profiles are clamped to this.
+MAX_SELECTED = 4
 
 # Providers able to read quota with their app's saved login (opt-in only).
 # Generic providers can join later by setting ``needs_session_consent``.

@@ -768,6 +768,12 @@ CONSENT_TEXT = ("显存雷达将使用 {app} 在本机保存的登录状态，�
                 "登录凭证只在内存中使用，不会保存、记录或上传。每 5 分钟最多查询一次，可随时在菜单中撤销。")
 
 
+def limit_hint_text(limit: int, language: str = "zh-CN") -> str:
+    """Hint shown when a further model is ticked past ``MAX_SELECTED``."""
+    return (f"Up to {limit} shown · untick one first" if language == "en"
+            else f"最多同时显示 {limit} 个，请先取消一个")
+
+
 def consent_text(app: str, provider: str) -> str:
     return CONSENT_TEXT.format(app=app, provider=provider)
 
@@ -1341,6 +1347,17 @@ class CodexUsageSurface:
         self._models_menu.DropDown.Renderer = renderer
         self._models_menu.DropDown.SizeChanged += round_menu
         self._model_items = {}
+        def show_limit_hint():
+            from .providers import MAX_SELECTED
+            try:
+                text = limit_hint_text(MAX_SELECTED, self.language())
+                self._limit_item.Visible = True
+                self._limit_item.Text = text
+                if form.Visible:
+                    tooltip.Show(text, form, 0, -scale(34), 2500)
+            except Exception:
+                logging.getLogger("vram_radar").info("model limit hint failed")
+
         def toggle_model(provider_id):
             try:
                 current = list(self.providers().get("selected") or ["codex"])
@@ -1348,7 +1365,8 @@ class CodexUsageSurface:
                 current = ["codex"]
             from .providers import MAX_SELECTED
             if provider_id not in current and len(current) >= MAX_SELECTED:
-                return  # the strip lays out at most six apps legibly
+                show_limit_hint()  # the strip lays out at most MAX_SELECTED apps legibly
+                return
             chosen = [x for x in current if x != provider_id] if provider_id in current else current + [provider_id]
             if not chosen:
                 return  # keep at least one; the strip (and this menu) must stay reachable
@@ -1364,7 +1382,7 @@ class CodexUsageSurface:
             item = self._models_menu.DropDownItems.Add(spec.name)
             item.Click += lambda _s, _e, pid=spec.id: toggle_model(pid)
             self._model_items[spec.id] = (item, spec)
-        self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 6 个")
+        self._limit_item = self._models_menu.DropDownItems.Add("最多同时显示 4 个")
         self._limit_item.Enabled = False
         self._models_menu.DropDownItems.Add(ToolStripSeparator())
         self._consent_menu = self._models_menu.DropDownItems.Add("自动读取额度…")
@@ -1509,10 +1527,11 @@ class CodexUsageSurface:
                 pstate = provider_states.get(pid)
                 item.Text = f"{spec.name} · {_provider_status(pstate, english)}"
                 item.Checked = pid in selected
-                item.Enabled = pid in selected or (not full and (pstate is None or bool(pstate.get("installed"))))
+                # Keep unticked items clickable at the limit so a 5th tick can
+                # explain itself (hint) instead of silently doing nothing.
+                item.Enabled = pid in selected or pstate is None or bool(pstate.get("installed"))
             self._limit_item.Visible = full
-            self._limit_item.Text = (f"Up to {MAX_SELECTED} shown · untick one first" if english
-                                     else f"最多同时显示 {MAX_SELECTED} 个，请先取消一个")
+            self._limit_item.Text = limit_hint_text(MAX_SELECTED, language)
             self._background_title.Text = "Background" if english else "背景"
             self._display_menu.Text = ("Display options" if language == "en" else "显示设置") + (
                 (" · Save failed" if language == "en" else " · 保存失败") if self._display_error else "")
