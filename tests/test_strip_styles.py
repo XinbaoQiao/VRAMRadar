@@ -48,6 +48,14 @@ class SixApps(unittest.TestCase):
         raw["usage_providers"] = list(PROVIDER_IDS)
         self.assertEqual(Profile.from_dict(raw).usage_providers, tuple(PROVIDER_IDS[:4]))
 
+    def test_old_profile_with_pie_display_loads_as_text(self):
+        for legacy in (True, False, "yes", None):
+            raw = Profile.empty("t").to_dict()
+            raw["codex_show_disks"] = legacy
+            profile = Profile.from_dict(raw)
+            self.assertFalse(hasattr(profile, "codex_show_disks"))
+            self.assertNotIn("codex_show_disks", profile.to_dict())  # dropped on next save
+
     def test_limit_hint_text(self):
         from vram_radar.usage_surface import limit_hint_text
         self.assertEqual(limit_hint_text(4), "最多同时显示 4 个，请先取消一个")

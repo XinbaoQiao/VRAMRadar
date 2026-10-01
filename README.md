@@ -38,7 +38,7 @@
 Monitor Codex quota from the Windows taskbar or macOS menu bar with the optional Extensions module.
 
 - Automatically detect a local signed-in Codex installation; no API key or manual path is required.
-- Use a compact Windows quota strip with bold decimal-hour countdowns, continuous colors, optional disks and a dock/free-move toggle.
+- Use a compact Windows quota strip with bold decimal-hour countdowns, continuous colors, a plain-text layout and a dock/free-move toggle.
 - Resize the server navigator and scroll to the bottom without sticky server headings jittering.
 
 Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.9.md).

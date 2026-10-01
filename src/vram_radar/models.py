@@ -707,7 +707,6 @@ class Profile:
     ui_language: str = "zh-CN"
     codex_usage_enabled: bool = False
     codex_executable: str = ""
-    codex_show_disks: bool = False
     codex_time_format: str = "days"
     # Which AI apps the usage strip shows (see providers/). Profiles written
     # before multi-provider support have no key and keep showing Codex only.
@@ -942,7 +941,6 @@ class Profile:
             ui_language=ui_language.strip(),
             codex_usage_enabled=require_bool(raw.get("codex_usage_enabled", False), "codex_usage_enabled"),
             codex_executable=require_optional_local_path(raw.get("codex_executable", ""), "codex_executable"),
-            codex_show_disks=require_bool(raw.get("codex_show_disks", False), "codex_show_disks"),
             codex_time_format=codex_time_format,
             usage_providers=normalize_usage_providers(raw.get("usage_providers", ["codex"])),
             usage_session_consent=normalize_usage_session_consent(raw.get("usage_session_consent", {})),
@@ -973,7 +971,6 @@ class Profile:
             "ui_language": self.ui_language,
             "codex_usage_enabled": self.codex_usage_enabled,
             "codex_executable": self.codex_executable,
-            "codex_show_disks": self.codex_show_disks,
             "codex_time_format": self.codex_time_format,
             "usage_providers": list(self.usage_providers),
             "usage_session_consent": {provider_id: True for provider_id in self.usage_session_consent},

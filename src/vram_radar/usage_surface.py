@@ -771,7 +771,7 @@ def usage_color(value, *, bright=False, waiting=False):
 
 def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now: float | None = None,
                    time_format: str = "decimal") -> dict:
-    """CodexUsage's two disks: remaining quota and remaining window time.
+    """Codex strip text: remaining quota and time left in the window.
 
     Layout/time notation adapted from Amygdala42/CodexUsage (MIT),
     WidgetRenderer.cs at cd72934ef01960c221aa8461b06ab657cf2e803d.
@@ -782,19 +782,16 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
     windows = state.get("windows", [])
     window = windows[index] if 0 <= index < len(windows) else {}
     percent = window.get("remaining_percent") if row["value"] != "—" else None
-    reset, minutes = window.get("resets_at"), window.get("window_minutes")
+    reset = window.get("resets_at")
     left = reset - now if isinstance(reset, (int, float)) and math.isfinite(reset) else None
-    time_percent = None
-    if left is not None and isinstance(minutes, (int, float)) and math.isfinite(minutes) and minutes > 0:
-        time_percent = max(0, min(100, left / (minutes * 60) * 100))
     english = language == "en"
     warning = False
     if state.get("state") == "error":
         countdown = ("Login" if english else "登录") if state.get("code") in {
             "login_required", "unsupported_account"} else ("Retry" if english else "重试")
-        warning, time_percent = True, None
+        warning = True
     elif state.get("stale"):
-        countdown, warning, time_percent = ("Stale" if english else "过期"), True, None
+        countdown, warning = ("Stale" if english else "过期"), True
     elif left is not None and left <= 0:
         countdown = "Wait" if english else "待更新"
     elif state.get("state") == "loading" and not window:
@@ -806,7 +803,7 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
         countdown = f"{left / 3600:.1f}h" if left >= 360 else "<0.1h"
     return {"value": row["value"], "percent": percent, "countdown": countdown,
             "remaining_seconds": left if not warning and left is not None and left > 0 else None,
-            "time_percent": time_percent, "warning": warning, "low": row["low"]}
+            "warning": warning, "low": row["low"]}
 
 
 def _provider_status(state: dict | None, english: bool) -> str:
@@ -983,7 +980,6 @@ class CodexUsageSurface:
         self.open_home = open_home or open_settings
         self.display_options = display_options or (lambda: {})
         self.save_display = save_display
-        self._show_disks = False
         self._display_error = False
         self.disable, self.quit_application = disable, quit_application
         self.active = False
@@ -1129,7 +1125,6 @@ class CodexUsageSurface:
             graphics.SmoothingMode = SmoothingMode.AntiAlias
             path = rounded_path()
             pen = Pen(track_color, 1)
-            track = SolidBrush(track_color)
             try:
                 fill = getattr(self, "_fill", None)
                 if fill is not None:
@@ -1142,27 +1137,7 @@ class CodexUsageSurface:
                         pill.Dispose()
                 if self._hovered:
                     graphics.DrawPath(pen, path)
-                self._disk_bounds = []
-                if self._show_disks:
-                    diameter, row_height = scale(14), scale(20)
-                    inset = (row_height-diameter)//2
-                    self._disk_bounds = [(scale(7), row*row_height+inset, diameter, diameter) for row in (0, 1)]
-                    for bounds, percent, color in zip(self._disk_bounds,
-                            (self._reading["percent"], self._reading["time_percent"]), (quota_color, time_color)):
-                        graphics.FillEllipse(track, *bounds)
-                        brush = SolidBrush(color)
-                        rim = Pen(Color.FromArgb(142, 151, 157), 1)
-                        try:
-                            if percent is not None and percent >= 100:
-                                graphics.FillEllipse(brush, *bounds)
-                            elif percent is not None and percent > 0:
-                                graphics.FillPie(brush, *map(float, bounds), -90.0, float(percent*3.6))
-                            graphics.DrawEllipse(rim, *bounds)
-                        finally:
-                            brush.Dispose()
-                            rim.Dispose()
             finally:
-                track.Dispose()
                 pen.Dispose()
                 path.Dispose()
 
@@ -1465,13 +1440,6 @@ class CodexUsageSurface:
                 except Exception:
                     self._display_error = True
             self._action(save)
-        for key, value, zh, en in [
-                ("codex_show_disks", False, "纯文字", "Text only"),
-                ("codex_show_disks", True, "饼图与数字", "Disks and text")]:
-            item = self._display_menu.DropDownItems.Add(zh)
-            item.Click += lambda _s, _e, k=key, v=value: save_choice(k, v)
-            self._display_choices.append((item, key, value, zh, en))
-        self._display_menu.DropDownItems.Add(ToolStripSeparator())
         self._background_title = self._display_menu.DropDownItems.Add("背景")
         self._background_title.Enabled = False
         for style in BACKGROUND_STYLES:
@@ -1633,7 +1601,6 @@ class CodexUsageSurface:
             state = self.snapshot()
             language = self.language()
             options = self.display_options()
-            show_disks = bool(options.get("codex_show_disks", False))
             try:
                 overview = self.providers() or {}
                 self._last_overview = overview
@@ -1645,11 +1612,6 @@ class CodexUsageSurface:
             others = [spec for pid, (item, spec) in self._model_items.items()
                       if pid in selected and pid != "codex"] if master_enabled else []
             multi = bool(others)
-            # Disks describe one Codex window; a multi-provider strip is text only.
-            effective_disks = show_disks and not multi
-            if effective_disks != self._show_disks:
-                self._show_disks = effective_disks
-                form.Invalidate()
             english = language == "en"
             self._models_menu.Text = "Models" if english else "显示模型"
             self._rescan_item.Text = "Detect again" if english else "重新检测"
@@ -1679,7 +1641,7 @@ class CodexUsageSurface:
             style = style if style in BACKGROUND_STYLES else "transparent"
             for item, key, value, zh, en in self._display_choices:
                 item.Text = en if language == "en" else zh
-                item.Checked = (style if key == "usage_background" else show_disks) == value
+                item.Checked = style == value
             now_mono = time.monotonic()
             theme = theme_settings()
             if (theme != getattr(self, "_theme", None) or style != getattr(self, "_style", None)
@@ -1824,7 +1786,7 @@ class CodexUsageSurface:
                 text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
                 for label in text_controls:
                     label.Size = Size(text_width, scale(20))
-                left_padding = 25 if self._show_disks else 5
+                left_padding = 5
                 for y, label in zip((0, 20), text_controls):
                     label.Location = Point(scale(left_padding), scale(y))
                 form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))

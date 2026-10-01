@@ -1276,7 +1276,7 @@ class AppApi:
             return self._persist_local_preferences(updated)
 
     def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
-        if key not in {"codex_show_disks", "codex_time_format", "usage_background"}:
+        if key not in {"codex_time_format", "usage_background"}:
             return {"ok": False, "code": "invalid_codex_display"}
         with self._profile_mutation_lock:
             raw = self.profile.to_dict()
@@ -3519,7 +3519,6 @@ class AppApi:
                 "navigator_height",
                 "codex_usage_enabled",
                 "codex_executable",
-                "codex_show_disks",
                 "codex_time_format",
                 "usage_providers",
                 "usage_session_consent",
@@ -4971,8 +4970,7 @@ def main(argv: list[str] | None = None) -> int:
                     usage_surface = CodexUsageSurface(
                         window, api._codex_usage.snapshot, language=lambda: api.profile.ui_language,
                         open_settings=show_usage_settings,
-                        display_options=lambda: {"codex_show_disks": api.profile.codex_show_disks,
-                                                 "codex_time_format": api.profile.codex_time_format,
+                        display_options=lambda: {"codex_time_format": api.profile.codex_time_format,
                                                  "usage_background": api.profile.usage_background},
                         save_display=api.save_codex_display,
                         open_home=lambda: shutdown.restore(lambda: window.evaluate_js(

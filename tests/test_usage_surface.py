@@ -65,13 +65,13 @@ class QuotaSurfaceTests(unittest.TestCase):
         self.assertEqual(taskbar_anchor((0, 1032, 1920, 1080), (1500, 1032, 1920, 1080), (86, 44)), (1413, 1034))
         self.assertEqual(taskbar_anchor((-1920, 0, 0, 72), (-400, 0, 0, 72), (133, 68)), (-534, 2))
 
-    def test_reference_widget_disks_and_compact_countdown(self):
+    def test_reference_widget_text_and_compact_countdown(self):
         state = {"enabled": True, "state": "ready", "windows": [
             {"remaining_percent": 68, "window_minutes": 300, "resets_at": 8200},
             {"remaining_percent": 42, "window_minutes": 10080, "resets_at": 173800}]}
         row = widget_reading(state, now=1000)
-        self.assertEqual((row["value"], row["percent"], row["countdown"], row["time_percent"]),
-                         ("68%", 68, "2.0h", 40))
+        self.assertEqual((row["value"], row["percent"], row["countdown"]), ("68%", 68, "2.0h"))
+        self.assertNotIn("time_percent", row)
         weekly = widget_reading(state, 1, now=1000)
         self.assertEqual((weekly["value"], weekly["countdown"]), ("42%", "48.0h"))
         self.assertEqual(widget_reading(state, 1, now=1000, time_format="hours")["countdown"], "48.0h")
@@ -79,15 +79,14 @@ class QuotaSurfaceTests(unittest.TestCase):
         self.assertEqual(widget_reading(state, 1, language="en", now=1000)["countdown"], "48.0h")
         self.assertEqual(widget_reading(state, 1, language="en", now=1000, time_format="hours")["countdown"], "48.0h")
         self.assertEqual(widget_reading(state, language="en", now=8000)["countdown"], "<0.1h")
-        self.assertAlmostEqual(weekly["time_percent"], 100*2/7)
 
-    def test_reference_widget_never_fills_unknown_or_stale_disks(self):
+    def test_reference_widget_unknown_or_stale_reads_as_status(self):
         state = {"enabled": True, "state": "ready", "windows": [{"remaining_percent": None}]}
         row = widget_reading(state, now=1000)
-        self.assertEqual((row["percent"], row["time_percent"], row["countdown"]), (None, None, "—"))
+        self.assertEqual((row["percent"], row["countdown"]), (None, "—"))
         state.update(stale=True, windows=[{"remaining_percent": 90, "window_minutes": 300, "resets_at": 4000}])
         row = widget_reading(state, language="en", now=1000)
-        self.assertEqual((row["percent"], row["time_percent"], row["countdown"]), (None, None, "Stale"))
+        self.assertEqual((row["percent"], row["countdown"]), (None, "Stale"))
 
     def test_reference_widget_expired_and_subhour_windows(self):
         state = {"enabled": True, "state": "ready", "windows": [
@@ -95,7 +94,7 @@ class QuotaSurfaceTests(unittest.TestCase):
         row = widget_reading(state, now=1000)
         self.assertEqual((row["percent"], row["countdown"]), (0, "<0.1h"))
         row = widget_reading(state, language="en", now=1020)
-        self.assertEqual((row["percent"], row["time_percent"], row["countdown"]), (None, 0, "Wait"))
+        self.assertEqual((row["percent"], row["countdown"]), (None, "Wait"))
 
     def test_native_disable_saves_before_reopening_fresh_settings(self):
         calls = []

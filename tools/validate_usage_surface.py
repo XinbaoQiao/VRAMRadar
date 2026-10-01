@@ -30,7 +30,7 @@ def main() -> int:
     language = {"value": "zh-CN"}
     refreshed = threading.Event()
     home_opened, details_opened = threading.Event(), threading.Event()
-    display = {"codex_show_disks": True, "codex_time_format": "decimal"}
+    display = {"codex_time_format": "decimal"}
     def save_display(key, value):
         display[key] = value
         return {"ok": True}
@@ -157,8 +157,6 @@ def main() -> int:
                     bitmap = Bitmap(surface.form.Width, surface.form.Height)
                     try:
                         surface.form.DrawToBitmap(bitmap, Rectangle(0, 0, bitmap.Width, bitmap.Height))
-                        upper, lower = surface._disk_bounds
-                        assertions["both_disks_have_identical_pixel_diameters"] = upper[2:] == lower[2:] == (round(14*surface._scale),)*2
                         bitmap.Save(str(args.output.resolve() / "taskbar-strip.png"), ImageFormat.Png)
                     finally:
                         bitmap.Dispose()
@@ -222,26 +220,23 @@ def main() -> int:
                 invoke(tick)
                 def select_weekly():
                     surface._window_menu.DropDownItems[1].PerformClick()
-                    assertions["quota_window_selection_updates_both_disks"] = (
+                    assertions["quota_window_selection_updates_text"] = (
                         surface._labels[0].Text == "42%" and surface._reading["percent"] == 42
-                        and 47 < surface._reading["time_percent"] < 49
                         and surface._window_menu.DropDownItems[1].Checked)
                     surface._window_menu.DropDownItems[0].PerformClick()
-                    assertions["reference_widget_size"] = (surface.form.Width == sum(round(n*surface._scale) for n in (25, 47, 2))
+                    assertions["reference_widget_size"] = (surface.form.Width == sum(round(n*surface._scale) for n in (5, 47, 2))
                                                            and surface.form.Height == round(40*surface._scale))
                 invoke(select_weekly)
-                invoke(lambda: surface._display_choices[0][0].PerformClick())
-                wait_for(lambda: display["codex_show_disks"] is False)
-                invoke(tick)
-                invoke(lambda: assertions.update(pure_text_option_removes_icon_column=not surface._show_disks and surface._labels[0].Left == round(5*surface._scale)))
+                invoke(lambda: assertions.update(text_only_strip=surface._labels[0].Left == round(5*surface._scale)
+                    and all(c[1] == "usage_background" for c in surface._display_choices)))
                 display["codex_time_format"] = "days"
                 invoke(tick)
                 invoke(lambda: assertions.update(unified_decimal_hours_ignore_legacy_preference=(
-                    len([c for c in surface._display_choices if c[1] != "usage_background"]) == 2 and surface._countdowns[0].Text.endswith("h")
+                    surface._countdowns[0].Text.endswith("h")
                     and "." in surface._countdowns[0].Text),
                     countdown_matches_percent_font=(surface._countdowns[0].Font.Bold
                         and surface._countdowns[0].Font.Size == surface._labels[0].Font.Size)))
-                display.update(codex_show_disks=True, codex_time_format="decimal")
+                display.update(codex_time_format="decimal")
                 invoke(tick)
                 looks = {}
                 for style in ("transparent", "match", "dark", "light", "accent"):

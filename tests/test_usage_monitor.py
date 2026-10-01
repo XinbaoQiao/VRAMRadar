@@ -388,13 +388,14 @@ class UsageSettingsTests(unittest.TestCase):
             service = DashboardService(profile, SnapshotCache(paths, "test"))
             api = AppApi(profile, ProfileStore(paths), paths, service, automatic_import_enabled=False)
             with patch.object(service, "request_refresh") as refresh:
-                self.assertTrue(api.save_codex_display("codex_show_disks", True)["ok"])
+                self.assertFalse(api.save_codex_display("codex_show_disks", True)["ok"])  # pie mode removed
+                self.assertTrue(api.save_codex_display("usage_background", "dark")["ok"])
                 self.assertTrue(api.save_codex_display("codex_time_format", "hours")["ok"])
                 saved = api.store.load("test")
-                self.assertTrue(saved.codex_show_disks)
+                self.assertEqual(saved.usage_background, "dark")
+                self.assertFalse(hasattr(saved, "codex_show_disks"))
                 self.assertEqual(saved.codex_time_format, "hours")
                 self.assertFalse(api.save_codex_display("codex_time_format", "invalid")["ok"])
-                self.assertFalse(api.save_codex_display("codex_show_disks", "yes")["ok"])
                 refresh.assert_not_called()
                 self.assertTrue(api.set_navigator_size(320, 560)["ok"])
                 resized = api.store.load("test")
@@ -402,6 +403,6 @@ class UsageSettingsTests(unittest.TestCase):
                 self.assertFalse(api.set_navigator_size(-1, 560)["ok"])
                 self.assertFalse(api.set_navigator_size(True, 560)["ok"])
             with patch.object(api.store, "save", side_effect=OSError("write failed")):
-                self.assertFalse(api.save_codex_display("codex_show_disks", False)["ok"])
-                self.assertTrue(api.profile.codex_show_disks)
+                self.assertFalse(api.save_codex_display("usage_background", "light")["ok"])
+                self.assertEqual(api.profile.usage_background, "dark")
             api._codex_usage.close()
