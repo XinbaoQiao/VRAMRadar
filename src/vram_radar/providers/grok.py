@@ -8,19 +8,24 @@ the Connect RPC ``aiserver.v1.DashboardService/GetSandUsageStatus`` (a POST)
 authenticated with an access token kept in Electron safeStorage (DPAPI).  The
 result is only held in memory and never written to disk: its persisted
 ``sand-client-persistence`` slices are UI layout, drafts, roster and
-transcripts.  Reproducing the query would require decrypting the app's token
-and impersonating it with a non-GET call, which this project does not do.
+transcripts.  With the user's explicit, per-provider consent (providers.session_consent),
+Radar reuses that same stored login to call the SAME read-only endpoint the
+app itself uses for the avatar menu (see grok_usage): the token is decrypted
+in memory only, used for one read-only POST, and never refreshed, logged or
+written.  Without consent none of that runs.
 
-What *is* legitimately readable: Grok renders that usage in its own account
+Always available, consent or not: Grok renders that usage in its own account
 menu (avatar > usage row "NN%" + reset hint).  ``screen_usage`` reads that
 text through Windows UI Automation while the menu is open (read-only, only
-when Grok is the foreground window, only inside menus).  The last reading is
-shown with the time it was seen; without one the strip says "已登录".
+when Grok is the foreground window, only inside menus).  It is the fallback
+when the session read is off or the sign-in expired; without either the strip
+says "已登录".
 """
 from __future__ import annotations
 
 import time
 
+from . import grok_usage
 from .base import (Environment, base_state, detect_install, newest_mtime, pair, pid_alive, read_json,
                    running_pair, text)
 
@@ -39,12 +44,20 @@ def _screen_watcher():
 
 WATCHER = None
 
+# Session-based quota reading (opt-in, see providers.session_consent): set by
+# probe_all each round to ('grok' selected) and consent granted.  When off,
+# Grok behaves exactly as before (screen reading / sign-in state only).
+SESSION = {"enabled": False}
+CACHE = grok_usage.UsageCache()
+
 
 def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict:
     """Merge an on-screen usage reading (see screen_usage) into a probe state."""
     now = time.time() if now is None else now
     seen = reading.get("seen_at") if isinstance(reading, dict) else None
     if not isinstance(seen, (int, float)) or not 0 <= now - seen <= SCREEN_MAX_AGE:
+        if state.get("quota_source") == "session":
+            return state  # keep the consented session reading as primary
         if state.get("installed") and state.get("signed_in") is not False:
             state["brief"] = pair("已登录（用量只显示在 Grok 自己的头像菜单里，打开一次即可读取）",
                                   "Signed in (usage appears only in Grok's own account menu; open it once to read)")
@@ -65,6 +78,59 @@ def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict
     state["facts"].insert(0, pair(f"用量读自 Grok 头像菜单（{stamp}），菜单再次打开时更新",
                                   f"Usage read from Grok's account menu at {stamp}; updates when it is opened again"))
     return state
+
+
+def _session_usage(data_dirs) -> dict | None:
+    """Query Grok's own read-only usage endpoint with its stored login.
+    Runs only on the monitor thread and only when consented.  Never logs the
+    token or the response."""
+    for folder in data_dirs:
+        if (folder / "sand-secrets.json").exists():
+            try:
+                return CACHE.get(folder)
+            except Exception as exc:  # a crypto/HTTP hiccup must not break the probe
+                LOG.info("grok session usage unavailable (%s)", type(exc).__name__)
+                return {"status": "error"}
+    return None
+
+
+def _apply_session(state: dict, session: dict) -> dict:
+    """Merge a session usage reading into the probe state.  On an expired
+    token we surface the re-login notice and keep the screen reading fallback."""
+    status = session.get("status")
+    if status == "unauthorized":
+        state["facts"].insert(0, pair("自动读取额度失败：Grok 登录已过期，请在 Grok 中重新登录",
+                                      "Automatic usage read failed: Grok sign-in expired, sign in again in Grok"))
+        state["session_quota"] = "expired"
+        state["session_relogin"] = True
+        return state
+    if status != "ok":
+        return state
+    used = session.get("used_percent")
+    if not isinstance(used, (int, float)) or not 0 <= used <= 100:
+        return state
+    value = f"{used:.0f}%"
+    reset_at = session.get("reset_at")
+    reset_zh, reset_en = _reset_labels(reset_at)
+    state["headline"] = pair(f"已用 {value}", f"{value} used")
+    state["subline"] = pair(reset_zh or "自动读取", reset_en or "auto")
+    brief_zh = f"已用 {value}" + (f" · {reset_zh}" if reset_zh else "") + "（自动读取）"
+    brief_en = f"{value} used" + (f" · {reset_en}" if reset_en else "") + " (auto)"
+    state["brief"] = pair(brief_zh, brief_en)
+    state["low"] = used >= 90
+    state["quota_available"] = True
+    state["quota_source"] = "session"
+    state["session_quota"] = "ok"
+    state["facts"].insert(0, pair("额度经你授权，使用 Grok 本机登录只读查询获取（每 5 分钟最多一次）",
+                                  "Usage read with your consent via Grok's local login, read-only (at most every 5 min)"))
+    return state
+
+
+def _reset_labels(reset_at) -> tuple[str, str]:
+    if not isinstance(reset_at, (int, float)) or reset_at <= 0:
+        return "", ""
+    stamp = time.strftime("%m-%d %H:%M", time.localtime(reset_at))
+    return f"{stamp} 重置", f"resets {stamp}"
 
 
 def probe(env: Environment) -> dict:
@@ -96,10 +162,12 @@ def probe(env: Environment) -> dict:
         if not state["installed"] and alive:
             state["installed"], state["state"] = True, "ready"
     state["quota_reason"] = "no_local_quota"
-    state["facts"].append(pair("Grok 的周用量只在应用内存中，由加密登录令牌在线获取，本地不落盘；"
-                               "为保护账户，雷达不解密令牌，只显示登录与运行状态",
-                               "Grok fetches weekly usage online with its encrypted sign-in token and never stores it; "
-                               "Radar does not decrypt that token, so it shows sign-in and run state"))
+    session = _session_usage(data_dirs) if SESSION.get("enabled") else None
+    if session is not None:
+        state = _apply_session(state, session)
+    if state.get("quota_source") != "session" and not state.get("session_relogin"):
+        state["facts"].append(pair("Grok 的周用量只在应用内存中在线获取，本地不落盘；未授权自动读取时，雷达只显示登录与运行状态",
+                                   "Grok fetches weekly usage online and never stores it; without consent for automatic reading, Radar shows only sign-in and run state"))
     if state["signed_in"] is True:
         headline = pair("已登录", "Signed in")
     elif state["signed_in"] is False:

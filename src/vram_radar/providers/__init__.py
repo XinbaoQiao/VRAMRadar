@@ -90,6 +90,7 @@ def probe_all(env: Environment | None = None, *, codex_executable: str = "",
     query this round (only providers the user chose to display)."""
     env = env or Environment()
     deepseek.NETWORK["enabled"] = "deepseek" in network
+    grok.SESSION["enabled"] = "grok" in network and session_consent("grok")
     results: dict[str, dict] = {}
     # Two passes: folders holding one detected app are also searched for the
     # others, so custom install roots (e.g. D:\Apps\<App>) are found too.
