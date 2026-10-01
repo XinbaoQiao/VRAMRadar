@@ -517,6 +517,14 @@ class ProviderSpec:
     session_app: str = ""
     session_server: str = ""
 
+    def label(self, english: bool = False) -> str:
+        """Display name; English UI uses the app's Latin-script name."""
+        return ENGLISH_NAMES.get(self.id, self.name) if english else self.name
+
+
+# English display names for apps whose registry name is Chinese.
+ENGLISH_NAMES = {"glm": "GLM", "qwen": "Qwen", "yuanbao": "Yuanbao"}
+
 
 def base_state(spec_id: str, name: str, short: str, detection: Detection) -> dict:
     return {

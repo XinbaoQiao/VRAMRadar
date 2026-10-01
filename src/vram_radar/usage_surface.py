@@ -1120,7 +1120,7 @@ def still_pending(state: dict | None, granted_at: float, now: float, timeout: fl
                 and float(state.get("checked_at") or 0) >= granted_at)
 
 
-def consent_precheck(state: dict | None, app: str) -> str | None:
+def consent_precheck(state: dict | None, app: str, english: bool = False) -> str | None:
     """Why the consent dialog must not be offered yet, or None.
 
     Session reading needs the app installed and signed in on this PC; asking
@@ -1130,9 +1130,11 @@ def consent_precheck(state: dict | None, app: str) -> str | None:
     if not isinstance(state, dict):
         return None
     if state.get("installed") is False:
-        return f"未检测到 {app}。请先在本机安装并登录 {app}，再开启自动读取额度。"
+        return (f"{app} not found. Install {app} on this PC and sign in, then turn on automatic reading."
+                if english else f"未检测到 {app}。请先在本机安装并登录 {app}，再开启自动读取额度。")
     if state.get("signed_in") is False:
-        return f"{app} 尚未登录。请先在 {app} 中登录，再开启自动读取额度。"
+        return (f"{app} is not signed in. Sign in to {app} first, then turn on automatic reading."
+                if english else f"{app} 尚未登录。请先在 {app} 中登录，再开启自动读取额度。")
     return None
 
 
@@ -1145,22 +1147,24 @@ def windows_dpi_scale(fallback: float = 1.0) -> float:
 
 
 def windows_consent_dialog(app: str, provider: str, scale: float | None = None, *,
-                           icon_path: str | None = None) -> bool:
+                           icon_path: str | None = None, language: str = "zh-CN") -> bool:
     """Modal 允许/暂不 (UI thread only). True only on 允许."""
     from . import ui_dialogs
-    spec = ui_dialogs.consent_spec(app, app, CONSENT_ETA_SECONDS)
+    spec = ui_dialogs.consent_spec(app, app, CONSENT_ETA_SECONDS, language=language)
     return ui_dialogs.show_dialog(spec, scale=scale, icon_path=icon_path) == "allow"
 
 
-def windows_revoke_dialog(name: str, scale: float | None = None, *, icon_path: str | None = None) -> bool:
+def windows_revoke_dialog(name: str, scale: float | None = None, *, icon_path: str | None = None,
+                          language: str = "zh-CN") -> bool:
     from . import ui_dialogs
-    return ui_dialogs.show_dialog(ui_dialogs.revoke_spec(name), scale=scale, icon_path=icon_path) == "revoke"
+    return ui_dialogs.show_dialog(ui_dialogs.revoke_spec(name, language=language), scale=scale,
+                                  icon_path=icon_path) == "revoke"
 
 
 def windows_notice_dialog(text: str, scale: float | None = None, *, name: str = "",
-                          icon_path: str | None = None) -> None:
+                          icon_path: str | None = None, language: str = "zh-CN") -> None:
     from . import ui_dialogs
-    ui_dialogs.show_dialog(ui_dialogs.notice_spec(text, name), scale=scale, icon_path=icon_path)
+    ui_dialogs.show_dialog(ui_dialogs.notice_spec(text, name, language=language), scale=scale, icon_path=icon_path)
 
 
 class CodexUsageSurface:
@@ -1187,11 +1191,12 @@ class CodexUsageSurface:
         self._dialog_name = ""
         self.confirm_consent = confirm_consent or (
             lambda app, provider: windows_consent_dialog(app, provider, self._dialog_scale(),
-                                                         icon_path=self._dialog_icon))
+                                                         icon_path=self._dialog_icon, language=self._lang()))
         self.confirm_revoke = lambda name: windows_revoke_dialog(name, self._dialog_scale(),
-                                                                 icon_path=self._dialog_icon)
+                                                                 icon_path=self._dialog_icon, language=self._lang())
         self.notify_blocked = lambda text: windows_notice_dialog(text, self._dialog_scale(),
-                                                                 name=self._dialog_name, icon_path=self._dialog_icon)
+                                                                 name=self._dialog_name, icon_path=self._dialog_icon,
+                                                                 language=self._lang())
         self.notify_toast = self._show_toast
         self._pending: dict = {}
         self._extra_columns: list = []
@@ -1218,6 +1223,12 @@ class CodexUsageSurface:
                 logging.getLogger("vram_radar").warning("Codex surface action failed")
         threading.Thread(target=invoke, daemon=True, name="codex-surface-action").start()
 
+    def _lang(self) -> str:
+        try:
+            return "en" if self.language() == "en" else "zh-CN"
+        except Exception:
+            return "zh-CN"
+
     @staticmethod
     def _consent_spec(provider_id):
         from .providers import PROVIDERS
@@ -1242,8 +1253,10 @@ class CodexUsageSurface:
             states = {}
         state = states.get(provider_id) if isinstance(states, dict) else None
         self._dialog_icon = (state or {}).get("install_path") if isinstance(state, dict) else None
-        self._dialog_name = spec.name
-        blocked = consent_precheck(state, spec.session_app or spec.name)
+        english = self._lang() == "en"
+        name = spec.label(english)
+        self._dialog_name = name
+        blocked = consent_precheck(state, name if spec.session_app in ("", spec.name) else spec.session_app, english)
         if blocked:
             try:
                 self.notify_blocked(blocked)
@@ -1251,7 +1264,8 @@ class CodexUsageSurface:
                 logging.getLogger("vram_radar").warning("session consent notice failed")
             return False
         try:
-            accepted = self.confirm_consent(spec.session_app or spec.name, spec.session_server or spec.name) is True
+            accepted = self.confirm_consent(name if spec.session_app in ("", spec.name) else spec.session_app,
+                                            spec.session_server or name) is True
         except Exception:
             logging.getLogger("vram_radar").warning("session consent dialog failed")
             accepted = False
@@ -1260,7 +1274,10 @@ class CodexUsageSurface:
             # triggers it) delivers the first value.
             self._pending[provider_id] = time.time()
             self._action(lambda: self._store_consent(provider_id, True))
-            self._toast(f"正在读取 {spec.name} 额度…", f"约 {CONSENT_ETA_SECONDS} 秒内显示在任务栏", spec.name)
+            if english:
+                self._toast(f"Reading {name} quota…", f"On the taskbar within about {CONSENT_ETA_SECONDS} s", name)
+            else:
+                self._toast(f"正在读取 {name} 额度…", f"约 {CONSENT_ETA_SECONDS} 秒内显示在任务栏", name)
         return accepted
 
     def revoke_session_consent(self, provider_id) -> None:
@@ -1279,13 +1296,18 @@ class CodexUsageSurface:
                 state = None
             self._dialog_icon = state.get("install_path") if isinstance(state, dict) else None
             try:
-                confirmed = self.confirm_revoke(spec.name) is True
+                english = self._lang() == "en"
+                confirmed = self.confirm_revoke(spec.label(english)) is True
             except Exception:
                 logging.getLogger("vram_radar").warning("revoke dialog failed")
                 confirmed = False
             if confirmed:
                 self.revoke_session_consent(provider_id)
-                self._toast(f"已关闭 {spec.name} 的自动读取", "可随时在同一菜单重新开启", spec.name)
+                name = spec.label(english)
+                if english:
+                    self._toast(f"Stopped reading {name} automatically", "Turn it back on from the same menu anytime", name)
+                else:
+                    self._toast(f"已关闭 {name} 的自动读取", "可随时在同一菜单重新开启", name)
         else:
             self.request_session_consent(provider_id)
 
@@ -1311,7 +1333,7 @@ class CodexUsageSurface:
         icon = self._dialog_icon if name and name == self._dialog_name else None
         if not name:
             icon = sys.executable if getattr(sys, "frozen", False) else None
-        ui_dialogs.show_toast(ui_dialogs.toast_spec(headline, line, name or "显存雷达"), anchor,
+        ui_dialogs.show_toast(ui_dialogs.toast_spec(headline, line, name or ("VRAM Radar" if self._lang() == "en" else "显存雷达")), anchor,
                               scale=self._dialog_scale(), icon_path=icon)
 
     def _store_consent(self, provider_id, granted: bool) -> None:
@@ -2002,7 +2024,7 @@ class CodexUsageSurface:
             for pid, (item, spec) in self._consent_items.items():
                 pstate = provider_states.get(pid)
                 label, clickable = auto_read_status(pstate, pid in consented, english)
-                item.Text = spec.name
+                item.Text = spec.label(english)
                 item.ShortcutKeyDisplayString = label
                 item.Enabled = clickable
                 set_icon(item, spec, pstate)
@@ -2010,7 +2032,7 @@ class CodexUsageSurface:
             full = len(selected) >= MAX_SELECTED
             for pid, (item, spec) in self._model_items.items():
                 pstate = provider_states.get(pid)
-                item.Text = spec.name
+                item.Text = spec.label(english)
                 item.ShowShortcutKeys = True
                 item.ShortcutKeyDisplayString = _provider_status(pstate, english)
                 set_icon(item, spec, pstate)
@@ -2192,7 +2214,7 @@ class CodexUsageSurface:
             fg = menu.ForeColor
             for spec in others:
                 info = provider_reading(provider_states.get(spec.id),
-                                        {"id": spec.id, "name": spec.name, "short": spec.short}, language)
+                                         {"id": spec.id, "name": spec.label(english), "short": spec.label(english) if english else spec.short}, language)
                 granted = self._pending.get(spec.id)
                 if granted is not None:
                     pstate = provider_states.get(spec.id)

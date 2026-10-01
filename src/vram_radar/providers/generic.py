@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import Environment, base_state, detect_install, exists, newest_mtime, nonempty_file, pair, running_pair
+from .base import ENGLISH_NAMES, Environment, base_state, detect_install, exists, newest_mtime, nonempty_file, pair, running_pair
 
 
 def make_probe(provider_id: str, name: str, short: str, *, uninstall, processes, executables,
@@ -32,7 +32,8 @@ def make_probe(provider_id: str, name: str, short: str, *, uninstall, processes,
             state["facts"].append(pair("仅发现旧数据目录，程序可能已卸载", "Only leftover data found; the app may be uninstalled"))
         state["quota_reason"] = "no_local_quota"
         state["facts"].append(pair(reason_zh or f"{name} 本地不提供额度数据，仅显示安装/运行状态",
-                                   reason_en or f"{name} exposes no local quota data; showing install/run state"))
+                                   reason_en or f"{ENGLISH_NAMES.get(provider_id, name)} exposes no local quota data; "
+                                                "showing install/run state"))
         if state["installed"]:
             state["headline"] = pair("已登录", "Signed in") if state["signed_in"] else pair("已安装", "Installed")
         else:
