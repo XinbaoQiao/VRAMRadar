@@ -387,6 +387,31 @@ def capture_screen(rect):
         return None
 
 
+LATIN_VALUE_FAMILY = "Segoe UI"
+# Segoe UI has no CJK glyphs; GDI's font-link fallback draws them noticeably
+# lighter than Segoe UI Bold (10-02 v8: '\u672a\u8fd0\u884c' next to bold '0%').
+# Microsoft YaHei UI Bold matches the weight (its Latin glyphs are Segoe's).
+CJK_VALUE_FAMILY = "Microsoft YaHei UI"
+_CJK = re.compile(r"[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\u3000-\u303f]")
+
+
+def value_font_family(text) -> str:
+    """Font family for a strip value/reset/state text (same weight and size)."""
+    return CJK_VALUE_FAMILY if _CJK.search(text or "") else LATIN_VALUE_FAMILY
+
+
+def pick_value_font(text, base, cache: dict, make):
+    """``base`` (Segoe UI Bold) for Latin text, else the same size/style in
+    ``value_font_family(text)``; ``make(family, base)`` builds it once."""
+    family = value_font_family(text)
+    if family == LATIN_VALUE_FAMILY:
+        return base
+    key = (family, float(base.Size), int(base.Style))
+    if key not in cache:
+        cache[key] = make(family, base)
+    return cache[key]
+
+
 def weather_scan_limit(elements, own=None):
     """Right end of the area scanned for weather content.
 
@@ -2120,6 +2145,8 @@ class CodexUsageSurface:
         self._name_font = Font("Segoe UI", scale(12), FontStyle.Regular, GraphicsUnit.Pixel)
         self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
         self._fit_fonts = {}
+        self._cjk_fonts = {}
+        self._make_font = lambda family, base: Font(family, base.Size, base.Style, GraphicsUnit.Pixel)
 
         def make_column():
             pair = []
@@ -2444,6 +2471,10 @@ class CodexUsageSurface:
                 self._fit_level = 0
                 # Keep the gap tight without shrinking type or clipping longer
                 # countdowns (for example 168.0h) and localized status messages.
+                for label, base in zip(text_controls, self._fonts):
+                    want = pick_value_font(label.Text, base, self._cjk_fonts, self._make_font)
+                    if label.Font is not want:
+                        label.Font = want
                 text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
                 for label in text_controls:
                     label.Size = Size(text_width, scale(20))
@@ -2482,10 +2513,10 @@ class CodexUsageSurface:
                         for top, bottom, reset_label in used:
                             if top.Font is not fonts[0]:
                                 top.Font = fonts[0]
-                            if bottom.Font is not fonts[1]:
-                                bottom.Font = fonts[1]
-                            if reset_label.Font is not fonts[1]:
-                                reset_label.Font = fonts[1]
+                            for label in (bottom, reset_label):
+                                want = pick_value_font(label.Text, fonts[1], self._cjk_fonts, self._make_font)
+                                if label.Font is not want:
+                                    label.Font = want
                         icon_px = strip_icon_px(self._scale, factor)
                         for index, (name_label, *_) in enumerate(used):
                             image = None
