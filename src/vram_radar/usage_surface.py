@@ -425,7 +425,12 @@ def pick_value_font(text, base, cache: dict, make):
 # Weather scan tuning (fractions of the taskbar height; see trim_widgets).
 WEATHER_INK_THRESHOLD = 45     # sum |dRGB|: grey line-2 text of a news item
 WEATHER_BLANK_RUN = 0.5
-WEATHER_OCCLUDED_SLACK = 0.2
+# Must stay below the strip's clear gap minus the placement tolerance at every
+# scale: the gap is 0.25 x height (12 px of a 48 px bar at 100 %) and
+# PlacementDebouncer ignores moves of <= 2 px, so 1-2 px wider text leaves a
+# 10 px gap.  0.2 x (10 px) read that as "under the strip" and jumped the
+# strip one bar height right and back (10-03 review).
+WEATHER_OCCLUDED_SLACK = 0.15
 
 
 def weather_scan_limit(elements, own=None):
@@ -603,8 +608,8 @@ def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
         return elements
     trimmed = dict(elements)
     at_strip = bool(own) and limit == max(left, own[0])
-    # Ink ending closer to the strip than the clear gap it keeps (>= 0.25 x
-    # height) means the text grew toward / under it: the visible part may end
+    # Ink ending well inside the clear gap the strip keeps (0.25 x height)
+    # means the text grew toward / under it: the visible part may end
     # at a glyph or colon gap just left of the strip, so a 1 px "touches the
     # limit" test missed it (10-03).  Treat it as running under the strip.
     reach_slack = max(1, round(height * WEATHER_OCCLUDED_SLACK)) if at_strip else 1
