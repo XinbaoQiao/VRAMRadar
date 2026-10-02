@@ -152,10 +152,10 @@ class KimiParserTests(unittest.TestCase):
         self.assertEqual(set(saved["reading"]) - set(kimi._KEEP), set())
         self.assertNotIn("bid", self.last_path.read_text(encoding="utf-8"))
         kimi.LAST.update(reading=None, at=None, loaded=False)   # app restart
-        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        out = kimi.apply_session({"facts": [], "running": True}, {"status": "unauthorized", "login_valid": True}, now=2_000)
         self.assertEqual(out["quota"]["zh"], "75%")
         kimi.LAST.update(reading=None, at=None, loaded=False)
-        late = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=1790997735 + 10)
+        late = kimi.apply_session({"facts": [], "running": True}, {"status": "unauthorized", "login_valid": True}, now=1790997735 + 10)
         self.assertEqual(late["headline"]["zh"], "待刷新")   # quota window already reset
 
     def test_real_response_shape(self):
@@ -185,13 +185,38 @@ class KimiParserTests(unittest.TestCase):
     def test_access_expired_keeps_last_reading(self):
         reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
         kimi.apply_session({"facts": []}, reading, now=1_000)
-        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        out = kimi.apply_session({"facts": [], "running": True}, {"status": "unauthorized", "login_valid": True}, now=2_000)
         self.assertEqual(out["quota"]["zh"], "75%")
         self.assertTrue(out["subline"]["zh"].startswith("读于"))
         kimi.LAST["reading"] = None
         self.last_path.unlink()
-        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": True}, now=2_000)
+        out = kimi.apply_session({"facts": [], "running": True}, {"status": "unauthorized", "login_valid": True}, now=2_000)
         self.assertEqual(out["headline"]["zh"], "待刷新")
+
+    def test_kimi_closed_access_expired_says_open_kimi(self):
+        # 10-02: Kimi closed 23:53, access credential expired 00:07, login
+        # valid -> strip showed the old reading in quiet grey for 17 h.
+        reading = kimi_usage.parse_usage(REAL_SUB, REAL_STATS)
+        kimi.apply_session({"facts": []}, reading, now=1_000)
+        out = kimi.apply_session({"facts": [], "running": False, "reset_at": 5_000},
+                                 {"status": "unauthorized", "login_valid": True}, now=60_000)
+        self.assertEqual((out["quota"]["zh"], out["quota"]["en"]), ("\u5f00Kimi", "Open Kimi"))
+        self.assertTrue(out["needs_action"])
+        self.assertFalse(out["stale"])
+        self.assertNotIn("reset_at", out)
+        self.assertIn("75%", out["brief"]["en"])          # last value kept in the tooltip
+        from vram_radar import usage_surface as us
+        from vram_radar.quota_colors import quota_color, usage_color
+        info = us.provider_reading(out, {"id": "kimi", "name": "Kimi", "short": "Kimi"}, "zh-CN", now=60_000)
+        self.assertTrue(info["action"])
+        self.assertEqual((info["quota"], info["reset"]), ("\u5f00Kimi", ""))
+        self.assertEqual(quota_color(None, warning=True, action=True), usage_color(0))
+        self.assertNotEqual(quota_color(None, warning=True, action=True), quota_color(None, warning=True))
+
+    def test_relogin_shows_sign_in_in_attention_colour(self):
+        out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": False}, now=2_000)
+        self.assertTrue(out["needs_action"] and out["session_relogin"])
+        self.assertEqual(out["quota"], out["headline"])
 
     def test_new_token_file_bypasses_backoff(self):
         sig = [(1, 1)]

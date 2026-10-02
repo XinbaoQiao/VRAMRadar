@@ -1163,7 +1163,8 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
             "percent": state.get("quota_percent"),
             "quota": local(state.get("quota")), "reset": reset_short(reset - now, english) if reset_ok else "",
             "reset_full": reset_full(reset, english) if reset_ok else "",
-            "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines),
+            "low": bool(state.get("low")), "warning": warning, "action": bool(state.get("needs_action")),
+            "detail": "\n".join(lines),
             "brief": f"{name}  {brief}"}
 
 
@@ -2418,7 +2419,7 @@ class CodexUsageSurface:
                 provider_rows.append(info)
                 value, reset_txt = strip_parts(info.get("quota", ""), info.get("reset", ""), info["value"])
                 color = Color.FromArgb(*quota_rule_color(
-                    info.get("percent"), low=info["low"], warning=info["warning"],
+                    info.get("percent"), low=info["low"], warning=info["warning"], action=info.get("action", False),
                     known=bool(info.get("quota") or info.get("reset")), bright=bright, surface=self._palette[0]))
                 cells.append((info["name"], value, reset_txt, color))
                 cell_ids.append(spec.id)

@@ -155,15 +155,38 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
     if status == "unauthorized" and session.get("login_valid"):
         state["session_quota"] = "waiting_app"
         _load_last()
-        if _usable_last(now):
-            state = _show_reading(state, LAST["reading"], now, read_at=LAST["at"])
+        last = _usable_last(now)
+        if state.get("running"):
+            # Kimi is running and renews its 15-min access credential itself:
+            # keep the last reading (marked with its time) until it does.
+            if last:
+                state = _show_reading(state, last, now, read_at=LAST["at"])
+            else:
+                state["headline"] = pair("\u5f85\u5237\u65b0", "Pending")
+                state["subline"] = pair("Kimi \u8fd0\u884c\u4e2d", "Kimi running")
+                state["quota_available"] = False
         else:
-            state["headline"] = pair("待刷新", "Pending")
-            state["subline"] = pair("打开 Kimi", "open Kimi")
-            state["brief"] = pair("Kimi 登录有效；Kimi 未运行，打开 Kimi 后自动读取额度",
-                                  "Kimi sign-in is valid; open Kimi and the quota is read automatically")
+            # 10-02: Kimi closed at 23:53, its access credential expired 00:07
+            # (login valid until 12-30) -> the strip showed the 17 h old
+            # reading in quiet grey.  Only Kimi itself can renew the
+            # credential (we never run the refresh flow), so say so plainly.
+            state["headline"] = pair("\u5f00Kimi", "Open Kimi")
+            state["quota"] = state["headline"]
+            state["subline"] = pair("\u6253\u5f00 Kimi \u5373\u5237\u65b0", "open Kimi to refresh")
+            state["needs_action"], state["stale"] = True, False
             state["quota_available"] = False
-        state["facts"].insert(0, pair("Kimi 的访问凭据只在 Kimi 运行时续期；打开 Kimi 后会立即重新读取",
+            state.pop("reset_at", None)
+            state.pop("quota_percent", None)
+            zh = "Kimi \u672a\u8fd0\u884c\uff0c\u8bbf\u95ee\u51ed\u8bc1\u5df2\u8fc7\u671f\uff08\u767b\u5f55\u4ecd\u6709\u6548\uff09\uff1a\u6253\u5f00 Kimi \u5373\u81ea\u52a8\u8bfb\u53d6"
+            en = "Kimi is not running and its access credential expired (sign-in still valid): open Kimi to read the quota"
+            if last:
+                when = time.strftime("%m-%d %H:%M", time.localtime(LAST["at"]))
+                used = last.get("used_percent")
+                if isinstance(used, (int, float)):
+                    zh += f"\uff08\u4e0a\u6b21 {when}\uff1a\u5269\u4f59 {100 - used:.0f}%\uff09"
+                    en += f" (last {when}: {100 - used:.0f}% left)"
+            state["brief"] = pair(zh, en)
+        state["facts"].insert(0, pair("Kimi \u7684\u8bbf\u95ee\u51ed\u8bc1\u53ea\u5728 Kimi \u8fd0\u884c\u65f6\u7eed\u671f\uff1b\u6253\u5f00 Kimi \u4f1a\u7acb\u5373\u91cd\u65b0\u8bfb\u53d6",
                                       "Kimi renews its access credential only while running; opening Kimi triggers an immediate re-read"))
         return state
     if status == "unauthorized":
@@ -172,6 +195,7 @@ def apply_session(state: dict, session: dict | None, now: float | None = None) -
         state["subline"] = pair("打开 Kimi 一次", "open Kimi once")
         state["brief"] = pair("需重新登录（打开 Kimi 一次）", "Sign in again (open Kimi once)")
         state["session_quota"], state["session_relogin"] = "expired", True
+        state["quota"], state["needs_action"] = state["headline"], True
         state["quota_available"] = False
         expired = session.get("expired_at")
         when = time.strftime("%m-%d %H:%M", time.localtime(expired)) if isinstance(expired, (int, float)) else ""

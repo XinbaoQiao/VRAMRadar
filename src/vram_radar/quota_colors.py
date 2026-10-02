@@ -159,7 +159,7 @@ def usage_color(value, *, bright=False, waiting=False, surface=None):
     return _color(round(fraction * 1000), bool(bright), surface)
 
 
-def quota_color(percent=None, *, low=False, warning=False, known=False, bright=False, surface=None):
+def quota_color(percent=None, *, low=False, warning=False, known=False, bright=False, surface=None, action=False):
     """The single rule for every provider's quota and reset text:
 
     * stale / error / sign-in needed -> neutral grey (the value is not current);
@@ -168,6 +168,8 @@ def quota_color(percent=None, *, low=False, warning=False, known=False, bright=F
     * any other known amount (balance, "available", reset only) -> the 100 % end;
     * no quota information at all (bare status) -> neutral grey.
     """
+    if action:   # the user must act (open the app / sign in): attention end, never quiet grey
+        return usage_color(0, bright=bright, surface=surface)
     if warning:
         return usage_color(None, bright=bright, surface=surface)
     if isinstance(percent, (int, float)) and not isinstance(percent, bool) and math.isfinite(percent):
