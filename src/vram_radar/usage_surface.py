@@ -784,7 +784,36 @@ class TaskbarLayout:
             found["WidgetsButton"] = (trimmed[0], trimmed[1], right, trimmed[3])
         return found
 
+    # Re-run the full UI Automation search at most this often; in between
+    # only the cached buttons' rectangles are re-read.  A FindAll over the
+    # taskbar every 2 s grew native memory ~2.8 MB per 1000 searches
+    # (UIAutomationCore client-side state; 10-03 soak) -- most of the app's
+    # ~7 MB/h growth.  Rect reads track Start/Search moving (centered icons)
+    # just as fast.
+    UIA_REFIND = 120.0
+
     def _read(self, taskbar_handle) -> dict:
+        cache = getattr(self, "_uia_cache", None)
+        # Without a cached Widgets button (turned on later, Explorer still
+        # starting) search again soon, so the strip never sits on the weather.
+        refind = self.UIA_REFIND if cache and any(k == "WidgetsButton" for k, _ in cache[2]) else 10.0
+        if cache and cache[0] == int(taskbar_handle or 0) and time.monotonic() - cache[1] < refind:
+            try:
+                found = {}
+                for automation_id, element in cache[2]:
+                    rect = element.Current.BoundingRectangle
+                    if rect.IsEmpty or rect.Width <= 0:
+                        continue
+                    found[automation_id] = (int(rect.Left), int(rect.Top), int(rect.Right), int(rect.Bottom))
+                if any(k in found for k in RIGHT_BOUND_IDS):
+                    return found
+            except Exception:
+                pass   # element gone (Explorer restart, button removed): search again
+        self._uia_cache = None
+        return self._find_all(taskbar_handle)
+
+    def _find_all(self, taskbar_handle) -> dict:
+        """Full UI Automation search (FindAll over the taskbar subtree)."""
         try:
             from System import IntPtr
             from System.Windows.Automation import (AutomationElement, OrCondition, PropertyCondition,
@@ -792,13 +821,14 @@ class TaskbarLayout:
             root = AutomationElement.FromHandle(IntPtr(int(taskbar_handle)))
             conditions = [PropertyCondition(AutomationElement.AutomationIdProperty, value)
                           for value in (*LEFT_BOUND_IDS, *RIGHT_BOUND_IDS)]
-            found = {}
+            found, cached = {}, []
             for element in root.FindAll(TreeScope.Descendants, OrCondition(*conditions)):
                 rect = element.Current.BoundingRectangle
                 if rect.IsEmpty or rect.Width <= 0:
                     continue
                 found[element.Current.AutomationId] = (int(rect.Left), int(rect.Top),
                                                        int(rect.Right), int(rect.Bottom))
+                cached.append((element.Current.AutomationId, element))
             if not any(k in found for k in RIGHT_BOUND_IDS):
                 # Start hidden by policy/tools: use the first task button.
                 buttons = root.FindAll(TreeScope.Descendants, PropertyCondition(
@@ -809,6 +839,8 @@ class TaskbarLayout:
                          and not b.Current.BoundingRectangle.IsEmpty]
                 if lefts:
                     found["first_app"] = min(lefts)
+                cached = []   # fallback layout: always searched afresh
+            self._uia_cache = (int(taskbar_handle), time.monotonic(), cached) if cached else None
             return found
         except Exception as exc:
             logging.getLogger("vram_radar").info("taskbar layout read failed (%s)", type(exc).__name__)
@@ -816,6 +848,7 @@ class TaskbarLayout:
 
     def invalidate(self):
         self._key = None
+        self._uia_cache = None
 
 
 def exclude_rect(elements, own):

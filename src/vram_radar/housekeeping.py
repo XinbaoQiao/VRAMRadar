@@ -280,6 +280,127 @@ def idle_seconds() -> float | None:
         return None
 
 
+def _process_memory() -> dict[str, int]:
+    """Private bytes and working set of this process (Windows), else {}."""
+    if sys.platform != "win32":
+        return {}
+    try:
+        import ctypes
+        Counters = _counters_type()
+        counters = Counters()
+        counters.cb = ctypes.sizeof(Counters)
+        if ctypes.windll.psapi.GetProcessMemoryInfo(ctypes.c_void_p(-1), ctypes.byref(counters), counters.cb):
+            return {"private_bytes": int(counters.PrivateUsage), "working_set": int(counters.WorkingSetSize)}
+    except Exception:
+        pass
+    return {}
+
+
+def trim_memory(working_set: bool = True) -> dict[str, Any]:
+    """Give memory back without restarting: a full Python collection, a
+    compacting .NET collection (WinForms/pythonnet objects) and -- Windows --
+    trimming the working set so pages that are no longer used (startup
+    code, freed heaps) return to the system.  Pages still in use simply
+    fault back in; nothing visible changes.  Never raises."""
+    before = _process_memory()
+    collected = 0
+    try:
+        collected = gc.collect()
+    except Exception:
+        pass
+    try:
+        from System import GC  # type: ignore[import-not-found]
+        from System.Runtime import GCSettings, GCLargeObjectHeapCompactionMode  # type: ignore[import-not-found]
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce
+        GC.Collect()
+        GC.WaitForPendingFinalizers()
+        GC.Collect()
+    except Exception:
+        pass
+    if working_set and sys.platform == "win32":
+        try:
+            import ctypes
+            kernel32 = ctypes.WinDLL("kernel32")
+            kernel32.SetProcessWorkingSetSize.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_size_t]
+            kernel32.SetProcessWorkingSetSize(ctypes.c_void_p(-1), ctypes.c_size_t(-1), ctypes.c_size_t(-1))
+        except Exception:
+            pass
+    after = _process_memory()
+    mb = lambda value: round(value / 1048576, 1) if isinstance(value, int) else None
+    return {"gc": collected,
+            "private_mb": [mb(before.get("private_bytes")), mb(after.get("private_bytes"))],
+            "working_set_mb": [mb(before.get("working_set")), mb(after.get("working_set"))]}
+
+
+DIAGNOSTICS_FLAG = "diagnostics.on"
+DIAGNOSTICS_FILE = "diagnostics.jsonl"
+DIAGNOSTICS_MAX_BYTES = 2_000_000
+
+
+def diagnostics_requested(runtime: Path) -> str | None:
+    """Content of ``runtime/diagnostics.on`` ("" or "trace") when present."""
+    try:
+        return (Path(runtime) / DIAGNOSTICS_FLAG).read_text(encoding="utf-8").strip().lower()
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError):
+        return ""
+
+
+def start_tracing_if_requested(runtime: Path) -> bool:
+    """Startup only: ``trace`` in the flag file turns on tracemalloc."""
+    if diagnostics_requested(runtime) == "trace":
+        import tracemalloc
+        if not tracemalloc.is_tracing():
+            tracemalloc.start(4)
+        return True
+    return False
+
+
+def diagnostics_snapshot(top: int = 15) -> dict[str, Any]:
+    """Memory picture for leak hunting: process counters, .NET heap, Python
+    object counts by type and (when tracing) the top allocation sites."""
+    sample: dict[str, Any] = {"at": round(time.time(), 1), **process_sample(), **_process_memory()}
+    try:
+        from System import GC  # type: ignore[import-not-found]
+        sample["managed_bytes"] = int(GC.GetTotalMemory(False))
+    except Exception:
+        pass
+    counts: dict[str, int] = {}
+    objects = gc.get_objects()
+    for obj in objects:
+        name = type(obj).__name__
+        counts[name] = counts.get(name, 0) + 1
+    sample["py_objects"] = len(objects)
+    del objects
+    sample["py_types"] = sorted(counts.items(), key=lambda item: -item[1])[:top]
+    try:
+        import tracemalloc
+        if tracemalloc.is_tracing():
+            sample["traced_bytes"] = tracemalloc.get_traced_memory()[0]
+            sample["traced_top"] = [f"{stat.size // 1024}KB {stat.traceback[0].filename.rsplit(os.sep, 1)[-1]}:{stat.traceback[0].lineno}"
+                                    for stat in tracemalloc.take_snapshot().statistics("lineno")[:top]]
+    except Exception:
+        pass
+    return sample
+
+
+def write_diagnostics(runtime: Path, logs: Path) -> bool:
+    """Append one snapshot to ``logs/diagnostics.jsonl`` while the flag file
+    exists (off by default; the file is capped and restarted when full)."""
+    if diagnostics_requested(runtime) is None:
+        return False
+    target = Path(logs) / DIAGNOSTICS_FILE
+    try:
+        if target.exists() and target.stat().st_size > DIAGNOSTICS_MAX_BYTES:
+            target.unlink()
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(diagnostics_snapshot(), ensure_ascii=False) + "\n")
+        return True
+    except OSError:
+        return False
+
+
 class HealthWatchdog:
     """Decides when a clean self-restart is warranted.
 
@@ -347,8 +468,13 @@ class Housekeeper:
                  sampler: Callable[[], dict[str, int]] = process_sample,
                  restart: Callable[[str], bool] | None = None, is_idle: Callable[[], bool] = lambda: False,
                  first_maintenance: float = 600.0, maintenance_interval: float = DAY,
-                 check_interval: float = 600.0, clock: Callable[[], float] = time.monotonic) -> None:
+                 check_interval: float = 600.0, clock: Callable[[], float] = time.monotonic,
+                 trim: Callable[[], dict[str, Any]] | None = None, first_trim: float = 180.0,
+                 trim_interval: float = 3600.0, diagnostics: Callable[[], Any] | None = None) -> None:
         self.maintenance = maintenance
+        self.trim = trim
+        self.trim_interval = trim_interval
+        self.diagnostics = diagnostics
         self.watchdog = watchdog
         self.sampler = sampler
         self.restart = restart
@@ -359,6 +485,7 @@ class Housekeeper:
         now = clock()
         self.next_maintenance = now + first_maintenance
         self.next_check = now + check_interval
+        self.next_trim = now + first_trim
         self.pending: str | None = None
         self.restarted = False
         self.stop_event = threading.Event()
@@ -375,8 +502,23 @@ class Housekeeper:
                 LOG.info("maintenance %s gc=%d", json.dumps(summary, sort_keys=True), collected)
             except Exception as exc:
                 LOG.info("maintenance failed (%s)", type(exc).__name__)
-        if self.watchdog is not None and now >= self.next_check:
+        if self.trim is not None and now >= self.next_trim:
+            # Memory is kept in check by cleanup; the watchdog below is only
+            # an emergency backstop.
+            self.next_trim = now + self.trim_interval
+            try:
+                LOG.info("memory trim %s", json.dumps(self.trim(), sort_keys=True))
+            except Exception as exc:
+                LOG.info("memory trim failed (%s)", type(exc).__name__)
+        check_due = now >= self.next_check
+        if check_due:
             self.next_check = now + self.check_interval
+        if self.diagnostics is not None and check_due:
+            try:
+                self.diagnostics()
+            except Exception:
+                pass
+        if self.watchdog is not None and check_due:
             try:
                 reason = self.watchdog.check(self.sampler())
             except Exception:

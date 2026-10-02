@@ -86,7 +86,10 @@ from .housekeeping import (
     idle_seconds,
     prune_webview_sessions,
     run_maintenance,
+    start_tracing_if_requested,
+    trim_memory,
     webview_storage_path,
+    write_diagnostics,
 )
 from .storage import (
     prune_orphan_temporaries,
@@ -755,8 +758,12 @@ def start_housekeeping(api: Any, paths: StoragePaths, profile_id: str, window: A
         exit_requested.set()
         return True
 
+    # Diagnostics stay off unless runtime/diagnostics.on exists ("trace" in
+    # it also turns on tracemalloc); see housekeeping.write_diagnostics.
+    start_tracing_if_requested(paths.runtime)
     keeper = Housekeeper(maintenance, watchdog=HealthWatchdog(paths.runtime / f"{profile_id}.health.json"),
-                         restart=restart, is_idle=idle)
+                         restart=restart, is_idle=idle, trim=trim_memory,
+                         diagnostics=lambda: write_diagnostics(paths.runtime, paths.logs))
     keeper.start()
     return keeper
 

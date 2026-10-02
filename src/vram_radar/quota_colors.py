@@ -148,7 +148,7 @@ def readable(lab, surface, minimum=MIN_CONTRAST, strict=False):
     return from_oklab((far, a, b))
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=512)   # sampled surfaces vary with the wallpaper; keep it small
 def _color(fraction_key, bright, surface):
     if fraction_key is None:
         return readable(to_oklab(NEUTRAL[bright]), surface, strict=True)
