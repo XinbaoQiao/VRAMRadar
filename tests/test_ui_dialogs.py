@@ -22,7 +22,7 @@ class DialogSpecTests(unittest.TestCase):
         spec = ui.notice_spec(consent_precheck({"installed": False}, "Kimi"), "Kimi")
         self.assertEqual(spec["headline"], "未检测到 Kimi")
         self.assertEqual(len(spec["lines"]), 1)
-        self.assertEqual(spec["buttons"], [("ok", "知道了", True)])
+        self.assertEqual(spec["buttons"], [("ok", "确定", True)])
 
     def test_revoke_has_primary_and_cancel(self):
         spec = ui.revoke_spec("Kimi")

@@ -157,7 +157,7 @@
       </header>
       <div class="dialog-content">
         <ol id="onboarding-progress" class="onboarding-progress" aria-label="首次配置进度" hidden>
-          <li data-onboarding-marker="1"><span>1</span><div><strong>了解用途</strong><small>先知道它会做什么</small></div></li>
+          <li data-onboarding-marker="1"><span>1</span><div><strong>了解用途</strong><small>了解应用的功能</small></div></li>
           <li data-onboarding-marker="2"><span>2</span><div><strong>发现服务器</strong><small>自动查找或打开教程</small></div></li>
           <li data-onboarding-marker="3"><span>3</span><div><strong>检查并完成</strong><small>确认连接与登录方式</small></div></li>
         </ol>
@@ -257,7 +257,7 @@
               </details>
 
               <details class="guide-more">
-                <summary>配置文件应该写什么？查看最小示例</summary>
+                <summary>查看最小配置示例</summary>
                 <div class="guide-more-body"><p>把示例中的地址和用户名替换为自己的信息。<code>gpu-lab</code> 是以后在终端和显存雷达中看到的别名。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="ssh-config-example" aria-label="复制 SSH 配置示例">复制</button><pre><code id="ssh-config-example">Host gpu-lab
     HostName gpu.example.org
     User researcher</code></pre></div></div>
@@ -375,7 +375,7 @@
             <label><span>对应公钥路径（可选）</span><input data-key-field="public_key_path" placeholder="~/.ssh/id_ed25519.pub"><small>私钥带口令时建议选择 .pub，并先加载 ssh-agent。</small></label>
           </div>
           <details class="ssh-key-notes">
-            <summary>生成专用密钥时会发生什么？</summary>
+            <summary>关于生成专用密钥</summary>
             <p>系统生成独立的 Ed25519 密钥，不覆盖 <code>~/.ssh</code> 中任何现有文件。为了后台自动连接，专用私钥不设置密钥口令，并依靠当前系统用户的文件权限保护；需要口令保护时请选择现有密钥并使用 ssh-agent。</p>
           </details>
           <div class="ssh-key-setup-actions">

@@ -1237,7 +1237,7 @@ def limit_menu_text(limit: int, language: str = "zh-CN") -> str:
 def limit_hint_text(limit: int, language: str = "zh-CN") -> str:
     """Hint shown when a further model is ticked past ``MAX_SELECTED``."""
     return (f"Up to {limit} shown · untick one first" if language == "en"
-            else f"最多同时显示 {limit} 个，请先取消一个")
+            else f"最多同时显示 {limit} 个，请先取消其中一项")
 
 
 def auto_read_status(state: dict | None, consented: bool, english: bool = False) -> tuple[str, bool]:

@@ -115,7 +115,7 @@ def notice_spec(text: str, name: str = "", icon=None, language: str = "zh-CN") -
     head, lines = (parts[0], parts[1:]) if parts else ("", [])
     return {"kind": "dialog", "icon": icon, "icon_name": name or head,
             "headline": head, "lines": lines, "note": "",
-            "buttons": [("ok", "OK" if language == "en" else "知道了", True)], "cancel": "ok"}
+            "buttons": [("ok", "OK" if language == "en" else "确定", True)], "cancel": "ok"}
 
 
 def toast_spec(headline: str, line: str = "", name: str = "", icon=None) -> dict:

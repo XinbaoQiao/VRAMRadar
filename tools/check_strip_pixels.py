@@ -48,7 +48,7 @@ DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 THEMES = {"light": ((238, 228, 214), (90, 90, 90), (26, 26, 26), (160, 62, 96)),
           "dark": ((32, 32, 32), (180, 180, 180), (245, 245, 245), (227, 143, 163))}
 # (name, quota, reset): both items, quota only (DeepSeek), widest resets.
-CELLS = [("Codex", "0%", "6\u592912\u5c0f\u65f6"), ("Grok", "100%", "6\u592923\u5c0f\u65f6"), ("DeepSeek", "¥6", ""), ("Kimi", "80%", "23\u5c0f\u65f6")]
+CELLS = [("Codex", "0%", "6d 12h"), ("Grok", "100%", "6d 23h"), ("DeepSeek", "¥6", ""), ("Kimi", "80%", "23h")]
 def install_paths():
     """Real install paths from the providers' own detection (icons as shipped)."""
     import importlib

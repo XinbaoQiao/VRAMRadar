@@ -1249,8 +1249,8 @@ class AppApi:
             pending,
             title="VRAM Radar",
             message=(
-                f"You have {len(pending)} pending notifications."
-                if english else f"你有 {len(pending)} 条待处理通知。"
+                f"{len(pending)} pending notifications."
+                if english else f"共有 {len(pending)} 条待处理通知。"
             ),
             respect_retry_deadline=not force,
         )

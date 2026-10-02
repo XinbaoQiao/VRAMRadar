@@ -70,12 +70,12 @@ class QuotaSurfaceTests(unittest.TestCase):
             {"remaining_percent": 68, "window_minutes": 300, "resets_at": 8200},
             {"remaining_percent": 42, "window_minutes": 10080, "resets_at": 173800}]}
         row = widget_reading(state, now=1000)
-        self.assertEqual((row["value"], row["percent"], row["countdown"]), ("68%", 68, "2\u5c0f\u65f6"))
+        self.assertEqual((row["value"], row["percent"], row["countdown"]), ("68%", 68, "2h"))
         self.assertNotIn("time_percent", row)
         weekly = widget_reading(state, 1, now=1000)
-        self.assertEqual((weekly["value"], weekly["countdown"]), ("42%", "2\u5929"))   # zero hours dropped
-        self.assertEqual(widget_reading(state, 1, now=1000, time_format="hours")["countdown"], "2\u5929")
-        self.assertEqual(widget_reading(state, 1, now=1000, time_format="decimal")["countdown"], "2\u5929")
+        self.assertEqual((weekly["value"], weekly["countdown"]), ("42%", "2d"))   # zero hours dropped
+        self.assertEqual(widget_reading(state, 1, now=1000, time_format="hours")["countdown"], "2d")
+        self.assertEqual(widget_reading(state, 1, now=1000, time_format="decimal")["countdown"], "2d")
         self.assertEqual(widget_reading(state, 1, language="en", now=1000)["countdown"], "2d")
         self.assertEqual(widget_reading(state, 1, language="en", now=1000, time_format="hours")["countdown"], "2d")
         self.assertEqual(widget_reading(state, language="en", now=8000)["countdown"], "4m")
@@ -92,7 +92,7 @@ class QuotaSurfaceTests(unittest.TestCase):
         state = {"enabled": True, "state": "ready", "windows": [
             {"remaining_percent": 0, "window_minutes": 300, "resets_at": 1020}]}
         row = widget_reading(state, now=1000)
-        self.assertEqual((row["percent"], row["countdown"]), (0, "1\u5206\u949f"))
+        self.assertEqual((row["percent"], row["countdown"]), (0, "1m"))
         row = widget_reading(state, language="en", now=1020)
         self.assertEqual((row["percent"], row["countdown"]), (None, "Wait"))
 
@@ -112,7 +112,7 @@ class QuotaSurfaceTests(unittest.TestCase):
         ]}, now=1000)
         self.assertEqual([row["label"] for row in rows], ["5h", "7d"])
         self.assertEqual([row["value"] for row in rows], ["68%", "9%"])
-        self.assertEqual([row["countdown"] for row in rows], ["2\u5c0f\u65f6", "2\u5929"])
+        self.assertEqual([row["countdown"] for row in rows], ["2h", "2d"])
         self.assertTrue(rows[1]["low"])
 
     def test_disabled_has_no_surface_even_with_cached_windows(self):

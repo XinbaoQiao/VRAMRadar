@@ -38,7 +38,7 @@ class Tooltip(unittest.TestCase):
                                  "facts": []}, {"id": "kimi", "name": "Kimi"}, now=1000)
         from vram_radar.reset_format import reset_full
         self.assertEqual(info["brief"], info["brief"].split(" \u00b7 ")[0] + " \u00b7 " + reset_full(1000 + 7200, False))
-        self.assertEqual((info["quota"], info["reset"]), ("", "2\u5c0f\u65f6"))
+        self.assertEqual((info["quota"], info["reset"]), ("", "2h"))
 
     def test_codex_error_line(self):
         self.assertEqual(codex_brief(quota_lines({"enabled": True, "state": "error", "code": "login_required"})),
@@ -63,7 +63,7 @@ class SixApps(unittest.TestCase):
 
     def test_limit_hint_text(self):
         from vram_radar.usage_surface import limit_hint_text
-        self.assertEqual(limit_hint_text(4), "最多同时显示 4 个，请先取消一个")
+        self.assertEqual(limit_hint_text(4), "最多同时显示 4 个，请先取消其中一项")
         self.assertIn("Up to 4", limit_hint_text(4, "en"))
 
 

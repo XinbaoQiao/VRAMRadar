@@ -26,18 +26,18 @@ def reset_short(seconds, english: bool = False) -> str:
 
     Days and hours are floored (never promises an earlier reset than the
     real one by more than the shown unit); under an hour, minutes are rounded
-    up so the last minute reads 1 min rather than 0.
+    up so the last minute reads 1 min rather than 0.  Both languages use
+    the compact unit letters ('1d 8h', '5h', '45m'; 10-02 user choice);
+    ``english`` is kept for callers and the localized absolute time.
     """
     if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
         return ""
     if seconds < 3600:
         minutes = min(59, max(1, math.ceil(seconds / 60)))
-        return f"{minutes}m" if english else f"{minutes}\u5206\u949f"
+        return f"{minutes}m"
     total_hours = int(seconds // 3600)
     days, hours = divmod(total_hours, 24)
-    if english:
-        return " ".join(part for part in (f"{days}d" if days else "", f"{hours}h" if hours else "") if part)
-    return (f"{days}\u5929" if days else "") + (f"{hours}\u5c0f\u65f6" if hours else "")
+    return " ".join(part for part in (f"{days}d" if days else "", f"{hours}h" if hours else "") if part)
 
 
 def reset_full(epoch, english: bool) -> str:

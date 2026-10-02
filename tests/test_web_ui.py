@@ -713,7 +713,7 @@ class WebUiContractTests(unittest.TestCase):
             "自动检测不到？",
             "Windows 教程",
             "macOS 教程",
-            "配置文件应该写什么？",
+            "查看最小配置示例",
             "使用 VS Code / Cursor Remote-SSH",
             "找到路径以后",
         ):

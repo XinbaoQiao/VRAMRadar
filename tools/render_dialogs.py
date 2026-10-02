@@ -24,6 +24,6 @@ for theme, dark in (("light", False), ("dark", True)):
                                 os.path.join(out, f"notice_signed_out_{theme}.png"), dark=dark, icon_path=apps["grok"][1]))
     made.append(ui.save_preview(ui.toast_spec("正在读取 Grok 额度…", f"约 {CONSENT_ETA_SECONDS} 秒内显示在任务栏", "Grok"),
                                 os.path.join(out, f"toast_reading_{theme}.png"), dark=dark, icon_path=apps["grok"][1]))
-    made.append(ui.save_preview(ui.toast_spec("最多同时显示 4 个", "请先取消一个再勾选", "显存雷达"),
+    made.append(ui.save_preview(ui.toast_spec("最多同时显示 4 个", "请先取消其中一项再勾选", "显存雷达"),
                                 os.path.join(out, f"toast_limit_{theme}.png"), dark=dark, icon_path=r"D:\Download\VRAM Radar\VRAMRadar.exe"))
 print(len(made), "files")

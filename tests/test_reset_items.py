@@ -22,7 +22,7 @@ class Format(unittest.TestCase):
     def test_short_hours_then_days(self):
         self.assertEqual([reset_short(s, True) for s in (None, 0, -5, float("nan"), 200, 33.9 * H, 47.9 * H, 48 * H, 3.2 * 86400)],
                          ["", "", "", "", "4m", "1d 9h", "1d 23h", "2d", "3d 4h"])
-        for text in ("4m", "1d 9h", "3d", "5\u5c0f\u65f6", "6\u592912\u5c0f\u65f6", "45\u5206\u949f"):
+        for text in ("4m", "1d 9h", "3d", "5h", "6d 12h", "45m"):
             self.assertTrue(RESET_RE.fullmatch(text))
         self.assertIsNone(RESET_RE.fullmatch("50%"))
 

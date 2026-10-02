@@ -63,8 +63,8 @@ def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict
         if state.get("quota_source") == "session":
             return state  # keep the consented session reading as primary
         if state.get("installed") and state.get("signed_in") is not False:
-            state["brief"] = pair("已登录（用量只显示在 Grok 自己的头像菜单里，打开一次即可读取）",
-                                  "Signed in (usage appears only in Grok's own account menu; open it once to read)")
+            state["brief"] = pair("已登录（用量仅显示在 Grok 头像菜单中，打开该菜单后读取）",
+                                  "Signed in (usage is shown only in Grok's account menu; it is read when that menu opens)")
         return state
     used = reading.get("percent_used")
     if not isinstance(used, (int, float)) or not 0 <= used <= 100:
@@ -140,7 +140,7 @@ def _apply_session(state: dict, session: dict) -> dict:
     state["quota_available"] = True
     state["quota_source"] = "session"
     state["session_quota"] = "ok"
-    state["facts"].insert(0, pair("额度经你授权，使用 Grok 本机登录只读查询获取（每 5 分钟最多一次）",
+    state["facts"].insert(0, pair("额度经授权，通过 Grok 本机登录只读查询获取（每 5 分钟最多一次）",
                                   "Usage read with your consent via Grok's local login, read-only (at most every 5 min)"))
     return state
 

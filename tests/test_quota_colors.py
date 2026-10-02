@@ -65,11 +65,16 @@ class Gradient(unittest.TestCase):
 
 
 class Countdown(unittest.TestCase):
-    CASES = [(0, "", ""), (-30, "", ""), (1, "1m", "1\u5206\u949f"), (59 * M, "59m", "59\u5206\u949f"),
-             (59 * M + 30, "59m", "59\u5206\u949f"), (H, "1h", "1\u5c0f\u65f6"), (H + 59 * M, "1h", "1\u5c0f\u65f6"),
-             (23 * H + 59 * M, "23h", "23\u5c0f\u65f6"), (D, "1d", "1\u5929"), (D + 3 * H, "1d 3h", "1\u59293\u5c0f\u65f6"),
-             (47 * H, "1d 23h", "1\u592923\u5c0f\u65f6"), (6 * D + 12 * H, "6d 12h", "6\u592912\u5c0f\u65f6"),
-             (2 * D + 30 * M, "2d", "2\u5929"), (45 * M, "45m", "45\u5206\u949f"), (5 * H, "5h", "5\u5c0f\u65f6")]
+    def test_same_compact_letters_in_both_languages(self):
+        from vram_radar.reset_format import reset_short
+        for seconds, text in ((32 * 3600, "1d 8h"), (75 * 3600, "3d 3h"), (5 * 3600, "5h"), (45 * 60, "45m"), (48 * 3600 + 1800, "2d")):
+            self.assertEqual((reset_short(seconds), reset_short(seconds, True)), (text, text))
+
+    CASES = [(0, "", ""), (-30, "", ""), (1, "1m", "1m"), (59 * M, "59m", "59m"),
+             (59 * M + 30, "59m", "59m"), (H, "1h", "1h"), (H + 59 * M, "1h", "1h"),
+             (23 * H + 59 * M, "23h", "23h"), (D, "1d", "1d"), (D + 3 * H, "1d 3h", "1d 3h"),
+             (47 * H, "1d 23h", "1d 23h"), (6 * D + 12 * H, "6d 12h", "6d 12h"),
+             (2 * D + 30 * M, "2d", "2d"), (45 * M, "45m", "45m"), (5 * H, "5h", "5h")]
 
     def test_edge_cases_both_languages(self):
         for seconds, en, zh in self.CASES:

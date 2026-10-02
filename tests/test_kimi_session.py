@@ -98,7 +98,7 @@ class KimiSessionTests(unittest.TestCase):
         state = {"headline": {"zh": "可用", "en": "OK"}, "facts": []}
         out = kimi.apply_session(state, {"status": "unauthorized", "reason": "expired", "expired_at": 1.0})
         self.assertEqual(out["headline"]["zh"], "需登录")
-        self.assertEqual(out["brief"]["zh"], "需重新登录（打开 Kimi 一次）")
+        self.assertEqual(out["brief"]["zh"], "需重新登录（请启动 Kimi）")
         ok = kimi.apply_session({"facts": []}, {"status": "ok", "exhausted": False, "reset_at": 7200 + 100},
                                 now=100)
         self.assertNotIn("quota", ok)          # no share known: reset only
@@ -200,16 +200,19 @@ class KimiParserTests(unittest.TestCase):
         kimi.apply_session({"facts": []}, reading, now=1_000)
         out = kimi.apply_session({"facts": [], "running": False, "reset_at": 5_000},
                                  {"status": "unauthorized", "login_valid": True}, now=60_000)
-        self.assertEqual((out["quota"]["zh"], out["quota"]["en"]), ("\u5f00Kimi", "Open Kimi"))
+        self.assertEqual((out["quota"]["zh"], out["quota"]["en"]), ("\u672a\u8fd0\u884c", "Not running"))
         self.assertTrue(out["needs_action"])
         self.assertFalse(out["stale"])
         self.assertNotIn("reset_at", out)
         self.assertIn("75%", out["brief"]["en"])          # last value kept in the tooltip
+        self.assertTrue(out["brief"]["zh"].startswith("Kimi \u672a\u8fd0\u884c\uff0c\u542f\u52a8\u540e\u81ea\u52a8\u66f4\u65b0\u989d\u5ea6\u3002\u4e0a\u6b21\u8bfb\u53d6 "))
+        self.assertTrue(out["brief"]["zh"].endswith("\uff1a\u5269\u4f59 75%"))
+        self.assertTrue(out["brief"]["en"].startswith("Kimi is not running; the quota updates when Kimi starts. Last read "))
         from vram_radar import usage_surface as us
         from vram_radar.quota_colors import quota_color, usage_color
         info = us.provider_reading(out, {"id": "kimi", "name": "Kimi", "short": "Kimi"}, "zh-CN", now=60_000)
         self.assertTrue(info["action"])
-        self.assertEqual((info["quota"], info["reset"]), ("\u5f00Kimi", ""))
+        self.assertEqual((info["quota"], info["reset"]), ("\u672a\u8fd0\u884c", ""))
         self.assertEqual(quota_color(None, warning=True, action=True), usage_color(0))
         self.assertNotEqual(quota_color(None, warning=True, action=True), quota_color(None, warning=True))
 

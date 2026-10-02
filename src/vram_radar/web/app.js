@@ -2354,12 +2354,12 @@ function resetCountdown(seconds, english) {
   if (!Number.isFinite(seconds) || seconds <= 0) return '';
   if (seconds < 3600) {
     const minutes = Math.min(59, Math.max(1, Math.ceil(seconds / 60)));
-    return english ? `${minutes}m` : `${minutes}\u5206\u949f`;
+    return `${minutes}m`;
   }
+  // Compact unit letters in both languages ('1d 8h', '5h', '45m').
   const total = Math.floor(seconds / 3600);
   const days = Math.floor(total / 24), hours = total % 24;
-  if (english) return [days ? `${days}d` : '', hours ? `${hours}h` : ''].filter(Boolean).join(' ');
-  return `${days ? `${days}\u5929` : ''}${hours ? `${hours}\u5c0f\u65f6` : ''}`;
+  return [days ? `${days}d` : '', hours ? `${hours}h` : ''].filter(Boolean).join(' ');
 }
 
 function codexResetLabel(window, now) {
@@ -2487,7 +2487,7 @@ function notificationEventMessage(event) {
   if (event.kind === 'favorite_gpu_available' && event.language && event.language !== window.VRAMRadarI18n?.language) {
     return localizedText('收藏的资源已空闲。');
   }
-  if (event.kind === 'resource_available') return localizedText('你设置的 GPU 条件已有匹配结果。');
+  if (event.kind === 'resource_available') return localizedText('已有符合所设 GPU 条件的结果。');
   if (event.kind === 'update_available' && event.latest_version) {
     return window.VRAMRadarI18n?.language === 'en'
       ? `VRAM Radar ${event.latest_version} is ready to download.`
@@ -4048,7 +4048,7 @@ async function evaluateResourceWatch() {
         resourceWatchLastNotificationAt = now;
         if (api?.show_notification) await api.show_notification(
           localizedText('显存雷达：资源可用'),
-          localizedText('你设置的 GPU 条件已有匹配结果。'),
+          localizedText('已有符合所设 GPU 条件的结果。'),
           'resource_available',
         );
       }
@@ -5133,7 +5133,7 @@ async function installLatestUpdate(button) {
   }
   const explanation = latestUpdateAction === 'one_click'
     ? '将从官方 GitHub Release 下载并校验安装包。校验成功后应用会关闭、安装并自动重启；失败时保留当前版本。是否继续？'
-    : '将从官方 GitHub Release 下载并校验更新包。校验成功后会在 Finder 中显示，仍需你手动替换应用。是否继续？';
+    : '将从官方 GitHub Release 下载并校验更新包。校验成功后会在 Finder 中显示，仍需手动替换应用。是否继续？';
   if (!window.confirm(localizedText(explanation))) return;
   latestUpdateProgress = {state: 'running', phase: 'checking', percent: null, message: ''};
   renderNotificationCenter(currentSnapshot);

@@ -543,7 +543,7 @@ class WindowsTrayController:
         else:
             self.notify(
                 "VRAM Radar 仍在运行",
-                "窗口已收起到通知区域。右键图标可以刷新、暂停监控或退出。",
+                "窗口已最小化到通知区域。右键单击图标可刷新、暂停监控或退出。",
             )
 
     def _close_behavior_value(self) -> str:
