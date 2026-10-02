@@ -59,5 +59,18 @@ class RenderedWeight(unittest.TestCase):
             self.assertGreater(chosen, regular * 1.4, text)    # clearly bold
 
 
+class CompactSpacing(unittest.TestCase):
+    def test_strip_countdown_uses_hair_space_only_on_the_strip(self):
+        from vram_radar.reset_format import reset_short
+        self.assertEqual(us.strip_reset_text(reset_short(30 * 3600)), "1d\u200a6h")
+        self.assertEqual(us.strip_reset_text("5h"), "5h")
+        self.assertEqual(us.strip_reset_text(""), "")
+        self.assertEqual(reset_short(30 * 3600), "1d 6h")          # tooltip / web keep the plain space
+
+    def test_icon_gap_tighter_but_positive(self):
+        self.assertEqual(us.ICON_GAP, 5)
+        self.assertGreaterEqual(us.icon_gap_px(1.275), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

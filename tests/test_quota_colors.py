@@ -44,6 +44,18 @@ class Gradient(unittest.TestCase):
                     color = usage_color(p, bright=bright, surface=surface)
                     self.assertGreaterEqual(contrast(color, surface), need, (base, style, p, color))
 
+    def test_state_grey_full_contrast_everywhere(self):
+        for base in ((32, 32, 32), (243, 243, 243), (0, 120, 215), (128, 128, 128), (118, 118, 118), (200, 60, 90)):
+            for style in BACKGROUND_STYLES:
+                look = strip_look(style, base, (0, 120, 215))
+                surface, bright = look["surface"], look["bright"]
+                grey = quota_color(None, action=True, bright=bright, surface=surface)
+                self.assertGreaterEqual(contrast(grey, surface), 4.5, (base, style, grey))
+                L, a, b = to_oklab(grey)
+                self.assertLess(math.hypot(a, b), 0.03, grey)               # stays grey
+                self.assertEqual(quota_color(None, low=True, bright=bright, surface=surface),
+                                 usage_color(0, bright=bright, surface=surface))   # used up stays a quota value
+
     def test_ends_and_clamping(self):
         self.assertEqual(usage_color(-5), usage_color(0))
         self.assertEqual(usage_color(250), usage_color(100))

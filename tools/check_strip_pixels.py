@@ -18,7 +18,7 @@ from System.Drawing import Bitmap, Color, ContentAlignment, Font, FontStyle, Gra
 from System.Drawing.Imaging import ImageLockMode, PixelFormat
 from System.Windows.Forms import Application, Form, FormBorderStyle, FormStartPosition, Label
 from System.Runtime.InteropServices import Marshal
-from vram_radar.usage_surface import (STRIP_DENSITY, compact_value, place_columns, set_name_cell, strip_icon_px,
+from vram_radar.usage_surface import (STRIP_DENSITY, compact_value, place_columns, set_name_cell, strip_icon_px, strip_reset_text,
                                       FIT_PLAN)
 from vram_radar.ui_dialogs import art_box, bundled_icon_path, icon_art_px, icon_source, letter_tile, provider_icon, _load_image
 
@@ -106,7 +106,7 @@ def run(save=None):
                         quota_fg = low_fg if idx == 0 else value_fg
                         dim_fg = quota_fg   # quota and reset share one colour
                         for font, text, fg in ((name_font, name, name_fg), (value_font, compact_value(value, level), quota_fg),
-                                               (value_font, reset if level < 1 else "", dim_fg)):
+                                               (value_font, strip_reset_text(reset) if level < 1 else "", dim_fg)):
                             lab = Label(); lab.AutoSize = False; lab.Font = font
                             lab.TextAlign = ContentAlignment.MiddleLeft; lab.BackColor = Color.Transparent
                             lab.ForeColor = Color.FromArgb(*fg); lab.Text = text; lab.Visible = bool(text)
@@ -132,13 +132,13 @@ def run(save=None):
                     # DrawToBitmap draws the client area at the client origin for a borderless form.
                     buf, stride = pixels(bmp)
                     key = f"{display:.2f}{'s' if strip_scale < 0.8 else ''}/{theme}/{mode}/f{factor}"
-                    need = math.ceil(6 * display * factor) if mode == "icons" else 1
+                    need = max(3, math.ceil(4 * display * factor)) if mode == "icons" else 3
                     cells = []
                     rects = []
                     for (name_label, value_label, reset_label), (name, *_) in zip(used, CELLS):
                         nr = (name_label.Left, name_label.Top, name_label.Right, name_label.Bottom)
                         vr = (value_label.Left, value_label.Top, value_label.Right, value_label.Bottom)
-                        rects += [nr, vr]
+                        rects += [nr, vr if not reset_label.Text else None]   # value/reset share padding (ink gap checked)
                         ni = ink_columns(buf, stride, bg, nr, bmp.Height)
                         vi = ink_columns(buf, stride, bg, vr, bmp.Height)
                         gap = (min(vi) - max(ni) - 1) if ni and vi else None
@@ -146,10 +146,11 @@ def run(save=None):
                         if reset_label.Text:
                             rr = (reset_label.Left, reset_label.Top, reset_label.Right, reset_label.Bottom)
                             rects.append(rr)
+                            rects[-2] = (vr[0], vr[1], min(vr[2], rr[0]), vr[3])
                             ri = ink_columns(buf, stride, bg, rr, bmp.Height)
                             reset_gap = (min(ri) - max(vi) - 1) if ri and vi else None
                             # Quota and reset stay two readable items (>= a thin space apart).
-                            if reset_gap is None or reset_gap < max(2, math.ceil(2 * display * factor)):
+                            if reset_gap is None or reset_gap < max(3, math.ceil(2 * display * factor)):
                                 failures.append(f"{key} {name}: quota/reset gap {reset_gap}")
                             if reset_label.GetPreferredSize(Size(0, 0)).Width > reset_label.Width or (ri and max(ri) >= rr[2] - 1):
                                 failures.append(f"{key} {name}: reset clipped")
@@ -199,9 +200,14 @@ def run(save=None):
                             if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]:
                                 failures.append(f"{key}: overlap {a} {b}")
                     col_gap = used[2][0].Left - max(c.Right for c in (*used[0][1:], *used[1][1:]) if c.Visible)
-                    if col_gap < 1:
-                        failures.append(f"{key}: columns touch ({col_gap})")
-                    results.append({"case": key, "width": width, "column_gap": col_gap, "cells": cells})
+                    left_ink = [x for c in (*used[0][1:], *used[1][1:]) if c.Visible and c.Text
+                                for x in ink_columns(buf, stride, bg, (c.Left, c.Top, c.Right, c.Bottom), bmp.Height)]
+                    right_ink = [x for c in (used[2][0], used[3][0])
+                                 for x in ink_columns(buf, stride, bg, (c.Left, c.Top, c.Right, c.Bottom), bmp.Height)]
+                    col_ink_gap = (min(right_ink) - max(left_ink) - 1) if left_ink and right_ink else None
+                    if col_gap < 1 or col_ink_gap is None or col_ink_gap < max(3, math.ceil(6 * display * factor)):
+                        failures.append(f"{key}: columns too close ({col_gap}/{col_ink_gap})")
+                    results.append({"case": key, "width": width, "column_gap": col_gap, "column_ink_gap": col_ink_gap, "cells": cells})
                     if save and factor == 1.0:
                         bmp.Save(os.path.join(save, "strip_" + key.split("/f")[0].replace("/", "_").replace(".", "_") + ".png"))
                     bmp.Dispose(); form.Dispose()

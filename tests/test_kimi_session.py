@@ -213,8 +213,8 @@ class KimiParserTests(unittest.TestCase):
         info = us.provider_reading(out, {"id": "kimi", "name": "Kimi", "short": "Kimi"}, "zh-CN", now=60_000)
         self.assertTrue(info["action"])
         self.assertEqual((info["quota"], info["reset"]), ("\u672a\u8fd0\u884c", ""))
-        self.assertEqual(quota_color(None, warning=True, action=True), usage_color(0))
-        self.assertNotEqual(quota_color(None, warning=True, action=True), quota_color(None, warning=True))
+        self.assertEqual(quota_color(None, warning=True, action=True), usage_color(None))   # neutral grey
+        self.assertEqual(quota_color(None, action=True), usage_color(None))
 
     def test_relogin_shows_sign_in_in_attention_colour(self):
         out = kimi.apply_session({"facts": []}, {"status": "unauthorized", "login_valid": False}, now=2_000)

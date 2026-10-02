@@ -170,7 +170,7 @@ RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
 # 图标 mode: icon size (px at the strip's 100 % scale) and the clear gap
 # between an icon and its value in px at 100 % *display* scale.
 ICON_PX = 15
-ICON_GAP = 8
+ICON_GAP = 5   # 10-02 19:18: tighter icon -> value (was 8)
 
 
 def strip_icon_px(strip_scale: float, factor: float = 1.0) -> int:
@@ -198,6 +198,13 @@ def set_name_cell(name_label, image, name: str, strip_scale: float, factor: floa
     name_label.Text = "" if image is not None else name
 
 
+def strip_reset_text(text: str) -> str:
+    """Strip display of a countdown: a hair space inside '1d\u200a6h' (4-5 px
+    at 150 % instead of 7, so it stays tighter than the quota -> reset gap;
+    tooltip/web keep '1d 6h')."""
+    return (text or "").replace(" ", "\u200a")
+
+
 def place_columns(used, strip_scale: float, factor: float) -> int:
     """Lay out (name, value[, reset]) label cells, two rows per column;
     returns the client width.  Icon cells reserve exactly the icon width and
@@ -207,7 +214,10 @@ def place_columns(used, strip_scale: float, factor: float) -> int:
     from System.Drawing import Point, Size
     scale = lambda value: round(value * strip_scale)
     icon_px = strip_icon_px(strip_scale, factor)
-    x, gap, inner, rgap = scale(7*factor), scale(10*factor), scale(4*factor), 0   # label padding already reads as a space
+    # Label padding already reads as a space: the reset label overlaps the
+    # value's empty right padding by rgap (ink stays >= 3 px apart, checked by
+    # tools/check_strip_pixels.py); columns 7 px apart (was 10).
+    x, gap, inner, rgap = scale(7*factor), scale(7*factor), scale(4*factor), -max(0, scale(2*factor) - 2)
     preferred = lambda label: label.GetPreferredSize(Size(0, 0)).Width
 
     def widths(cell):
@@ -2459,7 +2469,7 @@ class CodexUsageSurface:
                 name_label.Text = "" if show_icons and multi and name_label.Image is not None else name
                 level = getattr(self, "_fit_level", 0)
                 value_label.Text = compact_value(value, level)
-                reset_label.Text = reset_txt if level < 1 else ""
+                reset_label.Text = strip_reset_text(reset_txt) if level < 1 else ""
                 # Quota and reset share one colour (same rule for every provider).
                 name_label.ForeColor, value_label.ForeColor, reset_label.ForeColor = muted, color, color
                 name_label.Visible = value_label.Visible = True
@@ -2503,7 +2513,7 @@ class CodexUsageSurface:
                         self._fit_level = level
                         for (_, value_label, reset_label), (_, value, reset_txt, _) in zip(used, cells):
                             value_label.Text = compact_value(value, level)
-                            reset_label.Text = reset_txt if level < 1 else ""
+                            reset_label.Text = strip_reset_text(reset_txt) if level < 1 else ""
                             reset_label.Visible = bool(reset_label.Text)
                         fonts = self._fit_fonts.get(factor)
                         if fonts is None:

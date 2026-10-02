@@ -117,7 +117,7 @@ def curve_lab(fraction: float, bright: bool):
     return tuple(a + (b - a) * t for a, b in zip(samples[lo], samples[hi]))
 
 
-def readable(lab, surface, minimum=MIN_CONTRAST):
+def readable(lab, surface, minimum=MIN_CONTRAST, strict=False):
     """Move lightness away from ``surface`` (hue kept) until ``minimum``
     contrast, or as far as sRGB allows."""
     darker = luminance(surface) > 0.18
@@ -128,9 +128,15 @@ def readable(lab, surface, minimum=MIN_CONTRAST):
     # Smallest lightness shift that reaches the target (bisection keeps the
     # adjusted colours continuous instead of stepping).
     near, far = L, (0.0 if darker else 1.0)
+    if strict:
+        # Neutral grey: black or white always reach >= 4.58:1, so aim for the
+        # full 4.5:1 towards whichever end contrasts more.
+        if contrast(from_oklab((1.0 - far, a, b)), surface) > contrast(from_oklab((far, a, b)), surface):
+            far = 1.0 - far
     # Mid-tone surfaces (some accent styles) cannot reach 4.5:1 with any hue;
     # then settle for 80 % of the best possible contrast and keep the hue.
-    minimum = min(minimum, 0.8 * contrast(from_oklab((far, a, b)), surface))
+    if not strict:
+        minimum = min(minimum, 0.8 * contrast(from_oklab((far, a, b)), surface))
     if contrast(rgb, surface) >= minimum:
         return rgb
     for _ in range(30):
@@ -145,7 +151,7 @@ def readable(lab, surface, minimum=MIN_CONTRAST):
 @lru_cache(maxsize=4096)
 def _color(fraction_key, bright, surface):
     if fraction_key is None:
-        return readable(to_oklab(NEUTRAL[bright]), surface)
+        return readable(to_oklab(NEUTRAL[bright]), surface, strict=True)
     return readable(curve_lab(fraction_key / 1000, bright), surface)
 
 
@@ -162,15 +168,14 @@ def usage_color(value, *, bright=False, waiting=False, surface=None):
 def quota_color(percent=None, *, low=False, warning=False, known=False, bright=False, surface=None, action=False):
     """The single rule for every provider's quota and reset text:
 
-    * stale / error / sign-in needed -> neutral grey (the value is not current);
+    * inactive / unavailable (not running, not installed, signed out, sign-in
+      needed, stale, error) -> neutral grey, >= 4.5:1 on every surface;
     * a remaining percentage -> the gradient at that percentage;
     * used up / empty balance (no percentage) -> the 0 % end;
     * any other known amount (balance, "available", reset only) -> the 100 % end;
     * no quota information at all (bare status) -> neutral grey.
     """
-    if action:   # the user must act (open the app / sign in): attention end, never quiet grey
-        return usage_color(0, bright=bright, surface=surface)
-    if warning:
+    if action or warning:   # 10-02 19:18: states are grey, not red; only quota values use the gradient
         return usage_color(None, bright=bright, surface=surface)
     if isinstance(percent, (int, float)) and not isinstance(percent, bool) and math.isfinite(percent):
         return usage_color(percent, bright=bright, surface=surface)
