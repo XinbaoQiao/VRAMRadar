@@ -112,6 +112,7 @@ def _show_reading(state: dict, reading: dict, now: float, *, read_at: float | No
         state["headline"] = pair("可用", "OK")
     if exhausted or isinstance(used, (int, float)) or state["headline"].get("en") == "None":
         state["quota"] = state["headline"]   # remaining share / used up / none
+        state["quota_percent"] = 0 if exhausted else (100 - used if isinstance(used, (int, float)) else None)
     brief_zh = f"已用 {used:.0f}%" if isinstance(used, (int, float)) else ("已用尽" if exhausted else "可用")
     brief_en = f"{used:.0f}% used" if isinstance(used, (int, float)) else ("used up" if exhausted else "available")
     if isinstance(reset, (int, float)) and reset > now:

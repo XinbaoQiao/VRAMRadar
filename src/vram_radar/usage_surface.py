@@ -11,6 +11,7 @@ from typing import Callable
 import os
 
 from .reset_format import RESET_RE, reset_full, reset_short, strip_parts, valid_epoch
+from .quota_colors import quota_color as quota_rule_color, usage_color
 
 # Alpha of the strip's hit-test window: WinForms maps Opacity to a byte
 # (int(opacity * 255)), so this is alpha 1/255 -- invisible, yet hit-testable
@@ -92,7 +93,7 @@ def quota_lines(state: dict, language: str = "zh-CN", *, now: float | None = Non
         elif expired:
             countdown = "Updating…" if english else "等待更新"
         else:
-            countdown = reset_short(reset - now)
+            countdown = reset_short(reset - now, english)
         value = window.get("remaining_percent")
         valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
                  and math.isfinite(value) and not expired and not state.get("stale")
@@ -316,6 +317,27 @@ def content_right(pixels, width, height, threshold=60, min_hits=2, max_gap=None)
     return last
 
 
+def bar_plausible(pixels, width, height, threshold=60, max_share=0.25):
+    """False when a capture does not look like taskbar background around content.
+
+    On the taskbar a column's top and bottom rows show the same background;
+    on the lock-screen photo (or a full-screen overlay) they differ in most
+    columns, and every column would read as "content".
+    """
+    if width <= 0 or height < 8 or len(pixels) < width * height * 4:
+        return False
+    def px(x, y):
+        i = (y * width + x) * 4
+        return pixels[i + 2], pixels[i + 1], pixels[i]
+    rows = (1, 2, 3, height - 4, height - 3, height - 2)
+    bad = 0
+    for x in range(0, width, 2):
+        refs = [px(x, y) for y in rows]
+        spread = sum(max(c[k] for c in refs) - min(c[k] for c in refs) for k in range(3))
+        bad += spread > threshold
+    return bad <= max_share * ((width + 1) // 2)
+
+
 def capture_screen(rect):
     """BGRA bytes of a physical-pixel screen rect, or None."""
     try:
@@ -362,30 +384,102 @@ def capture_screen(rect):
         return None
 
 
-def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
-    """Shrink the Widgets button to its visible content (icon + weather text).
+def weather_scan_limit(elements, own=None):
+    """Right end of the area scanned for weather content.
 
-    Explorer reports the weather button much wider than what it draws
-    (228 px for "23°C / 局部多云" at 150 %, text ending near 150 px), which
-    made the empty gap look ~100 px narrower than it is.  The part covered by
-    our own strip is never scanned, so the strip cannot push itself away.
+    Not the Widgets button's UIA rect: Explorer does not always widen that
+    rect when the weather text grows (10-02: text drawn past its 237 px
+    right edge while the strip sat 18 px right of the rect -> overlap).  The
+    scan runs to Start/Search/first app instead, stopping early at our own
+    strip (never scanned) -- the blank-run rule in ``content_right`` ends it
+    right after the text anyway.
+    """
+    left, top, right, bottom = elements["WidgetsButton"]
+    bounds = [r[0] for k, r in elements.items()
+              if k in (*RIGHT_BOUND_IDS, "first_app") and r and r[0] > left]
+    limit = max(right, min(bounds)) if bounds else right
+    if own and own[1] < bottom and own[3] > top and own[2] > left and own[0] < limit:
+        limit = max(left, own[0])
+    return limit
+
+
+def scan_bound(elements):
+    """Left edge of Start/Search/first app right of the Widgets button (or None)."""
+    left = elements["WidgetsButton"][0]
+    bounds = [r[0] for k, r in elements.items()
+              if k in (*RIGHT_BOUND_IDS, "first_app") and r and r[0] > left]
+    return min(bounds) if bounds else None
+
+
+def screen_locked() -> bool:
+    """True while the lock screen is up (LockApp/LogonUI in the foreground).
+
+    The desktop capture then shows the lock-screen photo, which reads as
+    "weather content" all the way to Start (10-02 16:3x: strip stepped onto
+    the Search box while the PC was locked).
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return True   # secure desktop (UAC/LogonUI): no foreground window
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        handle = kernel32.OpenProcess(0x1000, False, pid.value)
+        if not handle:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(520)
+            size = wintypes.DWORD(520)
+            if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                return False
+        finally:
+            kernel32.CloseHandle(handle)
+        return buf.value.rsplit("\\", 1)[-1].lower() in ("lockapp.exe", "logonui.exe")
+    except Exception:
+        return False
+
+
+def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
+    """Set the Widgets right edge to the end of its visible content.
+
+    Explorer reports the weather button wider than what it draws (228 px
+    for "23\u00b0C / \u5c40\u90e8\u591a\u4e91" at 150 %, text ending near 150 px)
+    -- and sometimes narrower once the text grows.  The visible end is
+    measured up to ``weather_scan_limit``; our own strip is never scanned, so
+    the strip cannot push itself away.  ``_weather_scan`` = (limit,
+    content runs into the limit) for ``TaskbarLayout.widest_weather``.
     """
     widgets = elements.get("WidgetsButton") if elements else None
     if not widgets or widgets[2] - widgets[0] < min_width:
         return elements
     left, top, right, bottom = widgets
-    if own and own[0] < right and own[2] > left and own[1] < bottom and own[3] > top:
-        right = max(left, min(right, own[0]))
-    if right - left < min_width:
-        return elements
-    pixels = capture((left, top, right, bottom))
+    limit = weather_scan_limit(elements, own)
+    if limit - left < min_width:
+        trimmed = dict(elements)
+        trimmed["_weather_scan"] = (limit, True, scan_bound(elements))   # strip sits on the weather: cannot see it
+        return trimmed
+    pixels = capture((left, top, limit, bottom))
     # Weather icon->text spacing is ~0.14 x bar height; the strip keeps >= 18 px
     # (+ its own padding) clear, so a 0.2 x height blank run ends the widget.
-    edge = content_right(pixels, right - left, bottom - top, max_gap=max(6, round((bottom - top) * 0.2))) if pixels else None
+    edge = content_right(pixels, limit - left, bottom - top, max_gap=max(6, round((bottom - top) * 0.2))) if pixels else None
     if not edge or edge < min_width // 2:
         return elements
     trimmed = dict(elements)
-    trimmed["WidgetsButton"] = (left, top, min(widgets[2], left + edge), bottom)
+    reaches = left + edge >= limit - 1
+    bound = scan_bound(elements)
+    if (reaches and not (own and limit == max(left, own[0]))) or not bar_plausible(pixels, limit - left, bottom - top):
+        # "Content" running into Start/Search is no weather text (the blank
+        # run always ends it first): lock screen, a full-screen overlay or a
+        # capture glitch.  Keep the previous reading.
+        trimmed["_weather_scan"] = (limit, None, bound)
+        return trimmed
+    trimmed["WidgetsButton"] = (left, top, left + edge, bottom)
+    trimmed["_weather_scan"] = (limit, reaches, bound)
     return trimmed
 
 
@@ -398,8 +492,10 @@ class TaskbarLayout:
     back to the classic tray anchor; nothing here can raise into the UI loop.
     """
 
-    def __init__(self, interval: float = 5.0, retry: float = 1.0, trim=trim_widgets, background=False):
+    def __init__(self, interval: float = 5.0, retry: float = 1.0, trim=trim_widgets, background=False,
+                 locked=screen_locked):
         self.interval = interval
+        self.locked = locked if trim is not None else (lambda: False)
         # background: after the first good reading, refresh on a worker
         # thread (UIA FindAll + widget pixel scan took 70-300 ms on the UI
         # thread) and serve the cached reading meanwhile.
@@ -456,10 +552,15 @@ class TaskbarLayout:
         if usable_layout(found) and self.trim is not None:
             raw_widgets = found.get("WidgetsButton")
             try:
-                found = self.trim(found, exclude)
-                found = self.widest_weather(found, raw_widgets, exclude)
+                if self.locked():
+                    # Lock screen: the capture shows its photo, not the bar.
+                    found = self.hold_weather(found)
+                else:
+                    found = self.trim(found, exclude)
+                    found = self.widest_weather(found, raw_widgets, exclude)
             except Exception as exc:  # worker thread: never die silently mid-update
                 logging.getLogger("vram_radar").info("widget trim failed (%s)", type(exc).__name__)
+            found = {k: v for k, v in found.items() if not k.startswith("_")}
         if usable_layout(found):
             self._good_key, self._good, self.failures = key, found, 0
             self._elements = found
@@ -472,47 +573,65 @@ class TaskbarLayout:
             self._elements = self._good if same_bar else {}
         return self._elements
 
-    WEATHER_WINDOW = 600.0
+    # A narrower weather reading is followed once it has held this long
+    # (the widget briefly shows shorter texts while it updates); a wider one
+    # applies at once.
+    WEATHER_WINDOW = 20.0
+
+    def hold_weather(self, found) -> dict:
+        """Reuse the last served weather edge (same Widgets button) unmeasured."""
+        found = dict(found)
+        raw, last = found.get("WidgetsButton"), self._elements.get("WidgetsButton") if self._elements else None
+        if raw and last and (raw[0], raw[1], raw[3]) == (last[0], last[1], last[3]):
+            found["WidgetsButton"] = last
+        return found
 
     def widest_weather(self, found, raw_widgets, own, now=None) -> dict:
-        """Replace the trimmed Widgets right edge by the widest recent one.
+        """Settle the measured weather right edge (see ``trim_widgets``).
 
-        A reading whose content runs right up to our own strip (the part we
-        cannot scan) may be wider than it looks: it falls back to the full
-        button rect for now (safe) and is not remembered, so the next scan
-        -- with the strip moved clear -- measures the real width.
+        * content running into our own strip (we cannot see under it):
+          assume it reaches past the strip for now, so the strip steps clear
+          and the next scan measures the real end;
+        * wider than recent readings: applied immediately;
+        * narrower: applied after it held for ``WEATHER_WINDOW`` seconds.
+        Readings right up against the strip are used but not remembered (a
+        scan taken while the strip moved could include its pixels).
         """
-        trimmed = found.get("WidgetsButton") if found else None
+        found = dict(found or {})
+        scan = found.pop("_weather_scan", None)
+        trimmed = found.get("WidgetsButton")
         if not trimmed or not raw_widgets:
             return found
         now = time.monotonic() if now is None else now
         key = (raw_widgets[0], raw_widgets[1], raw_widgets[3])
         if key != self._weather_key:
             self._weather_key, self._weather_seen = key, []
-        limit = raw_widgets[2]
-        if own and own[0] < raw_widgets[2] and own[2] > raw_widgets[0] and own[1] < raw_widgets[3] and own[3] > raw_widgets[1]:
-            limit = max(raw_widgets[0], min(raw_widgets[2], own[0]))
+        limit, occluded, bound = (tuple(scan) + (None,))[:3] if scan else (raw_widgets[2], False, None)
         right = trimmed[2]
-        occluded = limit < raw_widgets[2] and right >= limit - 1
-        if occluded:
-            right = raw_widgets[2]
-        elif right < raw_widgets[2]:
-            # Remember a width only when two readings in a row agree and it
-            # is not right up against our own strip (a reading taken while the
-            # strip was moving could include its pixels).  Unconfirmed wider
-            # readings still apply now (safe side), they just are not kept.
-            near_own = bool(own) and own[0] - right <= max(6, round((raw_widgets[3] - raw_widgets[1]) * 0.2))
+        if occluded is None:
+            # Implausible scan: keep what was served last (else the raw rect).
+            last = self._elements.get("WidgetsButton") if self._elements else None
+            right = last[2] if last and (last[0], last[1], last[3]) == (trimmed[0], trimmed[1], trimmed[3]) else raw_widgets[2]
+        elif occluded:
+            # Explorer's rect when it reaches past the strip (it usually grows
+            # with the text); otherwise step right by one bar height (about
+            # three characters) and re-measure -- never a jump past the whole
+            # strip, which could leave no room before Start.
+            step = raw_widgets[3] - raw_widgets[1]
+            right = raw_widgets[2] if raw_widgets[2] > limit + 1 else limit + step
+        else:
+            near_own = bool(own) and 0 <= own[0] - right <= max(6, round((raw_widgets[3] - raw_widgets[1]) * 0.2))
             pending, self._weather_pending = getattr(self, "_weather_pending", None), right
             if not near_own and pending is not None and abs(pending - right) <= 1:
                 self._weather_seen.append((now, right))
         self._weather_seen = [(t, r) for t, r in self._weather_seen if now - t <= self.WEATHER_WINDOW][-200:]
         if self._weather_seen:
             right = max(right, *(r for _, r in self._weather_seen))
-        if right == trimmed[2]:
-            return found
-        out = dict(found)
-        out["WidgetsButton"] = (trimmed[0], trimmed[1], min(raw_widgets[2], right), trimmed[3])
-        return out
+        if bound is not None:
+            right = min(right, bound)   # never claim Start/Search/apps as weather
+        if right != trimmed[2]:
+            found["WidgetsButton"] = (trimmed[0], trimmed[1], right, trimmed[3])
+        return found
 
     def _read(self, taskbar_handle) -> dict:
         try:
@@ -625,6 +744,8 @@ class PlacementDebouncer:
             else:
                 self._pending, self._count = target, 1
             needed = self.switch_confirm if target[0] != self.current[0] else self.confirm
+            if target[0] == self.current[0] == "left" and target[1] > self.current[1]:
+                needed = 1   # weather grew toward/under the strip: step clear at once
             if self._count >= needed:
                 self.current, self._pending, self._count = target, None, 0
         return self.current
@@ -810,7 +931,7 @@ def compact_value(value: str, level: int) -> str:
     2 also drops unit words ("已用 15%" -> "15%", "¥6.00" -> "¥6")."""
     text = str(value or "")
     if level >= 1:
-        text = re.sub(r"\s+<?\d+(?:\.\d)?[hd]$", "", text)
+        text = re.sub(r"\s+(?:<?\d+(?:\.\d)?[hd]|" + RESET_RE.pattern + ")$", "", text)
     if level >= 2:
         text = re.sub(r"^(?:已用|Used)\s*(\d+(?:\.\d+)?%)$", r"\1", text)
         text = re.sub(r"(\d+)\.00(?!\d)", r"\1", text)
@@ -935,34 +1056,6 @@ def windows_surface_obscured(widget, docked=True):
                 and rect.right >= screen.right and rect.bottom >= screen.bottom)
 
 
-def usage_color(value, *, bright=False, waiting=False):
-    if not isinstance(value, (int, float)) or not math.isfinite(value):
-        return (112, 120, 125) if bright else (160, 168, 173)
-    # Berry, coral, amber, jade and ocean blue. Dark/light variants preserve
-    # legibility; interpolation makes these anchors a continuous scale.
-    colors = ((160, 62, 96), (184, 108, 84), (158, 130, 67),
-              (51, 139, 120), (55, 125, 163)) if bright else (
-              (227, 143, 163), (230, 166, 135), (218, 190, 119),
-              (105, 195, 173), (112, 184, 220))
-    value = max(0, value)
-    # A continuous proximity curve, without freezing all waits above 72 hours.
-    # 18h is the midpoint; longer waits gradually approach the cool endpoint.
-    fraction = 1 - 64800/(value+64800) if waiting else min(1, value/100)
-    position = fraction*(len(colors)-1)
-    index = min(len(colors)-2, int(position))
-    t = position-index
-    # Interpolate light rather than gamma-encoded bytes. No per-segment easing:
-    # it previously stalled around each anchor and looked like discrete tiers.
-    def linear(channel):
-        channel /= 255
-        return channel/12.92 if channel <= .04045 else ((channel+.055)/1.055)**2.4
-    def encoded(channel):
-        channel = 12.92*channel if channel <= .0031308 else 1.055*channel**(1/2.4)-.055
-        return max(0, min(255, round(channel*255)))
-    return tuple(encoded(linear(a)*(1-t)+linear(b)*t)
-                 for a, b in zip(colors[index], colors[index+1]))
-
-
 def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now: float | None = None,
                    time_format: str = "decimal") -> dict:
     """Codex strip text: remaining quota and time left in the window.
@@ -996,7 +1089,7 @@ def widget_reading(state: dict, index: int = 0, language: str = "zh-CN", *, now:
         countdown = "—"
     else:
         # Legacy saved format values remain readable but no longer alter display.
-        countdown = reset_short(left)
+        countdown = reset_short(left, english)
     return {"value": row["value"], "percent": percent, "countdown": countdown,
             "remaining_seconds": left if not warning and left is not None and left > 0 else None,
             "warning": warning, "low": row["low"]}
@@ -1062,7 +1155,8 @@ def provider_reading(state: dict | None, spec: dict, language: str = "zh-CN", *,
     if subline and re.match(r"^(记录|As of|旧记录|Old data)", subline):
         brief += f" ({subline})" if english else f"（{subline}）"
     return {"name": short, "value": headline, "countdown": subline or _provider_status(state, english),
-            "quota": local(state.get("quota")), "reset": reset_short(reset - now) if reset_ok else "",
+            "percent": state.get("quota_percent"),
+            "quota": local(state.get("quota")), "reset": reset_short(reset - now, english) if reset_ok else "",
             "reset_full": reset_full(reset, english) if reset_ok else "",
             "low": bool(state.get("low")), "warning": warning, "detail": "\n".join(lines),
             "brief": f"{name}  {brief}"}
@@ -1552,7 +1646,8 @@ class CodexUsageSurface:
             control.MouseEnter += update_hover
             control.MouseLeave += update_hover
 
-        self._layout = TaskbarLayout(background=True)
+        # 2 s: a growing weather text is re-measured within a few seconds.
+        self._layout = TaskbarLayout(interval=2.0, background=True)
         self._slot = "tray"
         self._placer = PlacementDebouncer(confirm=3, switch_confirm=5)
         self._bar_handle = None
@@ -2276,8 +2371,11 @@ class CodexUsageSurface:
             bright = self._palette[3]
             if rows:
                 reading = widget_reading(state, index, language)
-                quota_color = Color.FromArgb(*usage_color(reading["percent"], bright=bright))
-                time_color = Color.FromArgb(*usage_color(reading["remaining_seconds"], bright=bright, waiting=True))
+                # One colour rule for quota and reset, every provider (quota_colors).
+                quota_color = Color.FromArgb(*quota_rule_color(
+                    reading["percent"], low=reading["low"], warning=reading["warning"],
+                    bright=bright, surface=self._palette[0]))
+                time_color = quota_color
                 self._labels[0].ForeColor = quota_color
                 self._labels[0].Text = reading["value"]
                 self._countdowns[0].Text = reading["countdown"]
@@ -2314,23 +2412,23 @@ class CodexUsageSurface:
                             "auto read %s: first result %.1f s after consent", spec.id, time.time() - granted)
                 provider_rows.append(info)
                 value, reset_txt = strip_parts(info.get("quota", ""), info.get("reset", ""), info["value"])
-                color = (Color.FromArgb(*usage_color(0, bright=bright)) if info["low"] else
-                         warning_color if info["warning"] else fg)
+                color = Color.FromArgb(*quota_rule_color(
+                    info.get("percent"), low=info["low"], warning=info["warning"],
+                    known=bool(info.get("quota") or info.get("reset")), bright=bright, surface=self._palette[0]))
                 cells.append((info["name"], value, reset_txt, color))
                 cell_ids.append(spec.id)
             while len(self._extra_columns) < len(cells):
                 make_column()
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
                 (fg.R, fg.G, fg.B), self._palette[0])))
-            dim = lambda c: Color.FromArgb(*(round(f*0.7 + b*0.3) for f, b in zip((c.R, c.G, c.B), self._palette[0])))
             for (name_label, value_label, reset_label), (name, value, reset_txt, color) in zip(self._extra_columns, cells):
                 # 图标 mode: the icon replaces the name (tooltip keeps full names).
                 name_label.Text = "" if show_icons and multi and name_label.Image is not None else name
                 level = getattr(self, "_fit_level", 0)
                 value_label.Text = compact_value(value, level)
                 reset_label.Text = reset_txt if level < 1 else ""
-                # Reset countdown: same weight, slightly dimmer than the quota.
-                name_label.ForeColor, value_label.ForeColor, reset_label.ForeColor = muted, color, dim(color)
+                # Quota and reset share one colour (same rule for every provider).
+                name_label.ForeColor, value_label.ForeColor, reset_label.ForeColor = muted, color, color
                 name_label.Visible = value_label.Visible = True
                 reset_label.Visible = bool(reset_label.Text)
             for name_label, value_label, reset_label in self._extra_columns[len(cells):]:

@@ -2336,14 +2336,37 @@ function codexWindowLabel(window) {
   return `${number(minutes)} ${localizedText('分钟额度')}`;
 }
 
+// BEGIN quota-gradient (tools/gen_quota_gradient.py)
+const QUOTA_GRADIENT = {"light":[[160,62,96],[161,64,96],[162,65,96],[163,67,95],[164,69,95],[165,70,95],[166,72,95],[167,73,94],[168,75,94],[169,76,94],[170,78,93],[171,80,93],[172,81,93],[173,83,92],[173,84,92],[173,84,91],[172,85,89],[172,85,88],[172,85,86],[171,86,85],[171,86,83],[170,87,81],[170,87,80],[169,88,78],[169,88,77],[168,89,75],[168,89,74],[167,90,72],[167,90,70],[166,91,69],[165,91,67],[164,92,65],[163,93,64],[162,94,61],[161,94,59],[160,95,57],[159,96,55],[157,97,53],[155,98,50],[154,99,49],[153,99,46],[151,100,45],[149,101,43],[148,102,42],[146,103,42],[144,104,41],[141,105,41],[139,106,42],[137,107,43],[134,108,45],[131,109,46],[129,109,48],[127,110,50],[124,111,52],[122,112,54],[119,113,57],[116,113,58],[114,114,60],[111,115,63],[108,115,64],[106,116,66],[103,117,68],[100,117,70],[97,118,73],[94,118,74],[91,119,77],[87,120,78],[84,120,81],[81,120,82],[78,121,85],[74,121,86],[70,122,89],[66,122,91],[63,123,93],[58,123,95],[53,123,97],[49,124,100],[44,124,102],[38,124,104],[32,125,106],[27,125,110],[23,125,112],[18,125,114],[14,124,117],[12,124,120],[13,124,122],[14,124,125],[14,123,127],[18,123,130],[21,123,132],[23,122,134],[26,122,137],[29,122,138],[32,121,141],[35,121,143],[37,120,145],[40,120,148],[42,119,149],[45,119,152],[46,118,153],[48,118,156]],"dark":[[227,143,163],[227,144,162],[227,145,160],[228,146,159],[228,148,158],[228,149,156],[228,150,155],[229,151,154],[229,152,152],[229,153,151],[229,154,149],[230,155,148],[230,156,147],[230,157,145],[230,158,144],[230,160,142],[230,161,141],[230,162,140],[230,163,138],[230,164,137],[230,165,136],[230,167,134],[230,168,133],[230,169,132],[230,170,131],[230,171,129],[230,173,128],[230,174,127],[230,175,125],[230,176,124],[230,177,123],[230,179,122],[230,180,120],[229,181,119],[229,182,118],[228,184,118],[227,185,117],[226,186,117],[224,187,117],[222,189,118],[219,189,118],[217,190,119],[214,191,121],[212,192,122],[209,192,123],[206,193,125],[204,193,126],[201,193,128],[198,194,129],[195,194,130],[192,194,132],[190,194,133],[187,195,135],[184,195,136],[181,195,137],[178,195,139],[175,195,140],[172,195,142],[169,196,143],[166,196,144],[163,196,146],[160,196,147],[157,196,149],[154,196,150],[150,196,152],[147,196,153],[144,196,155],[141,196,156],[137,196,157],[134,196,159],[130,196,161],[127,196,162],[124,196,164],[120,196,165],[116,196,167],[113,195,169],[109,195,170],[106,195,172],[103,195,174],[100,195,177],[98,194,179],[96,194,181],[95,193,183],[95,193,186],[95,193,188],[95,192,190],[95,192,192],[96,191,194],[97,191,197],[98,190,199],[99,190,201],[100,189,203],[102,188,205],[103,188,207],[104,187,208],[106,187,210],[107,186,212],[109,186,214],[110,185,216],[111,185,218],[112,184,220]]};
+// END quota-gradient
+
+// Same colour rule as the taskbar strip (quota_colors.py): remaining % on
+// the OKLab gradient, light/dark variants picked by the page theme.
+function quotaColor(percent) {
+  if (!Number.isFinite(percent)) return '';
+  const i = Math.max(0, Math.min(100, Math.round(percent)));
+  const [l, d] = [QUOTA_GRADIENT.light[i], QUOTA_GRADIENT.dark[i]];
+  return `light-dark(rgb(${l.join(',')}), rgb(${d.join(',')}))`;
+}
+
+// Same wording as reset_format.reset_short: "6\u592912\u5c0f\u65f6" / "6d 12h", "5\u5c0f\u65f6" / "5h", "45\u5206\u949f" / "45m".
+function resetCountdown(seconds, english) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (seconds < 3600) {
+    const minutes = Math.min(59, Math.max(1, Math.ceil(seconds / 60)));
+    return english ? `${minutes}m` : `${minutes}\u5206\u949f`;
+  }
+  const total = Math.floor(seconds / 3600);
+  const days = Math.floor(total / 24), hours = total % 24;
+  if (english) return [days ? `${days}d` : '', hours ? `${hours}h` : ''].filter(Boolean).join(' ');
+  return `${days ? `${days}\u5929` : ''}${hours ? `${hours}\u5c0f\u65f6` : ''}`;
+}
+
 function codexResetLabel(window, now) {
   if (!Number.isFinite(window.resets_at)) return localizedText('重置时间未知');
   const left = Math.ceil((window.resets_at * 1000 - now) / 60000);
   if (left <= 0) return localizedText('等待额度更新');
-  const days = Math.floor(left / 1440);
-  const hours = Math.floor(left % 1440 / 60);
-  const minutes = left % 60;
-  const countdown = `${days ? `${days}d ` : ''}${hours ? `${hours}h ` : ''}${minutes}m`;
+  const countdown = resetCountdown(window.resets_at - now / 1000, globalThis.VRAMRadarI18n?.language === 'en');
   return `${localizedText('重置倒计时')} ${countdown}`;
 }
 
@@ -2363,7 +2386,8 @@ function renderCodexUsage(state = codexUsageState) {
       ? Math.max(0, Math.min(100, window.remaining_percent)) : null;
     const resetTime = Number.isFinite(window.resets_at)
       ? new Date(window.resets_at * 1000).toLocaleString(activeLocale()) : '';
-    return `<article class="quota-quota-card${percent != null && percent <= 10 ? ' quota-low' : ''}">
+    const tone = quotaColor(percent);
+    return `<article class="quota-quota-card${percent != null && percent <= 10 ? ' quota-low' : ''}"${tone ? ` style="--quota-color:${tone}"` : ''}>
       <div class="quota-quota-label"><span>${escapeHtml(window.name || 'Codex')}</span><strong>${escapeHtml(codexWindowLabel(window))}</strong></div>
       <div class="quota-quota-value">${percent == null ? '—' : `${number(percent)}<small>%</small>`}<span>${escapeHtml(localizedText('剩余额度'))}</span></div>
       <div class="quota-quota-track" style="--quota-width:${percent ?? 0}%" ${percent == null ? '' : `role="meter" aria-label="${escapeHtml(localizedText('剩余额度'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`}><i></i></div>

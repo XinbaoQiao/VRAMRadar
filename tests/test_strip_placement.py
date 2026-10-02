@@ -90,12 +90,14 @@ class StripPlacementTests(unittest.TestCase):
 
     def test_side_switch_needs_more_readings_than_move(self):
         placer = PlacementDebouncer(confirm=3, switch_confirm=5)
-        left, moved, tray = ("left", 156, 1039), ("left", 170, 1039), ("tray", 1700, 1039)
+        left, moved, tray = ("left", 156, 1039), ("left", 142, 1039), ("tray", 1700, 1039)
         placer.propose(left)
         self.assertEqual([placer.propose(tray) for _ in range(5)], [left] * 4 + [tray])
         placer.propose(left)
         self.assertEqual([placer.propose(left) for _ in range(5)][-1], left)
-        self.assertEqual([placer.propose(moved) for _ in range(3)], [left, left, moved])
+        self.assertEqual([placer.propose(moved) for _ in range(3)], [left, left, moved])   # toward the weather: confirmed
+        away = ("left", 190, 1039)
+        self.assertEqual(placer.propose(away), away)    # away from a growing weather text: at once
 
     def test_small_jitter_is_ignored(self):
         placer = PlacementDebouncer(confirm=1, switch_confirm=1, tolerance=2)
@@ -124,9 +126,13 @@ if __name__ == "__main__":
 class WidestWeatherTests(unittest.TestCase):
     RAW = (9, 1528, 237, 1600)
 
-    def run_reading(self, layout, right, own, now):
+    def run_reading(self, layout, right, own, now, scan=None):
         found = {"WidgetsButton": (9, 1528, right, 1600), "StartButton": (623, 1528, 691, 1600)}
-        return layout.widest_weather(found, self.RAW, own, now=now)["WidgetsButton"][2]
+        if scan:
+            found["_weather_scan"] = scan
+        out = layout.widest_weather(found, self.RAW, own, now=now)
+        self.assertNotIn("_weather_scan", out)
+        return out["WidgetsButton"][2]
 
     def test_keeps_widest_recent_and_expires(self):
         layout = TaskbarLayout(trim=None)
@@ -134,12 +140,12 @@ class WidestWeatherTests(unittest.TestCase):
         self.assertEqual(self.run_reading(layout, 150, own=None, now=0), 150)    # "局部多云"
         self.assertEqual(self.run_reading(layout, 150, own=None, now=5), 150)    # confirmed -> remembered
         self.assertEqual(self.run_reading(layout, 113, own=own, now=10), 150)    # narrower: keep widest
-        self.assertEqual(self.run_reading(layout, 113, own=own, now=700), 113)   # old reading expired
+        self.assertEqual(self.run_reading(layout, 113, own=own, now=30), 113)    # narrower held > WEATHER_WINDOW
 
     def test_content_under_strip_is_assumed_full_button_once(self):
         layout = TaskbarLayout(trim=None)
         own = (121, 1538, 342, 1589)
-        self.assertEqual(self.run_reading(layout, 121, own=own, now=0), 237)     # cannot see past the strip
+        self.assertEqual(self.run_reading(layout, 121, own=own, now=0, scan=(121, True)), 237)     # cannot see past the strip
         self.assertEqual(self.run_reading(layout, 150, own=(255, 1538, 476, 1589), now=5), 150)  # real width
         self.assertEqual(self.run_reading(layout, 150, own=(168, 1538, 389, 1589), now=10), 150)
         self.assertEqual(layout._weather_seen, [(10, 150)])

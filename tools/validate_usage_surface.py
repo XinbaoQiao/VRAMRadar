@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from vram_radar.usage_surface import CodexUsageSurface, windows_taskbar_geometry, taskbar_anchor, taskbar_scale, windows_taskbar_dpi, left_slot
 from benchmark_webview_ui import FakeApi, _wait_until_ready
+from vram_radar.reset_format import RESET_RE
 
 
 def main() -> int:
@@ -97,7 +98,7 @@ def main() -> int:
                 def inspect_layout():
                     assertions["visible_with_main_window_hidden"] = bool(surface.form.Visible)
                     assertions["percent_and_countdown_visible"] = all("%" in label.Text for label in surface._labels[:2]) and all(
-                        "h" in label.Text for label in surface._countdowns[:2])
+                        RESET_RE.fullmatch(label.Text) for label in surface._countdowns[:2])
                     text_controls = [*surface._labels[:2], *surface._captions[:2], *surface._countdowns[:2]]
                     assertions["both_text_lines_fit"] = all(label.GetPreferredSize(Size(0, 0)).Height <= label.Height
                         and label.GetPreferredSize(Size(0, 0)).Width <= label.Width for label in text_controls)
@@ -288,16 +289,20 @@ def main() -> int:
                         surface._labels[0].Text == "42%" and surface._reading["percent"] == 42
                         and surface._window_menu.DropDownItems[1].Checked)
                     surface._window_menu.DropDownItems[0].PerformClick()
-                    assertions["reference_widget_size"] = (surface.form.Width == sum(round(n*surface._scale) for n in (5, 47, 2))
-                                                           and surface.form.Height == round(40*surface._scale))
+                    # Reference size, widened only as much as the unified countdown needs.
+                    countdown = surface._countdowns[0]
+                    assertions["reference_widget_size"] = (
+                        surface.form.Width >= sum(round(n*surface._scale) for n in (5, 47, 2))
+                        and surface.form.Width == round(5*surface._scale) + countdown.Width + round(2*surface._scale)
+                        and countdown.GetPreferredSize(Size(0, 0)).Width <= countdown.Width
+                        and surface.form.Height == round(40*surface._scale))
                 invoke(select_weekly)
                 invoke(lambda: assertions.update(text_only_strip=surface._labels[0].Left == round(5*surface._scale)
                     and all(c[1] in {"usage_background", "usage_labels"} for c in surface._display_choices)))
                 display["codex_time_format"] = "days"
                 invoke(tick)
                 invoke(lambda: assertions.update(unified_decimal_hours_ignore_legacy_preference=(
-                    surface._countdowns[0].Text.endswith("h")
-                    and "." in surface._countdowns[0].Text),
+                    bool(RESET_RE.fullmatch(surface._countdowns[0].Text))),
                     countdown_matches_percent_font=(surface._countdowns[0].Font.Bold
                         and surface._countdowns[0].Font.Size == surface._labels[0].Font.Size)))
                 display.update(codex_time_format="decimal")
@@ -363,7 +368,7 @@ def main() -> int:
             else:
                 assertions["visible_with_main_window_hidden"] = surface.status_item is not None
                 assertions["percent_and_countdown_visible"] = "%" in str(surface.status_item.button().title())
-                assertions["countdowns_in_menu"] = "h" in str(surface.status_item.menu().itemAtIndex_(0).title())
+                assertions["countdowns_in_menu"] = bool(RESET_RE.search(str(surface.status_item.menu().itemAtIndex_(0).title())))
             state["stale"] = True
             invoke(tick)
             captured_text = []

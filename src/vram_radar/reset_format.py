@@ -1,7 +1,9 @@
 """Shared reset-time wording for every usage provider.
 
-Strip: a short countdown -- hours below two days ("33.9h"), days after
-("3.2d").  Tooltip / floating window: the local wall-clock time
+Strip / menus: a countdown in days + hours ("6\u592912\u5c0f\u65f6" / "6d 12h"),
+hours only below a day ("5\u5c0f\u65f6" / "5h"), minutes below an hour
+("45\u5206\u949f" / "45m"); zero parts are dropped ("2\u5929" / "2d").
+Tooltip / floating window: the local wall-clock time
 ("\u91cd\u7f6e: 10\u67085\u65e5 14:00" / "Resets Oct 5 14:00").
 """
 from __future__ import annotations
@@ -10,9 +12,8 @@ import math
 import re
 import time
 
-DAY_AFTER_HOURS = 48
-# A strip countdown as produced by reset_short (also legacy "47.6h").
-RESET_RE = re.compile(r"<?\d+(?:\.\d)?[hd]")
+# A strip countdown as produced by reset_short (either language).
+RESET_RE = re.compile(r"\d+\u5929(?:\d+\u5c0f\u65f6)?|\d+\u5c0f\u65f6|\d+\u5206\u949f|\d+d(?: \d+h)?|\d+h|\d+m")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
 
@@ -20,16 +21,23 @@ def valid_epoch(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
 
 
-def reset_short(seconds) -> str:
-    """'<0.1h', '33.9h' (< 48 h) or '3.2d'; '' when unknown or past."""
+def reset_short(seconds, english: bool = False) -> str:
+    """Time until a reset; '' when unknown or already past.
+
+    Days and hours are floored (never promises an earlier reset than the
+    real one by more than the shown unit); under an hour, minutes are rounded
+    up so the last minute reads 1 min rather than 0.
+    """
     if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or not math.isfinite(seconds) or seconds <= 0:
         return ""
-    hours = seconds / 3600
-    if hours < 0.1:
-        return "<0.1h"
-    if hours < DAY_AFTER_HOURS:
-        return f"{hours:.1f}h"
-    return f"{hours / 24:.1f}d"
+    if seconds < 3600:
+        minutes = min(59, max(1, math.ceil(seconds / 60)))
+        return f"{minutes}m" if english else f"{minutes}\u5206\u949f"
+    total_hours = int(seconds // 3600)
+    days, hours = divmod(total_hours, 24)
+    if english:
+        return " ".join(part for part in (f"{days}d" if days else "", f"{hours}h" if hours else "") if part)
+    return (f"{days}\u5929" if days else "") + (f"{hours}\u5c0f\u65f6" if hours else "")
 
 
 def reset_full(epoch, english: bool) -> str:

@@ -58,14 +58,12 @@
 .quota-quota-card { min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .quota-quota-label { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-size: var(--font-small); overflow-wrap: anywhere; }
 .quota-quota-label > span { color: var(--muted); }
-.quota-quota-value { display: flex; align-items: baseline; gap: 4px; margin: 6px 0; font: 600 20px var(--data-font); color: var(--instrument-accent); }
+.quota-quota-value { display: flex; align-items: baseline; gap: 4px; margin: 6px 0; font: 600 20px var(--data-font); color: var(--quota-color, var(--instrument-accent)); }
 .quota-quota-value > small { font-size: 15px; }
 .quota-quota-value > span { margin-left: auto; font: 13px var(--ui-font); color: var(--muted); }
 .quota-quota-track { height: 5px; overflow: hidden; border-radius: 3px; background: var(--instrument-grid); }
-.quota-quota-track > i { display: block; width: var(--quota-width); height: 100%; background: var(--instrument-accent); }
+.quota-quota-track > i { display: block; width: var(--quota-width); height: 100%; background: var(--quota-color, var(--instrument-accent)); }
 .quota-quota-reset { display: block; margin-top: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.quota-low .quota-quota-value { color: var(--red-text); }
-.quota-low .quota-quota-track > i { background: var(--red-text); }
 .quota-usage-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
 .quota-usage-actions small { flex: 1; color: var(--muted); }
 .quota-usage-path { padding: 12px 0; }

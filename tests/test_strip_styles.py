@@ -38,7 +38,7 @@ class Tooltip(unittest.TestCase):
                                  "facts": []}, {"id": "kimi", "name": "Kimi"}, now=1000)
         from vram_radar.reset_format import reset_full
         self.assertEqual(info["brief"], info["brief"].split(" \u00b7 ")[0] + " \u00b7 " + reset_full(1000 + 7200, False))
-        self.assertEqual((info["quota"], info["reset"]), ("", "2.0h"))
+        self.assertEqual((info["quota"], info["reset"]), ("", "2\u5c0f\u65f6"))
 
     def test_codex_error_line(self):
         self.assertEqual(codex_brief(quota_lines({"enabled": True, "state": "error", "code": "login_required"})),

@@ -20,9 +20,9 @@ def read(state, pid="x", lang="en"):
 
 class Format(unittest.TestCase):
     def test_short_hours_then_days(self):
-        self.assertEqual([reset_short(s) for s in (None, 0, -5, float("nan"), 200, 33.9 * H, 47.9 * H, 48 * H, 3.2 * 86400)],
-                         ["", "", "", "", "<0.1h", "33.9h", "47.9h", "2.0d", "3.2d"])
-        for text in ("<0.1h", "33.9h", "3.2d"):
+        self.assertEqual([reset_short(s, True) for s in (None, 0, -5, float("nan"), 200, 33.9 * H, 47.9 * H, 48 * H, 3.2 * 86400)],
+                         ["", "", "", "", "4m", "1d 9h", "1d 23h", "2d", "3d 4h"])
+        for text in ("4m", "1d 9h", "3d", "5\u5c0f\u65f6", "6\u592912\u5c0f\u65f6", "45\u5206\u949f"):
             self.assertTrue(RESET_RE.fullmatch(text))
         self.assertIsNone(RESET_RE.fullmatch("50%"))
 
@@ -36,7 +36,7 @@ class Format(unittest.TestCase):
         self.assertEqual(reset_full(None, True), "")
 
     def test_composition_quota_reset_both_neither(self):
-        self.assertEqual(strip_parts("66%", "3.2d", "OK"), ("66%", "3.2d"))
+        self.assertEqual(strip_parts("66%", "3d 4h", "OK"), ("66%", "3d 4h"))
         self.assertEqual(strip_parts("\u00a56", "", "OK"), ("\u00a56", ""))
         self.assertEqual(strip_parts("", "33.9h", "OK"), ("", "33.9h"))
         self.assertEqual(strip_parts("", "", "Login"), ("Login", ""))
@@ -52,8 +52,8 @@ class Providers(unittest.TestCase):
             {"remaining_percent": 0, "window_minutes": 10080, "resets_at": NOW + 47.6 * H},
             {"remaining_percent": 40, "window_minutes": 10080, "resets_at": NOW + 80 * H}]}
         rows = quota_lines(state, "en", now=NOW)
-        self.assertEqual((rows[0]["value"], rows[0]["countdown"], rows[0]["reset_at"]), ("0%", "47.6h", NOW + 47.6 * H))
-        self.assertEqual(widget_reading(state, 1, "en", now=NOW)["countdown"], "3.3d")
+        self.assertEqual((rows[0]["value"], rows[0]["countdown"], rows[0]["reset_at"]), ("0%", "1d 23h", NOW + 47.6 * H))
+        self.assertEqual(widget_reading(state, 1, "en", now=NOW)["countdown"], "3d 8h")
         self.assertIn(reset_full(NOW + 47.6 * H, True), codex_brief(rows, "en"))
 
     def test_grok_weekly_reset_from_next_reset_timestamp(self):
@@ -62,7 +62,7 @@ class Providers(unittest.TestCase):
         self.assertAlmostEqual(parsed["reset_at"], NOW + 3.2 * 86400, delta=1)
         state = grok._apply_session({"facts": []}, parsed)
         info = read(state, "Grok")
-        self.assertEqual((info["quota"], info["reset"]), ("66%", "3.2d"))
+        self.assertEqual((info["quota"], info["reset"]), ("66%", "3d 4h"))
         self.assertTrue(info["brief"].endswith(reset_full(parsed["reset_at"], True)))
         self.assertIn("\u91cd\u7f6e: ", read(state, "Grok", "zh-CN")["brief"])
         no_reset = read(grok._apply_session({"facts": []}, {"status": "ok", "used_percent": 34, "reset_at": None}))
@@ -75,16 +75,16 @@ class Providers(unittest.TestCase):
         info = read(state, "Grok")
         self.assertTrue(info["warning"])
         self.assertIn("(read ", info["brief"])
-        self.assertEqual(info["reset"], "30.0h")
+        self.assertEqual(info["reset"], "1d 6h")
 
     def test_kimi_share_and_reset(self):
         state = kimi._show_reading({"facts": []}, {"used_percent": 20, "reset_at": NOW + 33.9 * H}, NOW)
         info = read(state, "Kimi")
-        self.assertEqual((info["quota"], info["reset"]), ("80%", "33.9h"))
+        self.assertEqual((info["quota"], info["reset"]), ("80%", "1d 9h"))
         used_up = read(kimi._show_reading({"facts": []}, {"used_percent": 100, "reset_at": NOW + 5 * H}, NOW), "Kimi")
-        self.assertEqual((used_up["quota"], used_up["reset"]), ("Used up", "5.0h"))
+        self.assertEqual((used_up["quota"], used_up["reset"]), ("Used up", "5h"))
         reset_only = read(kimi._show_reading({"facts": []}, {"is_member": True, "reset_at": NOW + 5 * H}, NOW), "Kimi")
-        self.assertEqual(strip_parts(reset_only["quota"], reset_only["reset"], reset_only["value"]), ("", "5.0h"))
+        self.assertEqual(strip_parts(reset_only["quota"], reset_only["reset"], reset_only["value"]), ("", "5h"))
         self.assertEqual(kimi_usage._used_percent(0.2), 20.0)   # amountUsedRatio share
 
     def test_deepseek_balance_without_reset(self):

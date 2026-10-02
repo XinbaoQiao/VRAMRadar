@@ -48,7 +48,7 @@ DISPLAY_SCALES = (1.0, 1.25, 1.5, 1.75, 2.0)
 THEMES = {"light": ((238, 228, 214), (90, 90, 90), (26, 26, 26), (160, 62, 96)),
           "dark": ((32, 32, 32), (180, 180, 180), (245, 245, 245), (227, 143, 163))}
 # (name, quota, reset): both items, quota only (DeepSeek), widest resets.
-CELLS = [("Codex", "0%", "47.6h"), ("Grok", "100%", "3.2d"), ("DeepSeek", "¥6", ""), ("Kimi", "80%", "33.9h")]
+CELLS = [("Codex", "0%", "6\u592912\u5c0f\u65f6"), ("Grok", "100%", "6\u592923\u5c0f\u65f6"), ("DeepSeek", "¥6", ""), ("Kimi", "80%", "23\u5c0f\u65f6")]
 def install_paths():
     """Real install paths from the providers' own detection (icons as shipped)."""
     import importlib
@@ -104,7 +104,7 @@ def run(save=None):
                     for idx, (name, value, reset) in enumerate(CELLS):
                         pair = []
                         quota_fg = low_fg if idx == 0 else value_fg
-                        dim_fg = tuple(round(f * 0.7 + b * 0.3) for f, b in zip(quota_fg, bg))
+                        dim_fg = quota_fg   # quota and reset share one colour
                         for font, text, fg in ((name_font, name, name_fg), (value_font, compact_value(value, level), quota_fg),
                                                (value_font, reset if level < 1 else "", dim_fg)):
                             lab = Label(); lab.AutoSize = False; lab.Font = font

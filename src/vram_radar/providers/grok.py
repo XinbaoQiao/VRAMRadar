@@ -75,6 +75,7 @@ def overlay(state: dict, reading: dict | None, now: float | None = None) -> dict
     left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
     state["headline"] = pair(left, left)
     state["quota"] = pair(left, left)
+    state["quota_percent"] = 100 - used
     state["subline"] = pair(f"读于 {stamp}", f"read {stamp}")
     state["brief"] = pair(f"已用 {value}" + (f" · {reset}" if reset else "") + f"（{stamp} 读取）",
                           f"{value} used" + (f" · {reset}" if reset else "") + f" (read {stamp})")
@@ -123,6 +124,7 @@ def _apply_session(state: dict, session: dict) -> dict:
     left = f"{100 - used:.0f}%"   # strip: bare remaining share, like Codex
     state["headline"] = pair(left, left)
     state["quota"] = pair(left, left)
+    state["quota_percent"] = 100 - used
     state["subline"] = pair(reset_zh or "自动读取", reset_en or "auto")
     brief_zh = f"已用 {value}"
     brief_en = f"{value} used"
