@@ -138,6 +138,28 @@ class WeatherFollow(unittest.TestCase):
         out = layout.widest_weather(found, RAW["WidgetsButton"], (480, 1538, 680, 1589), now=0.0)
         self.assertLessEqual(out["WidgetsButton"][2], 491)
 
+    def test_real_bar_border_and_icon_gap(self):
+        # Live 10-02 bar: 2 dark border rows on top, icon 20..48, a 15 px
+        # blank run, then the text to 125.  Must read as plausible and end at
+        # the text, not the icon.
+        h, l, r = 72, 9, 255
+        data = bytearray()
+        for y in range(h):
+            for x in range(l, r):
+                if y < 2:
+                    c = (190, 183, 171)
+                elif 20 <= x < 48 and 18 <= y < 54:
+                    c = (33, 153, 238)
+                elif 63 <= x < 125 and 12 <= y < 58 and x % 3 == 0:
+                    c = (60, 60, 60)
+                else:
+                    c = (239, 228, 207)
+                data += bytes((*c, 255))
+        raw = dict(RAW, WidgetsButton=(9, 1528, 237, 1600))
+        out = us.trim_widgets(raw, (255, 1538, 455, 1590), capture=lambda rect: bytes(data))
+        self.assertEqual(out["WidgetsButton"][2], 124)
+        self.assertEqual(out["_weather_scan"][1], False)
+
     def test_screen_locked_is_safe(self):
         self.assertIn(us.screen_locked(), (True, False))
 

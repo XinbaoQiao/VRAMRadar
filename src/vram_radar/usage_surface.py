@@ -329,7 +329,10 @@ def bar_plausible(pixels, width, height, threshold=60, max_share=0.25):
     def px(x, y):
         i = (y * width + x) * 4
         return pixels[i + 2], pixels[i + 1], pixels[i]
-    rows = (1, 2, 3, height - 4, height - 3, height - 2)
+    # Skip the taskbar's top border line (1-2 px darker at 150 %, 10-02: it
+    # made every live capture "implausible").
+    a = max(3, height // 12)
+    rows = (a, a + 1, a + 2, height - a - 3, height - a - 2, height - a - 1)
     bad = 0
     for x in range(0, width, 2):
         refs = [px(x, y) for y in rows]
@@ -464,9 +467,11 @@ def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
         trimmed["_weather_scan"] = (limit, True, scan_bound(elements))   # strip sits on the weather: cannot see it
         return trimmed
     pixels = capture((left, top, limit, bottom))
-    # Weather icon->text spacing is ~0.14 x bar height; the strip keeps >= 18 px
-    # (+ its own padding) clear, so a 0.2 x height blank run ends the widget.
-    edge = content_right(pixels, limit - left, bottom - top, max_gap=max(6, round((bottom - top) * 0.2))) if pixels else None
+    # Weather icon->text spacing is ~0.2 x bar height (15 px of a 72 px bar at
+    # 150 %, 10-02: a 0.2 x height run cut the text off after the icon); the
+    # strip keeps >= 18 px (+ its own padding) clear, so a 0.3 x height blank
+    # run ends the widget.
+    edge = content_right(pixels, limit - left, bottom - top, max_gap=max(8, round((bottom - top) * 0.3))) if pixels else None
     if not edge or edge < min_width // 2:
         return elements
     trimmed = dict(elements)
