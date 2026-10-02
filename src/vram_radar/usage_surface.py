@@ -422,6 +422,12 @@ def pick_value_font(text, base, cache: dict, make):
     return cache[key]
 
 
+# Weather scan tuning (fractions of the taskbar height; see trim_widgets).
+WEATHER_INK_THRESHOLD = 45     # sum |dRGB|: grey line-2 text of a news item
+WEATHER_BLANK_RUN = 0.5
+WEATHER_OCCLUDED_SLACK = 0.2
+
+
 def weather_scan_limit(elements, own=None):
     """Right end of the area scanned for weather content.
 
@@ -449,13 +455,94 @@ def scan_bound(elements):
     return min(bounds) if bounds else None
 
 
+LOCK_PROCESSES = ("lockapp.exe", "logonui.exe")
+
+
+def lock_state(foreground, process, input_default, session_flags=None) -> bool:
+    """Pure decision behind ``screen_locked``.
+
+    ``session_flags``: WTSINFOEX SessionFlags of our session (0 = locked,
+    1 = unlocked, None/-1 = unknown) -- authoritative when known.
+    LockApp stays the foreground window after an unlock until another
+    window is activated; reading that as "locked" froze the weather
+    measurement while the desktop was in plain view (10-03 03:02: a 2-line
+    news widget grew under the strip and the step-right logic never ran).
+    Without session flags: a lock/logon window in the foreground, or no
+    foreground window while the input desktop is not "Default", is locked.
+    """
+    if session_flags == 0:
+        return True
+    if session_flags == 1:
+        return False
+    if input_default is False:
+        return True       # Winlogon/secure desktop has the input
+    if not foreground:
+        return input_default is None
+    return (process or "").lower() in LOCK_PROCESSES
+
+
+def session_lock_flags():
+    """SessionFlags of the current session (0 locked, 1 unlocked) or None."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        wts = ctypes.windll.wtsapi32
+        wts.WTSQuerySessionInformationW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_int,
+                                                    ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.DWORD)]
+        wts.WTSFreeMemory.argtypes = [ctypes.c_void_p]
+        buf, size = ctypes.c_void_p(), wintypes.DWORD()
+        # WTS_CURRENT_SESSION, WTSSessionInfoEx
+        if not wts.WTSQuerySessionInformationW(None, 0xFFFFFFFF, 25, ctypes.byref(buf), ctypes.byref(size)) or not buf.value:
+            return None
+        try:
+            # WTSINFOEXW: DWORD Level; union (8-aligned) WTSINFOEX_LEVEL1_W:
+            # SessionId, SessionState, SessionFlags.
+            if size.value < 20 or ctypes.c_uint32.from_address(buf.value).value != 1:
+                return None
+            flags = ctypes.c_int32.from_address(buf.value + 16).value
+        finally:
+            wts.WTSFreeMemory(buf)
+        return flags if flags in (0, 1) else None
+    except Exception:
+        return None
+
+
+def _input_desktop_default():
+    """True/False when the input desktop is/is not "Default"; None if unknown."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.OpenInputDesktop.restype = wintypes.HANDLE
+        user32.OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        user32.CloseDesktop.argtypes = [wintypes.HANDLE]
+        user32.GetUserObjectInformationW.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                                     wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        desk = user32.OpenInputDesktop(0, False, 0x0001)   # DESKTOP_READOBJECTS
+        if not desk:
+            return False  # access denied: the secure (Winlogon) desktop has the input
+        try:
+            buf = ctypes.create_unicode_buffer(64)
+            need = wintypes.DWORD()
+            if not user32.GetUserObjectInformationW(desk, 2, buf, ctypes.sizeof(buf), ctypes.byref(need)):
+                return None
+            return buf.value.lower() == "default"
+        finally:
+            user32.CloseDesktop(desk)
+    except Exception:
+        return None
+
+
 def screen_locked() -> bool:
-    """True while the lock screen is up (LockApp/LogonUI in the foreground).
+    """True while the lock screen is up (see ``lock_state``).
 
     The desktop capture then shows the lock-screen photo, which reads as
     "weather content" all the way to Start (10-02 16:3x: strip stepped onto
     the Search box while the PC was locked).
     """
+    flags = session_lock_flags()
+    if flags is not None:
+        return lock_state(True, None, None, flags)
     try:
         import ctypes
         from ctypes import wintypes
@@ -463,7 +550,7 @@ def screen_locked() -> bool:
         user32.GetForegroundWindow.restype = wintypes.HWND
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
-            return True   # secure desktop (UAC/LogonUI): no foreground window
+            return lock_state(False, None, _input_desktop_default())
         pid = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         kernel32.OpenProcess.restype = wintypes.HANDLE
@@ -477,7 +564,7 @@ def screen_locked() -> bool:
                 return False
         finally:
             kernel32.CloseHandle(handle)
-        return buf.value.rsplit("\\", 1)[-1].lower() in ("lockapp.exe", "logonui.exe")
+        return lock_state(True, buf.value.rsplit("\\", 1)[-1], None)
     except Exception:
         return False
 
@@ -502,17 +589,28 @@ def trim_widgets(elements, own=None, capture=capture_screen, min_width=24):
         trimmed["_weather_scan"] = (limit, True, scan_bound(elements))   # strip sits on the weather: cannot see it
         return trimmed
     pixels = capture((left, top, limit, bottom))
-    # Weather icon->text spacing is ~0.2 x bar height (15 px of a 72 px bar at
-    # 150 %, 10-02: a 0.2 x height run cut the text off after the icon); the
-    # strip keeps >= 18 px (+ its own padding) clear, so a 0.3 x height blank
-    # run ends the widget.
-    edge = content_right(pixels, limit - left, bottom - top, max_gap=max(8, round((bottom - top) * 0.3))) if pixels else None
+    height = bottom - top
+    # Rightmost ink over every row of the widget (a 2-line news item has a
+    # short bold line 1 and a longer, low-contrast grey line 2).  Weather
+    # icon->text spacing is ~0.2 x bar height, a full-width CJK colon or
+    # word gap up to ~0.35 x (10-03: '\u6e2f\u80a1\u5348\u8bc4\uff1a\u6052\u6307...' cut at
+    # the colon); a 0.5 x height blank run ends the widget -- still far
+    # short of the Start/Search gap.  Our own strip is never scanned (the
+    # limit stops at it).
+    edge = content_right(pixels, limit - left, height, threshold=WEATHER_INK_THRESHOLD,
+                         max_gap=max(12, round(height * WEATHER_BLANK_RUN))) if pixels else None
     if not edge or edge < min_width // 2:
         return elements
     trimmed = dict(elements)
-    reaches = left + edge >= limit - 1
+    at_strip = bool(own) and limit == max(left, own[0])
+    # Ink ending closer to the strip than the clear gap it keeps (>= 0.25 x
+    # height) means the text grew toward / under it: the visible part may end
+    # at a glyph or colon gap just left of the strip, so a 1 px "touches the
+    # limit" test missed it (10-03).  Treat it as running under the strip.
+    reach_slack = max(1, round(height * WEATHER_OCCLUDED_SLACK)) if at_strip else 1
+    reaches = left + edge >= limit - reach_slack
     bound = scan_bound(elements)
-    if (reaches and not (own and limit == max(left, own[0]))) or not bar_plausible(pixels, limit - left, bottom - top):
+    if (reaches and not at_strip) or not bar_plausible(pixels, limit - left, height):
         # "Content" running into Start/Search is no weather text (the blank
         # run always ends it first): lock screen, a full-screen overlay or a
         # capture glitch.  Keep the previous reading.
@@ -574,6 +672,7 @@ class TaskbarLayout:
     def elements(self, taskbar_handle: int, bar, exclude=None) -> dict:
         now = time.monotonic()
         key = (int(taskbar_handle or 0), tuple(bar))
+        self._own_now = exclude
         wait = self.retry if self.failures else self.interval
         if key == self._key and now - self._at < wait:
             return self._elements
@@ -596,8 +695,15 @@ class TaskbarLayout:
                     # Lock screen: the capture shows its photo, not the bar.
                     found = self.hold_weather(found)
                 else:
-                    found = self.trim(found, exclude)
-                    found = self.widest_weather(found, raw_widgets, exclude)
+                    trimmed = self.trim(found, exclude)
+                    if getattr(self, "_own_now", exclude) != exclude:
+                        # The strip moved while the background scan ran: the
+                        # capture may hold its pixels (left of the old rect
+                        # used as the scan limit).  Keep the served edge;
+                        # the next scan measures with the new rect.
+                        found = self.hold_weather(found)
+                    else:
+                        found = self.widest_weather(trimmed, raw_widgets, exclude)
             except Exception as exc:  # worker thread: never die silently mid-update
                 logging.getLogger("vram_radar").info("widget trim failed (%s)", type(exc).__name__)
             found = {k: v for k, v in found.items() if not k.startswith("_")}
