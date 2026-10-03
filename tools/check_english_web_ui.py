@@ -39,6 +39,8 @@ GRAMMAR = (
     re.compile(r"(?<![\d.,/])(?!1/)\d[\d,.]*/1 GPUs\b"),
     re.compile(r"(?:^|, )([^,]{3,}), \1(?:,|$)"),
 )
+# The same repeated-item check for the Chinese UI (e.g. 数据已过期，数据已过期).
+REPEAT_ZH = re.compile(r"(?:^|，)([^，]{2,})，\1(?:，|$)")
 SCENARIOS = ("full", "clean", "offline", "connecting", "single")
 # Collapsed sections are rendered again with every <details> opened.  Cluster
 # node modules are excluded: they page through get_cluster_nodes, which keeps the
@@ -68,6 +70,7 @@ class TextCollector(HTMLParser):
         self.stack: list[str] = []
         self.hits: list[str] = []
         self.grammar: list[str] = []
+        self.repeats: list[str] = []
 
     def inert(self) -> bool:
         # <template> content is not part of the live document; clones are
@@ -86,6 +89,8 @@ class TextCollector(HTMLParser):
                 self.hits.append(f"[{tag} {key}] {value.strip()}")
             if key in ATTRIBUTES and value and any(rule.search(value) for rule in GRAMMAR):
                 self.grammar.append(f"[{tag} {key}] {value.strip()}")
+            if key in ATTRIBUTES and value and REPEAT_ZH.search(value):
+                self.repeats.append(f"[{tag} {key}] {value.strip()}")
 
     def handle_endtag(self, tag):
         if self.inert() and tag != "template":
@@ -102,6 +107,8 @@ class TextCollector(HTMLParser):
             self.hits.append(text)
         if text and any(rule.search(text) for rule in GRAMMAR):
             self.grammar.append(text)
+        if text and REPEAT_ZH.search(text):
+            self.repeats.append(text)
 
 
 def prepare(folder: Path) -> Path:
@@ -156,10 +163,9 @@ def run(language: str = "en", browser: str | None = None) -> dict:
                 report["scenarios"][key] = {"dom_bytes": len(dom), "cjk": hits}
                 # In Chinese mode the check is inverted: CJK text must be present.
                 failed = failed or (not hits if language != "en" else bool(hits))
-                if language == "en":
-                    grammar = sorted(set(collector.grammar))
-                    report["scenarios"][key]["grammar"] = grammar
-                    failed = failed or bool(grammar)
+                grammar = sorted(set(collector.grammar if language == "en" else collector.repeats))
+                report["scenarios"][key]["grammar"] = grammar
+                failed = failed or bool(grammar)
     report["ok"] = not failed
     return report
 
@@ -170,7 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--zh", action="store_true", help="render Chinese instead (sanity check: expects CJK)")
     args = parser.parse_args(argv)
     report = run("zh-CN" if args.zh else "en", args.browser)
-    print(json.dumps(report, ensure_ascii=False, indent=1))
+    # Keep CJK readable on UTF-8 consoles; escape it on legacy code pages (GBK).
+    utf8 = (getattr(sys.stdout, "encoding", "") or "").lower().replace("-", "") == "utf8"
+    print(json.dumps(report, ensure_ascii=not utf8, indent=1))
     if report["ok"] is None:
         return 2
     return 0 if report["ok"] else 1

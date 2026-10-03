@@ -3065,7 +3065,8 @@ function renderServerNavigatorItem(server, index) {
   const position = String(index + 1).padStart(2, '0');
   const taskSummary = serverNavigatorOwnTaskSummary(server);
   const label = [server.display_name, stateLabel(state), serverNavigatorResourceSummary(server), taskSummary]
-    .filter(Boolean)
+    // Offline/stale servers summarize as their state; say it once (数据已过期, not 数据已过期，数据已过期).
+    .filter((part, i, parts) => part && !parts.slice(0, i).includes(part))
     .join('，');
   const favorite = favoriteServerIds.has(server.server_id);
   const favoriteKind = favorite ? localizedText('整台') : '';

@@ -19,7 +19,7 @@ from System.Drawing.Imaging import ImageLockMode, PixelFormat
 from System.Windows.Forms import Application, Form, FormBorderStyle, FormStartPosition, Label
 from System.Runtime.InteropServices import Marshal
 from vram_radar.usage_surface import (STRIP_DENSITY, compact_value, place_columns, set_name_cell, strip_icon_px, strip_reset_text,
-                                      FIT_PLAN)
+                                      FIT_PLAN, SINGLE_FIT_FACTORS, place_single)
 from vram_radar.ui_dialogs import art_box, bundled_icon_path, icon_art_px, icon_source, letter_tile, provider_icon, _load_image
 
 
@@ -211,7 +211,71 @@ def run(save=None):
                     if save and factor == 1.0:
                         bmp.Save(os.path.join(save, "strip_" + key.split("/f")[0].replace("/", "_").replace(".", "_") + ".png"))
                     bmp.Dispose(); form.Dispose()
+    single_cases(results, failures, save)
     return {"ok": not failures, "cases": len(results), "failures": failures[:20], "results": results}
+
+
+SINGLE_TEXTS = (("82%", "6d 7h"), ("100%", "168.0h"))
+
+
+def single_cases(results, failures, save=None):
+    """Codex-only strip (value over countdown) in a gap that is ample, a little
+    too narrow (type shrinks, nothing clipped) or far too narrow (clipped to the
+    gap): the strip never gets wider than the gap and ink stays inside it."""
+    from System.Drawing import Point
+    for display, strip_scale in [(d, max(0.6, d * STRIP_DENSITY)) for d in DISPLAY_SCALES]:
+        scale = lambda v: round(v * strip_scale)
+        for theme, (bg, _name_fg, value_fg, _low_fg) in THEMES.items():
+            for texts in SINGLE_TEXTS:
+                fonts = {}
+
+                def fonts_for(factor):
+                    if factor not in fonts:
+                        size = max(1, round(scale(14) * factor))
+                        fonts[factor] = (Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel),
+                                         Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel))
+                    return fonts[factor]
+
+                natural = None
+                for gap_name in ("ample", "tight", "narrow"):
+                    form = Form(); form.FormBorderStyle = getattr(FormBorderStyle, "None")
+                    form.BackColor = Color.FromArgb(*bg)
+                    labels = []
+                    for text in texts:
+                        lab = Label(); lab.AutoSize = False; lab.TextAlign = ContentAlignment.MiddleLeft
+                        lab.BackColor = Color.Transparent; lab.ForeColor = Color.FromArgb(*value_fg); lab.Text = text
+                        form.Controls.Add(lab); labels.append(lab)
+                    available = {"ample": None, "tight": (natural or 0) - 2, "narrow": scale(34)}[gap_name]
+                    width, factor = place_single(labels, fonts_for, lambda _text, base: base, strip_scale, available)
+                    if gap_name == "ample":  # text-only width: one pixel less forces smaller type
+                        natural = scale(5) + max(label.GetPreferredSize(Size(0, 0)).Width for label in labels) + scale(2)
+                    form.ClientSize = Size(width, scale(40))
+                    form.ShowInTaskbar = False; form.StartPosition = FormStartPosition.Manual
+                    form.Location = Point(-20000, -20000)
+                    form.Show(); Application.DoEvents()
+                    bmp = Bitmap(form.Width, form.Height)
+                    form.DrawToBitmap(bmp, Rectangle(0, 0, form.Width, form.Height))
+                    buf, stride = pixels(bmp)
+                    key = f"single/{display:.2f}/{theme}/{texts[1]}/{gap_name}"
+                    ink = ink_box(buf, stride, bg, (0, 0, form.Width, form.Height))
+                    fits = all(label.GetPreferredSize(Size(0, 0)).Width <= label.Width for label in labels)
+                    if available is not None and width > available:
+                        failures.append(f"{key}: width {width} > gap {available}")
+                    if gap_name in ("ample", "tight") and not fits:
+                        failures.append(f"{key}: text clipped at factor {factor}")
+                    if gap_name == "tight" and factor == 1.0:
+                        failures.append(f"{key}: did not shrink")
+                    if factor < min(SINGLE_FIT_FACTORS):
+                        failures.append(f"{key}: font factor {factor} below floor")
+                    if not ink:
+                        failures.append(f"{key}: nothing drawn")
+                    results.append({"case": key, "width": width, "gap": available, "factor": factor, "fits": fits})
+                    if save and gap_name != "ample" and display == 1.5 and theme == "light":
+                        bmp.Save(os.path.join(save, f"single_{gap_name}_{texts[1].replace('.', '_').replace(' ', '')}.png"))
+                    bmp.Dispose(); form.Dispose()
+                for pair in fonts.values():
+                    for font in pair:
+                        font.Dispose()
 
 
 if __name__ == "__main__":

@@ -308,7 +308,13 @@ def main() -> int:
                         and surface.form.Width == round(5*surface._scale) + countdown.Width + round(2*surface._scale)
                         and countdown.GetPreferredSize(Size(0, 0)).Width <= countdown.Width
                         and surface.form.Height == round(40*surface._scale))
-                invoke(select_weekly)
+                # Full-size checks run with a roomy gap left of Start; the live
+                # taskbar may leave less, which compacts the strip (checked below).
+                def roomy_gap(width=2000):
+                    return patch("vram_radar.usage_surface.left_gap",
+                                 side_effect=lambda bar, elements, margin=6: (bar[0] + 100, bar[0] + 100 + width))
+                with roomy_gap():
+                    invoke(select_weekly)
                 invoke(lambda: assertions.update(text_only_strip=surface._labels[0].Left == round(5*surface._scale)
                     and all(c[1] in {"usage_background", "usage_labels"} for c in surface._display_choices)))
                 display["codex_time_format"] = "days"
@@ -338,6 +344,7 @@ def main() -> int:
                 invoke(tick)
                 original_state = dict(state)
                 fit_results = []
+                gap_patch = roomy_gap(); gap_patch.start()
                 for sample in [
                     {"enabled": True, "state": "ready", "windows": [
                         {"window_minutes": 300, "remaining_percent": 100, "resets_at": time.time()+8200},
@@ -362,6 +369,21 @@ def main() -> int:
                                 for control in controls if control.Visible))
                         invoke(inspect_edge_layout)
                 assertions["full_empty_unknown_and_localized_error_text_fit"] = all(fit_results)
+                gap_patch.stop()
+                # Codex-only strip in a gap too small for it: smaller type, then
+                # clipped, never wider than the gap (so it cannot reach Start).
+                state.clear()
+                state.update({"enabled": True, "state": "ready", "windows": [
+                    {"window_minutes": 10080, "remaining_percent": 100, "resets_at": time.time() + 604800}]})
+                gap_fits = []
+                for gap_px in (round(56 * surface._scale), round(24 * surface._scale)):
+                    with roomy_gap(gap_px):
+                        invoke(tick)
+                        invoke(lambda gap_px=gap_px: gap_fits.append(
+                            0 < surface.form.ClientSize.Width <= gap_px
+                            and all(c.Left + c.Width <= surface.form.ClientSize.Width
+                                    for c in (*surface._labels, *surface._countdowns) if c.Visible)))
+                assertions["single_strip_never_wider_than_gap"] = len(gap_fits) == 2 and all(gap_fits)
                 state.clear()
                 state.update(original_state)
                 language["value"] = "zh-CN"

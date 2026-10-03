@@ -205,6 +205,43 @@ def strip_reset_text(text: str) -> str:
     return (text or "").replace(" ", "\u200a")
 
 
+SINGLE_FIT_FACTORS = (1.0, 0.95, 0.9)  # same 90 % floor as FIT_PLAN
+
+
+def place_single(labels, fonts_for, pick, strip_scale: float, available=None) -> tuple[int, float]:
+    """Lay out the Codex-only strip (value over countdown); returns (width, factor).
+
+    ``fonts_for(factor)`` gives the (top, bottom) base fonts at that size and
+    ``pick(text, base)`` the script-appropriate face (see pick_value_font).  As
+    in the multi-app layout, the type shrinks step by step until the strip fits
+    ``available`` (the empty taskbar gap left of Start); if even the smallest
+    size does not fit, the width is clipped to the gap, so the strip never
+    reaches Start.  Without a gap (free placement, tray side) nothing shrinks.
+    """
+    from System.Drawing import Point, Size
+    scale = lambda v: round(v * strip_scale)
+    left, right, minimum = scale(5), scale(2), scale(47)
+    width, factor = 1, SINGLE_FIT_FACTORS[0]
+    for factor in SINGLE_FIT_FACTORS:
+        for label, base in zip(labels, fonts_for(factor)):
+            want = pick(label.Text, base)
+            if label.Font is not want:
+                label.Font = want
+        natural = left + max(label.GetPreferredSize(Size(0, 0)).Width for label in labels) + right
+        width = max(natural, left + minimum + right)
+        if available is None:
+            break
+        if natural <= available:
+            width = min(width, int(available))
+            break
+    if available is not None and width > available:
+        width = max(1, int(available))  # clip, never move sides or cover Start
+    for y, label in zip((0, 20), labels):
+        label.Size = Size(max(1, width - left - right), scale(20))
+        label.Location = Point(left, scale(y))
+    return width, factor
+
+
 def place_columns(used, strip_scale: float, factor: float) -> int:
     """Lay out (name, value[, reset]) label cells, two rows per column;
     returns the client width.  Icon cells reserve exactly the icon width and
@@ -1808,6 +1845,7 @@ class CodexUsageSurface:
         self._labels, self._countdowns, self._captions = [], [], []
         self._fonts = [Font("Segoe UI", scale(14), FontStyle.Bold, GraphicsUnit.Pixel),
                        Font("Segoe UI", scale(14), FontStyle.Bold, GraphicsUnit.Pixel)]
+        self._single_fonts = {}
         for y, collection in [(0, self._labels), (20, self._countdowns)]:
             label = Label()
             label.AutoSize = False
@@ -2519,8 +2557,9 @@ class CodexUsageSurface:
                 self._value_font = Font("Segoe UI", scale(13), FontStyle.Bold, GraphicsUnit.Pixel)
                 for top, bottom, reset_label in self._extra_columns:
                     top.Font, bottom.Font, reset_label.Font = self._name_font, self._value_font, self._value_font
-                old_fit = [font for pair in self._fit_fonts.values() for font in pair]
+                old_fit = [font for pair in (*self._fit_fonts.values(), *self._single_fonts.values()) for font in pair]
                 self._fit_fonts = {}
+                self._single_fonts = {}
                 for old_font in (*old_fonts, *old_cell_fonts, *old_fit):
                     old_font.Dispose()
             rows = quota_lines(state, language) if "codex" in selected else []
@@ -2620,33 +2659,40 @@ class CodexUsageSurface:
                 reset_label.Visible = bool(reset_label.Text)
             for name_label, value_label, reset_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = reset_label.Visible = False
+            # Width of the empty taskbar area left of Start (None: free placement
+            # or tray side); both layouts are compacted, then clipped, to fit it.
+            available = None
+            if self._placement == "taskbar" and geometry:
+                elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
+                                                 (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
+                gap_area = left_gap(geometry[0], elements, strip_margin(self._scale)) if elements else None
+                available = gap_area[1] - gap_area[0] if gap_area else None
             if not multi:
                 self._fit_key = None
                 self._fit_level = 0
-                # Keep the gap tight without shrinking type or clipping longer
-                # countdowns (for example 168.0h) and localized status messages.
-                for label, base in zip(text_controls, self._fonts):
-                    want = pick_value_font(label.Text, base, self._cjk_fonts, self._make_font)
-                    if label.Font is not want:
-                        label.Font = want
-                text_width = max(scale(47), *(label.GetPreferredSize(Size(0, 0)).Width for label in text_controls))
-                for label in text_controls:
-                    label.Size = Size(text_width, scale(20))
-                left_padding = 5
-                for y, label in zip((0, 20), text_controls):
-                    label.Location = Point(scale(left_padding), scale(y))
-                form.ClientSize = Size(scale(left_padding) + text_width + scale(2), scale(40))
+                # Full size when it fits; otherwise smaller type, then clipping (never
+                # wider than the gap).  Longer countdowns (168.0h) and localized status
+                # messages keep their text at full size whenever there is room.
+                def single_fonts(factor):
+                    if factor == 1.0:
+                        return self._fonts
+                    cached = self._single_fonts.get(factor)
+                    if cached is None:
+                        size = max(1, round(scale(14) * factor))
+                        cached = self._single_fonts[factor] = (
+                            Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel),
+                            Font("Segoe UI", size, FontStyle.Bold, GraphicsUnit.Pixel))
+                    return cached
+                width, _factor = place_single(
+                    text_controls, single_fonts,
+                    lambda text, base: pick_value_font(text, base, self._cjk_fonts, self._make_font),
+                    self._scale, available)
+                form.ClientSize = Size(width, scale(40))
             else:
                 # Two provider rows per column: "Name  value", full names.  Up
                 # to four apps (two columns) fit the empty taskbar area left of
                 # Start at the normal font; compact values before clipping.
                 used = self._extra_columns[:len(cells)]
-                available = None
-                if self._placement == "taskbar" and geometry:
-                    elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
-                                                     (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
-                    gap_area = left_gap(geometry[0], elements, strip_margin(self._scale)) if elements else None
-                    available = gap_area[1] - gap_area[0] if gap_area else None
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \
                     if show_icons else None
                 fit_key = (tuple((n, v, r) for n, v, r, _ in cells), available, self._scale,
@@ -2686,7 +2732,7 @@ class CodexUsageSurface:
                         if available is None or width <= available:
                             break
                     if available is not None and width > available:
-                        width = max(scale(40), int(available))  # clip, never move sides
+                        width = max(1, int(available))  # clip, never move sides or cover Start
                     form.ClientSize = Size(width, scale(40))
             if reading != self._reading:
                 self._reading = reading

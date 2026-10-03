@@ -23,7 +23,23 @@ class EnglishWebUiTests(unittest.TestCase):
 
     def test_rendered_main_window_stays_chinese_in_chinese_mode(self):
         report = check_english_web_ui.run("zh-CN", BROWSER)
+        repeats = {key: value["grammar"] for key, value in report["scenarios"].items() if value.get("grammar")}
+        self.assertEqual(repeats, {})  # e.g. "A100 Cluster，数据已过期，数据已过期"
         self.assertTrue(report["ok"], report)
+
+
+class RepeatRuleTests(unittest.TestCase):
+    def test_chinese_repeat_rule(self):
+        rule = check_english_web_ui.REPEAT_ZH
+        for text in ("A100 Cluster，数据已过期，数据已过期", "4090 Workstation，网络不可达，网络不可达，2 个任务"):
+            self.assertTrue(rule.search(text), text)
+        for text in ("A100 Cluster，数据已过期", "A100 Cluster，在线，8 GPU · 120 GiB 可用", "空闲，空闲中"):
+            self.assertFalse(rule.search(text), text)
+
+    def test_english_repeat_rule(self):
+        rule = check_english_web_ui.GRAMMAR[-1]
+        self.assertTrue(rule.search("A100 Cluster, Data is stale, Data is stale"))
+        self.assertFalse(rule.search("A100 Cluster, Data is stale"))
 
 
 if __name__ == "__main__":

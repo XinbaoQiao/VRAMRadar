@@ -9,7 +9,7 @@ class StripPixelTests(unittest.TestCase):
         import check_strip_pixels
         out = check_strip_pixels.run()
         self.assertTrue(out["ok"], out["failures"])
-        self.assertEqual(out["cases"], 48)
+        self.assertEqual(out["cases"], 48 + 60)  # multi-app columns + Codex-only gap cases
 
     def test_bundled_icons_without_installed_apps(self):
         # CI runners have none of the apps installed; Codex still draws its bundled art.
