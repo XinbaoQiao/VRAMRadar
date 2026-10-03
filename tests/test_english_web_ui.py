@@ -36,10 +36,35 @@ class RepeatRuleTests(unittest.TestCase):
         for text in ("A100 Cluster，数据已过期", "A100 Cluster，在线，8 GPU · 120 GiB 可用", "空闲，空闲中"):
             self.assertFalse(rule.search(text), text)
 
+    def test_english_singular_rule(self):
+        flagged = lambda text: any(rule.search(text) for rule in check_english_web_ui.GRAMMAR)
+        for text in ("1 servers", "Skipped 1 servers you removed", "1 items"):
+            self.assertTrue(flagged(text), text)
+        for text in ("1/1 servers ready", "11 servers", "0.1 hours", "2 items", "1 server"):
+            self.assertFalse(flagged(text), text)
+
     def test_english_repeat_rule(self):
-        rule = check_english_web_ui.GRAMMAR[-1]
+        rule = check_english_web_ui.REPEAT_EN
         self.assertTrue(rule.search("A100 Cluster, Data is stale, Data is stale"))
         self.assertFalse(rule.search("A100 Cluster, Data is stale"))
+
+
+
+@unittest.skipUnless(__import__("shutil").which("node"), "Node.js unavailable")
+class NavigatorLabelFilterTests(unittest.TestCase):
+    def test_only_the_state_like_summary_is_dropped(self):
+        import json, re, shutil, subprocess
+        source = (Path(__file__).resolve().parents[1] / "src" / "vram_radar" / "web" / "app.js").read_text(encoding="utf-8")
+        body = source[source.index("function renderServerNavigatorItem"):]
+        predicate = re.search(r"\.filter\((\(part, i, parts\) => [^\n]+)\)\n", body).group(1)
+        cases = [["A100 Cluster", "数据已过期", "数据已过期", ""],
+                 ["离线", "离线", "离线", ""],
+                 ["Lab", "监控就绪", "8 GPU · 120 GiB 可用", "2 个任务"],
+                 ["Lab", "网络不可达", "网络不可达", "网络不可达"]]
+        script = f"const f = {predicate}; process.stdout.write(JSON.stringify({json.dumps(cases, ensure_ascii=False)}.map(c => c.filter(f).join('，'))));"
+        out = subprocess.run([shutil.which("node"), "-e", script], capture_output=True, text=True, encoding="utf-8", check=True)
+        self.assertEqual(json.loads(out.stdout), ["A100 Cluster，数据已过期", "离线，离线", "Lab，监控就绪，8 GPU · 120 GiB 可用，2 个任务",
+                                                  "Lab，网络不可达，网络不可达"])
 
 
 if __name__ == "__main__":

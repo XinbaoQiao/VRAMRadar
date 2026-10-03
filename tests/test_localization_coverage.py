@@ -157,6 +157,16 @@ process.stdout.write(JSON.stringify(values.map(value => i18n.translateText(value
             '1/1 servers ready · 1 GPU', 'Lab, monitoring ready, 1 GPU · 2 GiB free',
             'Lab, monitoring ready, 4 GPUs · 2 GiB free, 1 running'])
 
+    def test_other_counts_agree_in_english(self):
+        sources = ['1 项', '2 项', '1 台', '12 台', '1 匹配', '1 天', '3 天', '1 小时', '1 秒', '1 位', '1 条',
+                   '1 个节点 · 先按卡型和分区汇总', '匹配 1 台', '匹配 3 台', '过去 1 小时结果', '已跳过 1 台你主动移除过的服务器',
+                   '配置已保存，正在自动识别 1 台服务器', '1,000 台']
+        self.assertEqual(self.translate(sources), [
+            '1 item', '2 items', '1 server', '12 servers', '1 match', '1 day', '3 days', '1 hour', '1 second', '1 user',
+            '1 job', '1 node · summarized by GPU model and partition', '1 server matches', '3 servers match',
+            'Results from the last 1 hour', 'Skipped 1 server you previously removed',
+            'Settings saved; detecting 1 server automatically', '1,000 servers'])
+
     def test_navigator_label_does_not_repeat_the_state(self):
         self.assertEqual(self.translate(['Lab A6000，数据已过期，数据已过期', 'Local GPU，正在配置中，正在配置中']),
                          ['Lab A6000, Data is stale', 'Local GPU, Configuring'])

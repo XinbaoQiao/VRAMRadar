@@ -231,6 +231,8 @@ const openDirectoryNodes = new Set();
 const openContextNotes = new Set();
 const directoryTrees = new Map();
 const directoryRequestTokens = new Map();
+// Pending folder reads by request key (see loadDirectoryTree).
+const directoryLoadsInFlight = new Map();
 const directoryFreshnessDeadlines = new Map();
 let directoryRequestSequence = 0;
 let directoryFreshnessTimer = null;
@@ -1945,6 +1947,7 @@ function scheduleDirectoryFreshnessValidation() {
 function invalidateDirectoryRequests(serverId = null) {
   if (serverId == null) {
     directoryRequestTokens.clear();
+    directoryLoadsInFlight.clear();
     clearDirectoryFreshness();
     return;
   }
@@ -1952,10 +1955,30 @@ function invalidateDirectoryRequests(serverId = null) {
   [...directoryRequestTokens.keys()].forEach(key => {
     if (key.startsWith(prefix)) directoryRequestTokens.delete(key);
   });
+  [...directoryLoadsInFlight.keys()].forEach(key => {
+    if (key.startsWith(prefix)) directoryLoadsInFlight.delete(key);
+  });
   clearDirectoryFreshness(serverId);
 }
 
-async function loadDirectoryTree(serverId, force = false, rootPath = null) {
+// One read per folder at a time.  Re-renders, details toggle events and the
+// freshness timer join a pending read instead of starting another: against a
+// slow or unreachable server every extra call parked a backend thread for up to
+// three minutes and, by superseding the previous request token, discarded the
+// answer that would have reset the freshness deadline - so the calls snowballed
+// into thousands of threads.  An explicit refresh (force) still starts its own.
+function loadDirectoryTree(serverId, force = false, rootPath = null) {
+  const key = directoryRequestKey(serverId, rootPath);
+  const pending = directoryLoadsInFlight.get(key);
+  if (pending && !force) return pending;
+  const load = loadDirectoryTreeNow(serverId, force, rootPath).finally(() => {
+    if (directoryLoadsInFlight.get(key) === load) directoryLoadsInFlight.delete(key);
+  });
+  directoryLoadsInFlight.set(key, load);
+  return load;
+}
+
+async function loadDirectoryTreeNow(serverId, force = false, rootPath = null) {
   const existing = directoryTrees.get(serverId);
   const requestKey = directoryRequestKey(serverId, rootPath);
   if (!rootPath && !force && existing?.status === 'loading') return;
@@ -3066,7 +3089,8 @@ function renderServerNavigatorItem(server, index) {
   const taskSummary = serverNavigatorOwnTaskSummary(server);
   const label = [server.display_name, stateLabel(state), serverNavigatorResourceSummary(server), taskSummary]
     // Offline/stale servers summarize as their state; say it once (数据已过期, not 数据已过期，数据已过期).
-    .filter((part, i, parts) => part && !parts.slice(0, i).includes(part))
+    // Only the summary is dropped: a server may be named like a state (e.g. 离线).
+    .filter((part, i, parts) => part && !(i === 2 && part === parts[1]))
     .join('，');
   const favorite = favoriteServerIds.has(server.server_id);
   const favoriteKind = favorite ? localizedText('整台') : '';

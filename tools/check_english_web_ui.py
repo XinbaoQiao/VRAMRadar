@@ -33,11 +33,13 @@ ATTRIBUTES = {"aria-label", "title", "placeholder", "alt", "data-label"}
 # Language names are intentionally shown in their own language.
 ALLOWED = {"简体中文"}
 # English count agreement and repeated list items (e.g. "Data is stale, Data is stale").
+REPEAT_EN = re.compile(r"(?:^|, )([^,]{3,}), \1(?:,|$)")
 GRAMMAR = (
     re.compile(r"(?<![\d.,/])1 GPUs\b"),
     re.compile(r"(?<![\d.,/])(?!1 )\d[\d,.]* GPU\b(?!s)"),
     re.compile(r"(?<![\d.,/])(?!1/)\d[\d,.]*/1 GPUs\b"),
-    re.compile(r"(?:^|, )([^,]{3,}), \1(?:,|$)"),
+    REPEAT_EN,
+    re.compile(r"(?<![\d.,/\u2013-])1 (?:servers|items|days|hours|minutes|seconds|nodes|jobs|users|matches)\b"),
 )
 # The same repeated-item check for the Chinese UI (e.g. 数据已过期，数据已过期).
 REPEAT_ZH = re.compile(r"(?:^|，)([^，]{2,})，\1(?:，|$)")
