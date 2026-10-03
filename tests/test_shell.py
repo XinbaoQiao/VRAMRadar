@@ -792,6 +792,12 @@ class ShellApiTests(unittest.TestCase):
             notify.assert_called_once()
             return notify.call_args.args
 
+    def test_tray_summary_gpu_count_agreement(self):
+        from vram_radar.shell import tray_summary_text
+        self.assertEqual(tray_summary_text(1, 1, 1, True), "1/1 online · 1 GPU")
+        self.assertEqual(tray_summary_text(2, 3, 8, True), "2/3 online · 8 GPUs")
+        self.assertEqual(tray_summary_text(1, 1, 1, False), "1/1 台在线 · 1 张 GPU")
+
     def test_multi_task_completion_message_is_fully_english(self):
         title, message = self._completion_message_for_four_processes("en")
         self.assertEqual(title, "Task completed")

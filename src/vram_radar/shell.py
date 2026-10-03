@@ -4747,6 +4747,13 @@ def profile_recovery_notice(recovery: dict[str, Any], language: str = "zh-CN") -
     return {"code": "profile_recovered", "severity": "warning", "message": message}
 
 
+def tray_summary_text(online: int, total: int, total_gpus: int, english: bool) -> str:
+    """Tray tooltip line: online servers and GPU count, singular for one GPU."""
+    if english:
+        return f"{online}/{total} online · {total_gpus} {'GPU' if total_gpus == 1 else 'GPUs'}"
+    return f"{online}/{total} 台在线 · {total_gpus} 张 GPU"
+
+
 def build_runtime(
     profile_id: str,
     home: Path | None,
@@ -5136,9 +5143,7 @@ def main(argv: list[str] | None = None) -> int:
                         online = int(summary.get("online_servers") or 0)
                         total = int(summary.get("total_servers") or 0)
                         total_gpus = int(summary.get("total_gpus") or 0)
-                        if api.profile.ui_language == "en":
-                            return f"{online}/{total} online · {total_gpus} GPUs"
-                        return f"{online}/{total} 台在线 · {total_gpus} 张 GPU"
+                        return tray_summary_text(online, total, total_gpus, api.profile.ui_language == "en")
 
                     def toggle_monitoring() -> None:
                         if service.is_paused():

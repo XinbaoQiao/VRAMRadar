@@ -58,6 +58,13 @@
       total_gpus: 0, free_vram_gib: 0, total_vram_gib: 0, account: {}, gpus: [], processes: {supported: false, active: []},
       connection: {state: 'connecting', data_origin: 'none', data_revision: 0, last_success_at: null, retry_at: null, error: null}});
   }
+  if (variant === 'single') {
+    // One GPU per server: exercises singular wording ("1 GPU").
+    servers.splice(1, 3, {...servers[2], gpus: servers[2].gpus.slice(0, 1), total_gpus: 1, free_vram_gib: 79.5, total_vram_gib: 80});
+    servers[0].nodes = servers[0].nodes.slice(0, 1).map(node => ({...node, total_gpus: 1, free_gpus: 1, allocated_gpus: 0}));
+    servers[0].total_gpus = 1;
+    servers[0].free_gpus = 1;
+  }
   const events = variant === 'full' ? [
     {sequence: 3, kind: 'task_completed', label: 'finetune-7b', created_at: ago(5)},
     {sequence: 2, kind: 'favorite_gpu_available', title: 'Favorite resource available', message: 'H100 Server: favorited GPU 1 is free', created_at: ago(20)},
@@ -70,7 +77,7 @@
       show_other_user_commands: false, connect_timeout_seconds: 10}))};
   const snapshot = {profile: {refresh_seconds: 60}, fetched_at: now, notices: [],
     monitoring: {revision: 7, in_flight: false, paused: false, data_updated_at: now},
-    summary: {revision: 7, free_vram_gib: 679.1, total_vram_gib: 1648, online_servers: servers.filter(s => s.connection.state === 'online').length, total_servers: servers.length, total_gpus: 22, data_updated_at: now},
+    summary: {revision: 7, free_vram_gib: 679.1, total_vram_gib: 1648, online_servers: servers.filter(s => s.connection.state === 'online').length, total_servers: servers.length, total_gpus: variant === 'single' ? 1 : 22, data_updated_at: now},
     notifications: {unread_count: events.length, latest_sequence: events.length, read_sequence: 0, events},
     servers};
   const known = {

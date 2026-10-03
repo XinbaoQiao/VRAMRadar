@@ -12,7 +12,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from vram_radar.usage_surface import CodexUsageSurface, windows_taskbar_geometry, taskbar_anchor, taskbar_scale, windows_taskbar_dpi, left_slot
+from vram_radar.usage_surface import (CodexUsageSurface, windows_taskbar_geometry, taskbar_anchor, taskbar_scale,
+                                      windows_taskbar_dpi, docked_target, docked_point, strip_margin)
 from benchmark_webview_ui import FakeApi, _wait_until_ready
 from vram_radar.reset_format import RESET_RE
 
@@ -107,10 +108,21 @@ def main() -> int:
                     # Docked placement: the empty area right of Widgets/left of Start when it fits,
                     # otherwise directly before the notification area.
                     if surface._slot == "left":
-                        elements = surface._layout.elements(__import__("ctypes").windll.user32.FindWindowW("Shell_TrayWnd", None), geometry[0])
-                        assertions["anchored_in_left_taskbar_area"] = (surface.form.Left, surface.form.Top) == left_slot(
-                            geometry[0], elements, (surface.form.Width, surface.form.Height),
-                            __import__("vram_radar.usage_surface", fromlist=["strip_margin"]).strip_margin(surface._scale))
+                        # Same reading the strip itself uses (its own rect excluded).  The
+                        # left gap may be narrower than the strip (wide weather widget, or
+                        # another running VRAM Radar strip next to it): by design the strip
+                        # then stays anchored at the gap start and is compacted, never moved
+                        # to the tray side, so compare against docked_target, not left_slot.
+                        own = (surface.form.Left, surface.form.Top, surface.form.Right, surface.form.Bottom)
+                        elements = surface._layout.elements(
+                            __import__("ctypes").windll.user32.FindWindowW("Shell_TrayWnd", None), geometry[0], own)
+                        margin = strip_margin(surface._scale)
+                        target = docked_target(geometry[0], geometry[1], elements,
+                                               (surface.form.Width, surface.form.Height), margin)
+                        assertions["anchored_in_left_taskbar_area"] = target[0] == "left" and (
+                            surface.form.Left, surface.form.Top) == docked_point(geometry[0], target, surface.form.Width)
+                        start = elements.get("StartButton") or elements.get("SearchButton")
+                        assertions["left_slot_clear_of_start"] = not start or surface.form.Left + surface.form.Width <= start[0]
                     else:
                         assertions["anchored_before_notification_area"] = bool(geometry) and (surface.form.Left, surface.form.Top) == taskbar_anchor(*geometry, (surface.form.Width, surface.form.Height))
                     assertions["compact_height_fits_taskbar"] = bool(geometry) and surface.form.Height == round(40*taskbar_scale(windows_taskbar_dpi(), geometry)) and surface.form.Height < geometry[0][3]-geometry[0][1]-6

@@ -26,6 +26,20 @@ class StripPlacementTests(unittest.TestCase):
         self.assertEqual(target[0], "left")
         self.assertEqual(docked_point(BAR, target, 200), (156, 1039))
 
+    def test_narrow_left_gap_keeps_left_anchor_instead_of_switching_sides(self):
+        # Reading from a 150 % taskbar where the Widgets edge reached x=422 (a second
+        # VRAM Radar strip beside the weather was read as weather content): the gap
+        # 440..491 is narrower than a 69 px strip.  The strip stays at the gap start;
+        # left_slot's "fits" answer (None) is not the placement rule.
+        from vram_radar.usage_surface import left_slot
+        bar = (0, 1528, 2560, 1600)
+        elements = {"WidgetsButton": (9, 1528, 422, 1600), "StartButton": (509, 1528, 577, 1600),
+                    "SearchButton": (580, 1540, 909, 1588), "TaskViewButton": (913, 1528, 979, 1600)}
+        target = docked_target(bar, (2200, 1528, 2560, 1600), elements, (69, 51), 18)
+        self.assertEqual(target[0], "left")
+        self.assertEqual(docked_point(bar, target, 69), (440, 1538))
+        self.assertIsNone(left_slot(bar, elements, (69, 51), 18))
+
     def test_tray_fallback_anchor_is_width_independent(self):
         a = docked_target(BAR, TRAY, {}, (200, 34))
         b = docked_target(BAR, TRAY, {}, (260, 34))

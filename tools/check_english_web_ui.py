@@ -32,7 +32,14 @@ CJK = re.compile(r"[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]")
 ATTRIBUTES = {"aria-label", "title", "placeholder", "alt", "data-label"}
 # Language names are intentionally shown in their own language.
 ALLOWED = {"简体中文"}
-SCENARIOS = ("full", "clean", "offline", "connecting")
+# English count agreement and repeated list items (e.g. "Data is stale, Data is stale").
+GRAMMAR = (
+    re.compile(r"(?<![\d.,/])1 GPUs\b"),
+    re.compile(r"(?<![\d.,/])(?!1 )\d[\d,.]* GPU\b(?!s)"),
+    re.compile(r"(?<![\d.,/])(?!1/)\d[\d,.]*/1 GPUs\b"),
+    re.compile(r"(?:^|, )([^,]{3,}), \1(?:,|$)"),
+)
+SCENARIOS = ("full", "clean", "offline", "connecting", "single")
 # Collapsed sections are rendered again with every <details> opened.  Cluster
 # node modules are excluded: they page through get_cluster_nodes, which keeps the
 # headless virtual clock busy without adding new strings.
@@ -60,6 +67,7 @@ class TextCollector(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.stack: list[str] = []
         self.hits: list[str] = []
+        self.grammar: list[str] = []
 
     def inert(self) -> bool:
         # <template> content is not part of the live document; clones are
@@ -76,6 +84,8 @@ class TextCollector(HTMLParser):
         for key, value in attrs:
             if key in ATTRIBUTES and value and CJK.search(value) and value.strip() not in ALLOWED:
                 self.hits.append(f"[{tag} {key}] {value.strip()}")
+            if key in ATTRIBUTES and value and any(rule.search(value) for rule in GRAMMAR):
+                self.grammar.append(f"[{tag} {key}] {value.strip()}")
 
     def handle_endtag(self, tag):
         if self.inert() and tag != "template":
@@ -90,6 +100,8 @@ class TextCollector(HTMLParser):
         text = data.strip()
         if text and CJK.search(text) and text not in ALLOWED:
             self.hits.append(text)
+        if text and any(rule.search(text) for rule in GRAMMAR):
+            self.grammar.append(text)
 
 
 def prepare(folder: Path) -> Path:
@@ -144,6 +156,10 @@ def run(language: str = "en", browser: str | None = None) -> dict:
                 report["scenarios"][key] = {"dom_bytes": len(dom), "cjk": hits}
                 # In Chinese mode the check is inverted: CJK text must be present.
                 failed = failed or (not hits if language != "en" else bool(hits))
+                if language == "en":
+                    grammar = sorted(set(collector.grammar))
+                    report["scenarios"][key]["grammar"] = grammar
+                    failed = failed or bool(grammar)
     report["ok"] = not failed
     return report
 

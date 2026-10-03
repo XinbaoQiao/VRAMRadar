@@ -132,7 +132,7 @@ process.stdout.write(JSON.stringify(values.map(value => i18n.translateText(value
                    '4090 Workstation，监控就绪，2 GPU · 30.5 GiB 可用']
         self.assertEqual(self.translate(sources), [
             '41m 10s', '1 server is not monitoring ready yet', 'Revalidate all', '.',
-            '4090 Workstation, monitoring ready, 2 GPU · 30.5 GiB free',
+            '4090 Workstation, monitoring ready, 2 GPUs · 30.5 GiB free',
         ])
 
     def test_chinese_mode_is_unchanged(self):
@@ -146,6 +146,20 @@ process.stdout.write(JSON.stringify(values.map(value => i18n.translateText(value
         result = subprocess.run([shutil.which("node"), "-e", script], cwd=ROOT, input=json.dumps(values),
                                 text=True, encoding="utf-8", capture_output=True, check=True)
         self.assertEqual(json.loads(result.stdout), values)
+
+    def test_gpu_counts_agree_in_english(self):
+        sources = ['1 GPU · 20 GiB 可用', '2 GPU · 20 GiB 可用', '1 张', '3 张', '1 张卡', '1 张（共 1 张）',
+                   '未知（共 1 张）', '0/1 GPU 调度器报告空闲', '16 GPU · 空闲容量未知', '1/1 台监控就绪 · 1 张 GPU',
+                   'Lab，监控就绪，1 GPU · 2 GiB 可用', 'Lab，监控就绪，4 GPU · 2 GiB 可用，1 运行']
+        self.assertEqual(self.translate(sources), [
+            '1 GPU · 20 GiB free', '2 GPUs · 20 GiB free', '1 GPU', '3 GPUs', '1 GPU', '1 free of 1 GPU',
+            'Unknown (1 GPU total)', '0/1 GPU idle per scheduler', '16 GPUs · Free capacity unknown',
+            '1/1 servers ready · 1 GPU', 'Lab, monitoring ready, 1 GPU · 2 GiB free',
+            'Lab, monitoring ready, 4 GPUs · 2 GiB free, 1 running'])
+
+    def test_navigator_label_does_not_repeat_the_state(self):
+        self.assertEqual(self.translate(['Lab A6000，数据已过期，数据已过期', 'Local GPU，正在配置中，正在配置中']),
+                         ['Lab A6000, Data is stale', 'Local GPU, Configuring'])
 
     def test_user_content_is_not_erased_or_replaced(self):
         values = ['实验服务器甲', './中文目录', 'python train.py --name 中文实验']

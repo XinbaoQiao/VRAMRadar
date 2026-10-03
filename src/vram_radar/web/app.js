@@ -489,7 +489,7 @@ function capacityTape(summary) {
 }
 
 function renderSummary(summary) {
-  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">连接就绪 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span>块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
+  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">连接就绪 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span data-i18n-count="${escapeHtml(String(summary.total_gpus ?? ''))}">块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
 }
 
 function setRefreshClock(text, active = false) {
@@ -2204,7 +2204,7 @@ function renderFavoritesSummaryStrip(snapshot) {
   const english = window.VRAMRadarI18n?.language === 'en';
   strip.hidden = false;
   strip.textContent = english
-    ? `Favorites ${serverCount} servers · ${gpuCount} GPUs · idle ${idle}`
+    ? `Favorites ${serverCount} ${serverCount === 1 ? 'server' : 'servers'} · ${gpuCount} ${gpuCount === 1 ? 'GPU' : 'GPUs'} · idle ${idle}`
     : `收藏 ${number(serverCount)} 台 · ${number(gpuCount)} 张卡 · 空闲 ${number(idle)}`;
   strip.title = english ? 'Show favorites in navigator' : '在导航中只看收藏';
   strip.setAttribute('aria-pressed', String(serverNavigatorFilter === 'favorites'));

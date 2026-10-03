@@ -1044,6 +1044,9 @@
     ['SSH 私钥', 'SSH private key'], ['SSH 公钥', 'SSH public key'],
   ]);
 
+  // English count nouns: "1 GPU", "2 GPUs".
+  const gpus = count => (String(count).trim() === '1' ? `${count} GPU` : `${count} GPUs`);
+
   const PATTERNS = [
     [/^另有别名：(.+)$/, 'Also known as: $1'],
     [/^第 ([\d,.]+) 组$/, 'Group $1'],
@@ -1080,7 +1083,7 @@
     [/^第 ([\d,.]+) 台服务器：(.+)$/, 'Server $1: $2'],
     [/^已解析 ([\d,.]+) 台服务器候选(.+)$/, 'Parsed $1 server candidates$2'],
     [/^总量 ([\d,.]+) GiB$/, '$1 GiB total'],
-    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 张 GPU$/, '$1/$2 servers ready · $3 GPUs'],
+    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 张 GPU$/, (_, ready, total, count) => `${ready}/${total} servers ready · ${gpus(count)}`],
     [/^GPU 实时显存 · 刚刚更新$/, 'Live GPU memory · updated just now'],
     [/^([\d,.]+) 个逻辑核心$/, '$1 logical cores'],
     [/^([\d,.]+) 个可见进程$/, '$1 visible processes'],
@@ -1089,11 +1092,11 @@
     [/^([\d,.]+) 项$/, '$1 items'],
     [/^([\d,.]+)–([\d,.]+) \/ ([\d,.]+) 台$/, '$1–$2 / $3 servers'],
     [/^([\d,.]+) 台$/, '$1 servers'],
-    [/^([\d,.]+) GPU · ([\d,.]+) GiB 可用$/, '$1 GPU · $2 GiB free'],
+    [/^([\d,.]+) GPU · ([\d,.]+) GiB 可用$/, (_, count, free) => `${gpus(count)} · ${free} GiB free`],
     [/^在线显存池，可用 ([\d,.]+) GiB，共 ([\d,.]+) GiB，可用率 ([\d,.]+)%，状态充足$/, 'Online VRAM pool: $1 GiB free of $2 GiB ($3%), healthy'],
     [/^修改时间：(.+)$/, 'Modified: $1'],
     [/^查看完整任务名称：(.+)$/, 'View full job name: $1'],
-    [/^(.+)，监控就绪，([\d,.]+) GPU · ([\d,.]+) GiB 可用$/, '$1, monitoring ready, $2 GPU · $3 GiB free'],
+    [/^(.+)，监控就绪，([\d,.]+) GPU · ([\d,.]+) GiB 可用$/, (_, name, count, free) => `${name}, monitoring ready, ${gpus(count)} · ${free} GiB free`],
     [/^收藏 (.+)$/, 'Favorite $1'],
     [/^收藏这张 GPU (.+)$/, 'Favorite GPU $1'],
     [/^取消收藏这张 GPU (.+)$/, 'Unfavorite GPU $1'],
@@ -1101,7 +1104,7 @@
     [/^拖动以调整第 ([\d,.]+) 台服务器的顺序$/, 'Drag to adjust the order of server $1'],
     [/^(.+) 已移动到第 ([\d,.]+) 位$/, '$1 moved to position $2'],
     [/^(.+) · ([\d,.]+) GiB\/卡$/, '$1 · $2 GiB/GPU'],
-    [/^([\d,.]+) 张（共 ([\d,.]+) 张）$/, '$1 free of $2 GPUs'],
+    [/^([\d,.]+) 张（共 ([\d,.]+) 张）$/, (_, free, total) => `${free} free of ${gpus(total)}`],
     [/^已分配 ([\d,.]+) GiB$/, '$1 GiB allocated'],
     [/^调度器未分配 ([\d,.]+) \/ ([\d,.]+) GiB$/, '$1 / $2 GiB unallocated by scheduler'],
     [/^([\d,.]+) 当前 · ([\d,.]+) 近期$/, '$1 current · $2 recent'],
@@ -1110,7 +1113,7 @@
     [/^([\d,.]+)小时([\d,.]+)分钟$/, '$1h $2m'],
     [/^([\d,.]+)小时$/, '$1h'],
     [/^([\d,.]+)分钟$/, '$1m'],
-    [/^([\d,.]+) 张$/, '$1 GPUs'],
+    [/^([\d,.]+) 张$/, (_, count) => gpus(count)],
     [/^([\d,.]+) 个节点 · 先按卡型和分区汇总$/, '$1 nodes · summarized by GPU model and partition'],
     [/^每页最多 ([\d,.]+) 个节点$/, 'Up to $1 nodes per page'],
     [/^GPU 实时显存 · 最后成功：从未成功$/, 'Live GPU memory · no successful sample yet'],
@@ -1122,7 +1125,7 @@
     [/^错误代码：\s*(.+?) · 约 ([\d,.]+) 秒后自动重试。当前没有可显示的 GPU 数据。$/, 'Error code: $1 · Retrying automatically in about $2 seconds. No GPU data is available.'],
     [/^错误代码：(.+)。当前没有可显示的 GPU 数据。$/, 'Error code: $1. No GPU data is available.'],
     [/^([\d,.]+) 运行$/, '$1 running'],
-    [/^(.+)，监控就绪，([\d,.]+) GPU · ([\d,.]+) GiB 可用，([\d,.]+) 运行$/, '$1, monitoring ready, $2 GPU · $3 GiB free, $4 running'],
+    [/^(.+)，监控就绪，([\d,.]+) GPU · ([\d,.]+) GiB 可用，([\d,.]+) 运行$/, (_, name, count, free, running) => `${name}, monitoring ready, ${gpus(count)} · ${free} GiB free, ${running} running`],
     [/^(.+)，需要认证，需要认证$/, '$1, authentication required'],
     [/^([\d,.]+) 天$/, '$1 days'],
     [/^([\d,.]+) 小时$/, '$1 hours'],
@@ -1135,7 +1138,7 @@
     [/^时钟：当前约 ([\d,.]+) MHz。$/, 'Clock ~$1 MHz.'],
     [/^([\d,.]+)--([\d,.]+) \/ ([\d,.]+) 台$/, '$1--$2 / $3 servers'],
     [/^([\d,.]+)[\u2013-]{1,2}([\d,.]+) \/ ([\d,.]+) 台$/, '$1--$2 / $3 servers'],
-    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 张 GPU$/, '$1/$2 servers ready · $3 GPUs'],
+    [/^([\d,.]+)\/([\d,.]+) 台监控就绪[\s·・]+([\d,.]+) 张 GPU$/, (_, ready, total, count) => `${ready}/${total} servers ready · ${gpus(count)}`],
     [/^状态更新于 (.+?) [·・] 每 ([\d,.]+) 秒$/, 'Status updated at $1 · every $2 s'],
     // Durations: any combination of days, hours, minutes and seconds.
     [/^(?=\d)(?:([\d,.]+)天)?(?:([\d,.]+)小时)?(?:([\d,.]+)分钟)?(?:([\d,.]+)秒)?$/u, (_, d, h, m, s) =>
@@ -1148,13 +1151,13 @@
     [/^在线显存池，可用 ([\d,.]+) GiB，总量暂不可用$/, 'Online VRAM pool: $1 GiB free, total unavailable'],
     [/^过去 ([\d,.]+) 小时结果$/, 'Results from the last $1 hours'],
     [/^([\d,.]+) 个$/, '$1'],
-    [/^未知（共 ([\d,.]+) 张）$/, 'Unknown ($1 GPUs total)'],
+    [/^未知（共 ([\d,.]+) 张）$/, (_, count) => `Unknown (${gpus(count)} total)`],
     [/^([\d,.]+) 项$/, (_, count) => (count === '1' ? '1 item' : `${count} items`)],
     [/^(.+) GiB\/卡$/, (_, value) => `${translated(value)} GiB/GPU`],
     [/^服务器目录在(.+)；拖动或按回车移至(.+)$/, (_, current, target) => `Server navigator is at ${translated(current)}; drag or press Enter to move to ${translated(target)}`],
     [/^拖动到([^；。·\n]+)$/, (_, target) => `Drag to ${translated(target)}`],
     [/^服务器目录已移到(.+)$/, (_, target) => `Server navigator moved to ${translated(target)}`],
-    [/^([\d,.]+) 张卡$/, '$1 GPUs'],
+    [/^([\d,.]+) 张卡$/, (_, count) => gpus(count)],
     [/^空闲 ([^；。·\n]+)$/, (_, value) => `${translated(value)} available`],
     [/^([^；。·\n]+) 已结束。$/, (_, label) => `${translated(label)} has finished.`],
     [/^VRAM Radar (.+) 已可下载。$/, 'VRAM Radar $1 is available to download.'],
@@ -1163,7 +1166,7 @@
     [/^([\d,.]+) 暂停$/, '$1 suspended'],
     [/^([\d,.]+) 个我的 GPU 进程$/, (_, count) => (count === '1' ? '1 of my GPU processes' : `${count} of my GPU processes`)],
     [/^([\d,.]+) GiB 可用$/, '$1 GiB available'],
-    [/^([\d,.]+)\/([\d,.]+) GPU 调度器报告空闲$/, '$1/$2 GPUs idle per scheduler'],
+    [/^([\d,.]+)\/([\d,.]+) GPU 调度器报告空闲$/, (_, free, total) => `${free}/${gpus(total)} idle per scheduler`],
     [/^未显示$/, 'Not shown'],
     [/^当前服务器不在筛选结果中，筛选结果共 ([\d,.]+) 台$/, 'The current server is not in the filtered results ($1 servers match)'],
     [/^([\d,.]+) 匹配$/, '$1 matches'],
@@ -1214,10 +1217,13 @@
     [/^GitHub 返回 HTTP ([\d]+)，请稍后重试$/, 'GitHub returned HTTP $1; try again later'],
     // Server navigator labels: name，state[，resources][，tasks].
     [/^(.+?)，(正在配置中|监控就绪|数据已过期|网络不可达|需要认证|安全阻止|配置异常|监控已暂停)((?:，.+)?)$/s, (_, name, state, rest) =>
-      [name, state, ...rest.split('，').filter(Boolean)].map((part, index) => (index ? translated(part) : part)).join(', ')],
+      [name, state, ...rest.split('，').filter(Boolean)].map((part, index) => (index ? translated(part) : part))
+        .filter((part, index, parts) => index < 2 || part !== parts[index - 1]).join(', ')],
+    [/^([\d,.]+) GPU · ([^·]+)$/, (_, count, rest) => `${gpus(count)} · ${translated(rest)}`],
     // Redaction marker inside otherwise untranslated content such as command summaries.
     [/^(.*\[已隐藏\].*)$/s, (_, value) => value.split('[已隐藏]').join('[hidden]')],
   ];
+  const SINGULAR = new Map([['块', ' GPU']]);
   const ATTRIBUTES = ['aria-label', 'title', 'placeholder', 'alt', 'data-label'];
   const textRecords = new WeakMap();
   const attributeRecords = new WeakMap();
@@ -1261,6 +1267,10 @@
     if (record && current === record.rendered && record.language === language) return;
     if (!record || current !== record.rendered) record = {source: current, rendered: current, language};
     record.rendered = language === 'en' ? translated(record.source) : record.source;
+    // A unit label next to a separately rendered number: data-i18n-count="1" selects the singular.
+    if (language === 'en' && node.parentElement.dataset?.i18nCount === '1' && SINGULAR.has(record.source.trim())) {
+      record.rendered = SINGULAR.get(record.source.trim());
+    }
     record.language = language;
     textRecords.set(node, record);
     if (current !== record.rendered) node.nodeValue = record.rendered;
