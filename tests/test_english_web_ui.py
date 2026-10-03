@@ -9,7 +9,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import check_english_web_ui  # noqa: E402
 
-BROWSER = None if os.environ.get("VRAM_RADAR_SKIP_BROWSER_TESTS") else check_english_web_ui.find_browser(None)
+# Headless Chrome on macOS runners stalls under --virtual-time-budget (the
+# release job timed out); the web UI is the same on every platform and is
+# rendered on Windows and Linux.
+BROWSER = (None if os.environ.get("VRAM_RADAR_SKIP_BROWSER_TESTS") or sys.platform == "darwin"
+           else check_english_web_ui.find_browser(None))
 
 
 @unittest.skipUnless(BROWSER, "no headless Chromium-family browser available")
