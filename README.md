@@ -33,15 +33,15 @@
 
 ![VRAM Radar overview](docs/assets/vram-radar-overview.png)
 
-## Latest update · v0.9.9
+## Latest update · v1.0.0
 
-Monitor Codex quota from the Windows taskbar or macOS menu bar with the optional Extensions module.
+The first stable release: quota for multiple AI apps on the Windows taskbar or macOS menu bar, plus long-run stability and updater hardening.
 
-- Automatically detect a local signed-in Codex installation; no API key or manual path is required.
-- Use a compact Windows quota strip with bold decimal-hour countdowns, continuous colors, a plain-text layout and a dock/free-move toggle.
-- Resize the server navigator and scroll to the bottom without sticky server headings jittering.
+- Track Codex, Grok, Kimi, DeepSeek and more (up to 4), with consent-based read-only auto-reading, icon or text labels, per-model reset countdowns and gradient colours.
+- The strip follows the taskbar weather widget's visible width; the UI is fully bilingual (Chinese/English).
+- Memory-leak fixes, bounded caches/logs, a more robust updater and macOS fixes.
 
-Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v0.9.9.md).
+Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v1.0.0.md).
 
 ## Vibe Coding made the code flow easier—and the server state harder to feel
 
@@ -102,12 +102,12 @@ Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, Orb
 
 ## Downloads and platform boundary
 
-The current public stable release is **v0.9.9**.
+The current public stable release is **v1.0.0**.
 
 | Platform | Download | Current boundary |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.9.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-0.9.9-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
+| macOS | `VRAMRadar-1.0.0-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
 
 The Latest Release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -116,7 +116,7 @@ offers a Windows portable ZIP. This release is not signed with an Apple Develope
 and is not notarized; on first launch, right-click **Open** in
 Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v0.9.9 release notes](docs/release-notes-v0.9.9.md) for the exact boundaries.
+Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v1.0.0 release notes](docs/release-notes-v1.0.0.md) for the exact boundaries.
 
 ## Local-first by design
 

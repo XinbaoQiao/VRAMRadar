@@ -1,3 +1,3 @@
 """VRAM Radar desktop application."""
 
-__version__ = "0.9.9"
+__version__ = "1.0.0"

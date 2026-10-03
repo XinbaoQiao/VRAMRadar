@@ -35,15 +35,15 @@
   <img src="docs/assets/readme/vibe-coding-cover.webp" width="560" alt="Vibe Coding 越顺手，GPU 状态反而越难感知">
 </p>
 
-## 最新更新 · v0.9.9
+## 最新更新 · v1.0.0
 
-新增可选的 Codex 额度监测，在 Windows 任务栏或 macOS 菜单栏查看剩余额度与重置倒计时。
+首个正式版：在 Windows 任务栏或 macOS 菜单栏查看多个 AI 应用的额度，并加固长时间运行稳定性与自动更新。
 
-- 自动查找已登录的本地 Codex，无需填写 API 密钥或手动配置路径。
-- Windows 额度条支持加粗小数小时、连续渐变、纯文字显示，以及固定／自由移动切换。
-- 支持拖动边框调整服务器侧栏尺寸，修复列表底部悬浮标题抖动。
+- 支持 Codex、Grok、Kimi、DeepSeek 等（最多 4 个），征得同意后只读自动读取，可选图标／文字显示、各模型重置倒计时与渐变颜色。
+- 额度条跟随任务栏天气组件的可见宽度定位；界面完整支持中英双语。
+- 修复内存泄漏，缓存与日志有上限，更新更可靠，并包含 macOS 修复。
 
-从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v0.9.9.md)。
+从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v1.0.0.md)。
 
 ## 为什么做这个工具
 
@@ -116,19 +116,19 @@ VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop`
 
 ## 下载与首次启动边界
 
-当前公开稳定版为 **v0.9.9**。
+当前公开稳定版为 **v1.0.0**。
 
 | 平台 | 下载文件 | 当前边界 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-0.9.9.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-0.9.9-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
+| macOS | `VRAMRadar-1.0.0-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
 
 Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
 更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
 macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
 **打开**，不要关闭 Gatekeeper。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v0.9.9 发布说明](docs/release-notes-v0.9.9.md)。
+Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v1.0.0 发布说明](docs/release-notes-v1.0.0.md)。
 
 ## 本地优先，不接管你的基础设施
 
