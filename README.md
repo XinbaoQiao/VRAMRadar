@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+  <strong>English</strong> · <a href="README.zh-CN.md">Chinese (Simplified)</a>
 </p>
 
 <p align="center">
@@ -9,11 +9,7 @@
 <h1 align="center">VRAM Radar</h1>
 
 <p align="center">
-  <strong>Know where your GPU capacity is—without leaving the flow.</strong>
-</p>
-
-<p align="center">
-  A local desktop view of GPU capacity, jobs, and connection state across SSH hosts and Slurm clusters.
+  <strong>GPU capacity across SSH hosts and Slurm clusters, plus AI app quota on the taskbar.</strong>
 </p>
 
 <p align="center">
@@ -25,129 +21,161 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>Download</strong></a>
-  · <a href="#quick-start">Quick start</a>
-  · <a href="#what-stays-visible">Features</a>
-  · <a href="docs/server-config-discovery.md">SSH setup</a>
+  <a href="../../releases/latest"><strong>Download v1.0.0</strong></a>
+  · <a href="#installation">Installation</a>
+  · <a href="#usage">Usage</a>
+  · <a href="#troubleshooting">Troubleshooting</a>
+  · <a href="docs/release-notes-v1.0.0.md">Changelog</a>
 </p>
 
-![VRAM Radar overview](docs/assets/vram-radar-overview.png)
+![VRAM Radar GPU overview (synthetic data)](docs/assets/readme/overview-en.png)
 
-## Latest update · v1.0.0
+VRAM Radar is a local, read-only desktop monitor. It shows available VRAM, GPU
+utilization, jobs and connection state for Direct SSH servers, Slurm clusters and
+the local NVIDIA GPU. An optional taskbar strip (Windows) or menu-bar item (macOS)
+shows the remaining quota and reset time of AI coding apps.
 
-The first stable release: quota for multiple AI apps on the Windows taskbar or macOS menu bar, plus long-run stability and updater hardening.
+It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
+`nvidia-smi`, `nvtop` or Slurm.
 
-- Track Codex, Grok, Kimi, DeepSeek and more (up to 4), with consent-based read-only auto-reading, icon or text labels, per-model reset countdowns and gradient colours.
-- The strip follows the taskbar weather widget's visible width; the UI is fully bilingual (Chinese/English).
-- Memory-leak fixes, bounded caches/logs, a more robust updater and macOS fixes.
+## Features
 
-Download from [Latest Release](../../releases/latest). See the [release notes](docs/release-notes-v1.0.0.md).
+### GPU monitoring
 
-## Vibe Coding made the code flow easier—and the server state harder to feel
-
-Agents can edit code, run commands, and start long tasks while you stay focused on the outcome. But once the terminal is no longer in front of you, simple operational questions become harder to answer:
-
-- Is the task still running?
-- Which server or GPU is it using?
-- When will usable capacity become available?
-
-VRAM Radar puts that missing state back into one local desktop view. It combines Direct SSH and Slurm capacity, shows your active work beside the GPUs, and keeps task-completion plus GPU-availability messages in one local notification center.
-
-It is intentionally not a scheduler: VRAM Radar does not submit jobs, reserve GPUs, or replace `nvidia-smi`, `nvtop`, or Slurm. It helps you decide **where capacity exists, where your work is running, and which server to open next**.
-
-## What stays visible
-
-| One view for multiple servers | Your jobs beside the GPUs | Alerts without constant refreshing |
-|---|---|---|
-| Compare Direct SSH workstations and Slurm clusters without opening a terminal for each host. | See running and queued work for the current account, with node and GPU context when available. | Receive native task/GPU alerts and review durable unread history from one bell. Other users' tasks are watched only when selected individually. |
-
-![VRAM Radar server and task details](docs/assets/vram-radar-server-detail.png)
-
-The interface starts with available VRAM and server state. Nodes, tasks, processes, matching controls, and code directories stay collapsed until you need them. Screenshots use synthetic data and contain no private hosts, keys, or Profiles.
-
-### Everyday workflow
-
-To monitor this computer's NVIDIA GPU, add a server in Settings and choose
-**Local NVIDIA GPU**. No SSH address or credentials are needed. Radar reads
-memory, GPU utilization and temperature once per configured refresh interval;
-it does not start compute tasks. Local mode requires `nvidia-smi` from the NVIDIA driver.
-
-| Capability | What you can do |
+| Capability | Description |
 |---|---|
-| Server navigation | Search and filter servers, keep favorites close, and pause monitoring when needed. |
-| GPU availability | Inspect per-GPU memory, utilization, and temperature when the backend provides them; receive alerts for favorite servers or GPUs that become idle or meet your free-memory threshold. |
-| Tasks and processes | Review Slurm running/queued jobs and Direct SSH GPU processes, including ownership, GPU allocation, and available timing metadata. |
-| Completion notifications | Enable alerts for your account's tasks, or select another user's task individually. Review messages and unread history in the local notification center. |
-| CPU and memory | Read CPU usage, load averages, core counts, and host memory alongside the GPU view, with built-in explanations. |
-| Working directories | Browse account directories on demand and pin a default directory without repeatedly opening a terminal. |
+| Multiple servers | Direct SSH workstations, Slurm clusters and **Local NVIDIA GPU** (requires `nvidia-smi`) in one view, with search, filters, favorites and per-server pause. |
+| Per-GPU detail | Used and free VRAM, utilization and temperature where the backend provides them; Slurm partitions, node state and scheduled allocation. |
+| Jobs and processes | Running and queued Slurm jobs and Direct SSH GPU processes for your account, with GPU allocation and available timing metadata. |
+| Notifications | Native alerts for task completion and for favorite servers or GPUs that become idle or reach a free-memory threshold, with unread history in the notification center. |
+| Host context | CPU usage, load averages, core count, host memory, and on-demand browsing of working directories. |
+| SSH discovery | Reads local OpenSSH, VS Code, Cursor, Windsurf, Colima, OrbStack and XDG locations. Discovery is local; a server counts as **monitoring ready** only after a successful connection. |
 
-### Reading task timing and connection state
+![Server detail (synthetic data)](docs/assets/readme/server-detail-en.png)
 
-For Direct SSH, process runtime depends on metadata exposed by the remote system. Container isolation, permissions, or inconsistent clocks can make that metadata unavailable or unreliable.
+### AI quota strip (Windows taskbar, macOS menu bar)
 
-- **Normal runtime:** positive durations retain the existing display. A newly started process may legitimately report zero.
-- **Timing unverified:** a zero reading cannot be tied to a verifiable process identity; no running-time estimate is invented.
-- **Runtime unavailable:** the same verified process reports zero for at least three samples spanning 30 seconds. A separate **Observed running for at least …** value records only the observation interval, not the full time since the task started.
+![Taskbar strip, icon labels](docs/assets/readme/taskbar-strip.png)
 
-Observation restarts after a process identity change, disappearance, connection failure, monitoring pause, or a long sampling gap. Cached/offline data is not evidence that a task is still running. Completion alerts depend on successful observations and cannot guarantee notification of a task that started and ended between samples.
+- On Windows, a compact strip sits on the taskbar to the right of the Widgets
+  (weather) button, follows the weather widget's visible width, and samples the
+  taskbar colour so it blends in.
+- Up to **4** apps at a time, each showing the remaining quota and the time until
+  reset. Supported apps: Codex, DeepSeek (wallet balance), Grok, Kimi, Claude,
+  GLM, Qwen and Tencent Yuanbao. Codex is selected by default; installed apps are
+  detected locally.
+- Labels can be app **Icons** or **Text** names:
 
-## Quick start
+  ![Taskbar strip, text labels (synthetic values)](docs/assets/readme/strip-text-mode.png)
 
-1. Download the package for your platform from the [Latest Release](../../releases/latest).
-2. Start VRAM Radar and review the SSH aliases found on your computer.
-3. Confirm whether each server uses Direct SSH or Slurm, save the Profile, and open the resource view.
-4. In Settings, choose task-completion and favorite-GPU alerts. Minimize the app to keep it accessible from the notification area or menu bar; configure whether closing the window hides it or exits.
+- Codex quota comes from the locally installed Codex `app-server`, using its own
+  ChatGPT sign-in. DeepSeek shows the wallet balance through a read-only query.
+- **Read quota automatically** (Grok, Kimi) is off until you allow it in a
+  consent dialog. It reuses the app's existing sign-in for one read-only quota
+  request; login data is decrypted in memory only and never saved, logged or
+  uploaded. Values refresh every 5 minutes.
 
-Automatic discovery reads common OpenSSH, VS Code, Cursor, Windsurf, Colima, OrbStack, XDG, and Harness catalog locations. Discovery is local and reviewable; finding an SSH entry does not count it as live capacity. A server becomes **monitoring ready** only after its saved connection and collector succeed.
+  ![Consent dialog](docs/assets/readme/consent-en.png)
 
-## Downloads and platform boundary
+- On macOS, the menu-bar item shows the Codex quota and reset countdowns, with a
+  menu for details, refresh and settings.
 
-The current public stable release is **v1.0.0**.
+### General
 
-| Platform | Download | Current boundary |
+- Bilingual interface (Simplified Chinese and English); the first run follows the
+  system language and can be changed under **Settings → Interface language**.
+- Automatic updates from GitHub Releases. Downloads are checked against the
+  release asset's SHA-256 digest and size before use. The Windows installed
+  version updates silently and restores the previous version if installation
+  fails; on macOS the verified zip is revealed in Finder.
+
+## Installation
+
+Download from the [latest release](../../releases/latest).
+
+| Platform | File | Notes |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | Per-user installer; currently unsigned, so SmartScreen may ask for confirmation. |
-| macOS | `VRAMRadar-1.0.0-macos.zip` | Contains native Apple Silicon and Intel apps; currently unsigned and unnotarized, so first launch uses Finder's **Open** action. |
+| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | Per-user installer, no administrator rights. The installer is not code-signed, so SmartScreen may show "Windows protected your PC"; choose **More info → Run anyway** after verifying the file. |
+| macOS | `VRAMRadar-1.0.0-macos.zip` | Contains `VRAM Radar (Apple Silicon).app` (arm64, macOS 14+) and `VRAM Radar (Intel).app` (x86_64, macOS 15+). Unsigned and unnotarized; see below. |
 
-The Latest Release contains exactly the two files users need to download. On
+The latest release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
 or desktop shortcut across in-place updates, and the public Release no longer
-offers a Windows portable ZIP. This release is not signed with an Apple Developer ID
-and is not notarized; on first launch, right-click **Open** in
-Finder instead of disabling Gatekeeper.
+offers a Windows portable ZIP.
+This release is not signed with an Apple Developer ID and is not notarized;
+on first launch, right-click **Open** in Finder instead of disabling Gatekeeper.
 
-Apple Silicon is currently validated on macOS 14 or newer; Intel x86_64 on macOS 15 or newer. Do not disable SmartScreen or Gatekeeper globally. See the [Windows installation guide](docs/windows-install-and-update.md), [Windows signing status](docs/windows-code-signing.md), [macOS notes](docs/macos-desktop.md), and [v1.0.0 release notes](docs/release-notes-v1.0.0.md) for the exact boundaries.
+Do not disable SmartScreen or Gatekeeper globally. See
+[Windows installation and updates](docs/windows-install-and-update.md),
+[Windows signing status](docs/windows-code-signing.md) and
+[macOS notes](docs/macos-desktop.md).
 
-## Local-first by design
+## Usage
 
-- Server Profiles, caches, logs, locks, and credentials stay on your computer and never enter the public package.
-- Passwords are stored only in Windows Credential Manager or macOS Keychain; they are not written to Profiles, logs, argv, or child-process environments.
-- Previously unknown SSH Host Keys are saved through OpenSSH on first use; changed Host Keys remain blocked.
-- Monitoring is read-only. Job submission, reservation, and site policy remain with Slurm or your existing platform.
+1. Start VRAM Radar and review the SSH aliases it finds.
+2. Confirm whether each server uses Direct SSH or Slurm, save, and open the
+   resource view. To monitor this computer, add a server and choose
+   **Local NVIDIA GPU**.
+3. In **Settings**, choose task-completion and favorite-GPU alerts.
+4. To show AI quota, open **Settings → Extensions** and turn on **Codex usage**.
 
-Read the full [privacy policy](PRIVACY.md) and [server reliability audit](docs/server-reliability-audit-2026-08-29.md) when you need the implementation details.
+### Taskbar strip
 
-## Documentation
+- **Click**: open the GPU overview window.
+- **Double-click**: open quota details in Settings.
+- **Right-click** menu:
 
-- [SSH configuration discovery](docs/server-config-discovery.md)
-- [Windows installation and updates](docs/windows-install-and-update.md)
-- [macOS builds and compatibility](docs/macos-desktop.md)
-- [Product and architecture notes](docs/productization-design.md)
-- [Interface design system](docs/design-system.md)
-- [Privacy](PRIVACY.md)
+<img src="docs/assets/readme/context-menu-en.png" width="240" alt="Strip context menu">
 
-## Development
+| Menu item | Effect |
+|---|---|
+| Refresh usage | Re-read all selected apps now. |
+| Hide usage strip | Turn the strip off and open Settings (re-enable under Extensions). |
+| Move freely / Lock to taskbar | Detach the strip to drag it anywhere, or return it to the taskbar. |
+| Display options | **Background**: Transparent (no background), Match taskbar, Subtle dark pill, Subtle light pill, Accent tint. **Labels**: Text or Icons. |
+| Models | Choose up to 4 apps; **Detect again** rescans installed apps. |
+| Read quota automatically | Allow or revoke automatic reading per app (read-only, no login kept). |
+| Quit VRAM Radar | Exit the application. |
 
-Radar includes optional [Codex usage monitoring](docs/subscription-usage.md)
-under **Settings → Extensions**, with a compact taskbar strip/menu-bar display
-for remaining quota and reset countdowns.
-It is off by default and requires a local Codex installation signed in to ChatGPT.
-Enable it once: the switch saves immediately, detects Codex automatically and
-restores monitoring after restarting Radar. Installation/sign-in is retried
-automatically; a manual executable path is only an advanced fallback.
+## Configuration
 
-<details>
-<summary><strong>Build and test locally</strong></summary>
+- Profiles, preferences, caches and logs are stored per user in the platform's
+  application data directory. Run `VRAMRadar.exe --show-paths` to print the
+  exact locations.
+- Passwords are stored only in Windows Credential Manager or macOS Keychain.
+  SSH private keys stay at the paths you select.
+- Command-line options: `--profile`, `--home` (alternative storage root),
+  `--servers-config` (import and sync a `servers.toml`), `--once` (print one JSON
+  snapshot without the GUI), `--show-paths`, `--debug`.
+- Strip settings (selected apps, labels, background, position, consent) are
+  saved in the Profile; quota values are kept in memory only.
+
+## Privacy
+
+- No analytics, advertising, crash uploads or accounts.
+- Network access is limited to the SSH servers you configure, GitHub Releases
+  for updates, and, when enabled, the quota services of the selected AI apps.
+- Server addresses, credentials, GPU status and logs are never sent to a VRAM
+  Radar service. Monitoring is read-only.
+
+See [PRIVACY.md](PRIVACY.md) and [AI app providers](docs/ai-app-providers.md).
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| A server is not monitoring ready | The card distinguishes network, authentication, configuration and resource-reading errors. Verify `ssh <alias>` works in a terminal, then choose **Validate again**. |
+| The strip does not appear | Turn on **Settings → Extensions → Codex usage**. If it was moved, use **Lock to taskbar**. |
+| An app shows no quota | Make sure the app is installed and signed in, use **Models → Detect again**, and for Grok or Kimi allow **Read quota automatically**. |
+| SmartScreen or Gatekeeper blocks launch | See [Installation](#installation). |
+| Reporting a problem | Use **Copy diagnostics** (locally redacted) and open an [Issue](../../issues) with the OS and app version. Do not post passwords, private keys or real server addresses. |
+
+Screenshots use synthetic server data, except the taskbar strip, which was
+captured from a live Windows 11 taskbar.
+
+## Build from source
+
+Requires Python with [uv](https://docs.astral.sh/uv/) and Node.js.
 
 Windows:
 
@@ -156,11 +184,8 @@ uv sync --extra build --frozen
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check src\vram_radar\web\app.js
 node --check src\vram_radar\web\localization.js
-.\.venv\Scripts\python.exe -m compileall -q src tests tools
-.\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
 .\.venv\Scripts\python.exe tools\validate_usage_surface.py
 .\Build-VramRadar.ps1 -SkipSync
-.\.venv\Scripts\python.exe tools\validate_packaged_askpass.py
 .\.venv\Scripts\python.exe tools\validate_packaged_tray.py
 ```
 
@@ -170,20 +195,22 @@ macOS:
 uv sync --extra build --frozen
 ./.venv/bin/python -m unittest discover -s tests -v
 node --check src/vram_radar/web/app.js
-node --check src/vram_radar/web/localization.js
-./.venv/bin/python -m compileall -q src tests tools
-./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
 ./.venv/bin/python tools/validate_usage_surface.py
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```
 
-The UI benchmark uses synthetic data and briefly shows a native window to verify scrolling and animation frames. Release validation must use an empty temporary Profile with `--no-auto-import`, so maintainer server configuration is never contacted. Before publication, launch the packaged executable once with a disposable `--home`, `--profile`, `--no-auto-import`, and `--show-paths`; macOS bundle validation covers its packaged startup path.
+Release validation should use an empty temporary Profile (`--home`, `--profile`,
+`--no-auto-import`) so no real server is contacted.
 
-</details>
+## Documentation
 
-## Feedback and license
+- [Changelog: v1.0.0 release notes](docs/release-notes-v1.0.0.md)
+- [SSH configuration discovery](docs/server-config-discovery.md)
+- [Codex usage](docs/subscription-usage.md) · [AI app providers](docs/ai-app-providers.md)
+- [Windows installation and updates](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
+- [Product and architecture notes](docs/productization-design.md) · [Design system](docs/design-system.md)
 
-Open an [Issue](../../issues) with the OS version, app version, and the app's **redacted diagnostics**. Never upload passwords, private keys, real server addresses, or an unreviewed full log.
+## License
 
-VRAM Radar is available under the [MIT License](LICENSE).
+[MIT](LICENSE)

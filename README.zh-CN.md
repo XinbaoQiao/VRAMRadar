@@ -9,11 +9,7 @@
 <h1 align="center">VRAM Radar · 显存雷达</h1>
 
 <p align="center">
-  <strong>Vibe Coding 越顺手，也别失去对服务器状态的感知。</strong>
-</p>
-
-<p align="center">
-  一个本地桌面界面，看清多台 SSH 服务器与 Slurm 集群里的 GPU、任务和连接状态。
+  <strong>看清 SSH 服务器与 Slurm 集群的 GPU 余量，并在任务栏显示 AI 应用额度。</strong>
 </p>
 
 <p align="center">
@@ -25,137 +21,140 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>下载正式版</strong></a>
-  · <a href="#3-分钟开始使用">快速开始</a>
-  · <a href="#三个最常用的能力">核心功能</a>
-  · <a href="docs/server-config-discovery.md">SSH 配置教程</a>
+  <a href="../../releases/latest"><strong>下载 v1.0.0</strong></a>
+  · <a href="#安装">安装</a>
+  · <a href="#使用">使用</a>
+  · <a href="#常见问题">常见问题</a>
+  · <a href="docs/release-notes-v1.0.0.md">更新日志</a>
 </p>
 
-<p align="center">
-  <img src="docs/assets/readme/vibe-coding-cover.webp" width="560" alt="Vibe Coding 越顺手，GPU 状态反而越难感知">
-</p>
+![VRAM Radar GPU 总览（示例数据）](docs/assets/readme/overview-zh.png)
 
-## 最新更新 · v1.0.0
+VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct SSH 服务器、Slurm
+集群和本机 NVIDIA GPU 的可用显存、利用率、任务与连接状态。可选的任务栏额度条
+（Windows）或菜单栏项（macOS）显示 AI 编程应用的剩余额度和重置时间。
 
-首个正式版：在 Windows 任务栏或 macOS 菜单栏查看多个 AI 应用的额度，并加固长时间运行稳定性与自动更新。
+它不是调度器：不提交任务、不预留 GPU，也不替代 `nvidia-smi`、`nvtop` 或 Slurm。
 
-- 支持 Codex、Grok、Kimi、DeepSeek 等（最多 4 个），征得同意后只读自动读取，可选图标／文字显示、各模型重置倒计时与渐变颜色。
-- 额度条跟随任务栏天气组件的可见宽度定位；界面完整支持中英双语。
-- 修复内存泄漏，缓存与日志有上限，更新更可靠，并包含 macOS 修复。
+## 功能
 
-从 [Latest Release](../../releases/latest) 下载。详细内容见 [发布说明](docs/release-notes-v1.0.0.md)。
+### GPU 监控
 
-## 为什么做这个工具
-
-现在很多开发流程已经变成直接用自然语言驱动代码和任务执行。Agent 可以改代码、跑命令、启动长任务，我们不必一直守着终端。
-
-但一个很现实的问题也冒出来了：**代码流程更省心，服务器状态反而更难感知。**
-
-- 任务到底还在不在跑？
-- 跑在哪台服务器、哪张 GPU 上？
-- 什么时候会有真正可用的显存？
-
-VRAM Radar 想补回的就是这层“状态感”。它把 Direct SSH 与 Slurm 里的容量、当前账号任务和连接状态放到同一个本地桌面界面里，并把任务完成与 GPU 可用消息收进同一个本地通知中心。
-
-## 三个最常用的能力
-
-<table>
-  <tr>
-    <td width="33%"><img src="docs/assets/readme/multi-server-overview.webp" alt="多服务器 GPU 总览"></td>
-    <td width="33%"><img src="docs/assets/readme/task-status.webp" alt="运行与排队任务状态"></td>
-    <td width="33%"><img src="docs/assets/readme/local-alert.webp" alt="GPU 资源可用时本地提醒"></td>
-  </tr>
-  <tr>
-    <td><strong>一个界面看多台服务器</strong><br>Direct SSH 工作站和 Slurm 集群不再分散在不同终端。</td>
-    <td><strong>任务状态与 GPU 放在一起</strong><br>查看当前账号的运行、排队、节点和资源状态。</td>
-    <td><strong>提醒集中，减少反复查看</strong><br>任务完成与 GPU 可用消息统一进入本地通知中心；保留未读记录，其他人的任务只在逐项选择后关注。</td>
-  </tr>
-</table>
-
-服务器总览优先展示可用显存和连接状态；节点、任务、进程、资源匹配和代码目录在需要时再展开。图中的服务器数据均为合成示例，不包含真实地址、账号、密钥或本地 Profile。
-
-### 日常使用
-
-在设置中添加设备，选择 **本地 NVIDIA GPU**，即可记录当前电脑的显卡。
-无需 SSH 地址或凭据；按已设置的刷新间隔读取显存、GPU 利用率和温度，不会启动计算任务。
-本地模式需要 NVIDIA 驱动提供的 `nvidia-smi`。
-
-| 功能 | 可以做什么 |
+| 能力 | 说明 |
 |---|---|
-| 服务器导航 | 搜索、筛选与收藏服务器，在需要时暂停监控。 |
-| GPU 可用性 | 在后端支持时查看每张卡的显存、使用率和温度；收藏的服务器或 GPU 整卡空闲、或达到设定空闲显存时接收提醒。 |
-| 任务与进程 | 查看 Slurm 运行和排队任务，以及 Direct SSH GPU 进程的归属、GPU 分配和可用计时信息。 |
-| 任务结束提醒 | 开启当前账号任务提醒，或逐项关注其他用户的任务；在本地通知中心查看消息和未读记录。 |
-| CPU 与内存 | 在 GPU 视图旁查看 CPU 使用率、平均负载、核心数量与主机内存，并阅读内置指标说明。 |
-| 工作目录 | 按需浏览账号目录、固定默认目录，减少反复打开终端的操作。 |
+| 多服务器 | 在同一界面查看 Direct SSH 工作站、Slurm 集群和 **本地 NVIDIA GPU**（需要 `nvidia-smi`），支持搜索、筛选、收藏和单台暂停。 |
+| 单卡详情 | 在后端提供时显示已用/空闲显存、利用率和温度；Slurm 显示分区、节点状态和调度分配。 |
+| 任务与进程 | 当前账号的 Slurm 运行/排队任务和 Direct SSH GPU 进程，附带 GPU 分配和可用的计时信息。 |
+| 通知 | 任务完成、收藏的服务器或 GPU 空闲/达到空闲显存阈值时发送系统通知；通知中心保留未读记录。 |
+| 主机信息 | CPU 使用率、负载、核心数、内存，以及按需浏览工作目录。 |
+| SSH 自动发现 | 读取本机 OpenSSH、VS Code、Cursor、Windsurf、Colima、OrbStack、XDG 等位置。发现过程只在本地进行；连接成功后服务器才算 **监控就绪**。 |
 
-### 如何理解计时与连接状态
+![服务器详情（示例数据）](docs/assets/readme/server-detail-zh.png)
 
-Direct SSH 进程的运行时长依赖远端系统提供的元数据。容器隔离、权限限制或时钟不一致，都可能导致这些信息缺失或不可靠。
+### AI 额度条（Windows 任务栏 / macOS 菜单栏）
 
-- **正常计时**：正数时长沿用原有显示；刚启动的进程确实可能短暂显示零。
-- **计时待确认**：零值无法对应到可验证的进程身份，此时不生成运行时间估计。
-- **运行时长不可用**：确认是同一进程，连续至少三次采样、跨越 30 秒仍返回零。另列的 **“已观测运行至少……”** 只表示软件实际观测到的时间下限，不代表任务从启动至今的完整时长。
+![任务栏额度条：天气组件右侧，图标模式](docs/assets/readme/taskbar-weather-zh.png)
 
-进程身份变化、进程消失、连接失败、暂停监控或采样间隔过长后，观测会重新计数。缓存或离线数据不能证明任务仍在运行；任务结束提醒依赖成功采样，无法保证捕获两次采样之间启动并结束的短任务。
+- Windows 上，额度条位于任务栏小组件（天气）按钮右侧，跟随天气组件的可见宽度，
+  并采样任务栏颜色以融入背景。
+- 最多同时显示 **4** 个应用，每项显示剩余额度和距重置的时间。支持 Codex、
+  DeepSeek（钱包余额）、Grok、Kimi、Claude、GLM 智谱清言、Qwen 通义、腾讯元宝。
+  默认选中 Codex；已安装的应用在本机自动检测。
+- 名称可显示为 **图标** 或 **文字**：
 
-<p align="center">
-  <img src="docs/assets/readme/product-boundary.webp" width="560" alt="VRAM Radar 不替代调度器，只把状态感补回来">
-</p>
+  ![文字模式（示例数值）](docs/assets/readme/strip-text-mode.png)
 
-VRAM Radar 不提交任务、不预约 GPU，也不替代 `nvidia-smi`、`nvtop` 或 Slurm。它解决的是更靠前的判断：**哪里有容量、我的任务在哪里、下一步应该打开哪台服务器。**
+- Codex 额度来自本机安装的 Codex `app-server`，使用其自身的 ChatGPT 登录。
+  DeepSeek 通过只读查询显示钱包余额。
+- **自动读取额度**（Grok、Kimi）默认关闭，需在授权对话框中允许。它复用应用已有的
+  登录，只发送一次只读额度查询；登录数据仅在内存中解密，不保存、不写日志、不上传。
+  之后每 5 分钟刷新。
 
-## 3 分钟开始使用
+  ![授权对话框](docs/assets/readme/consent-zh.png)
 
-1. 从 [Latest Release](../../releases/latest) 下载与你的平台对应的正式包。
-2. 启动 VRAM Radar，检查它在本机发现的 SSH 别名。
-3. 确认每台服务器使用 Direct SSH 还是 Slurm，保存 Profile 后进入资源总览。
-4. 在设置中选择任务结束提醒和收藏 GPU 提醒。最小化后可从通知区域或菜单栏访问应用；关闭窗口时隐藏还是退出，也可以在设置中选择。
+- macOS 菜单栏项显示 Codex 额度和重置倒计时，菜单中可查看详情、刷新和打开设置。
 
-自动发现覆盖常见 OpenSSH、VS Code、Cursor、Windsurf、Colima、OrbStack、XDG 与 Harness 目录。发现过程只读取本地配置；一个条目只有在保存后的连接和采集都成功后，才会显示为**监控就绪**并计入实时容量。
+### 通用
 
-## 下载与首次启动边界
+- 中英文双语界面；首次启动跟随系统语言，可在 **设置 → 界面语言** 中切换。
+- 通过 GitHub Releases 自动更新。下载文件在使用前按发布资产的 SHA-256 摘要和大小
+  校验。Windows 安装版静默更新，安装失败时恢复旧版本；macOS 上会在 Finder 中显示
+  已校验的 zip。
 
-当前公开稳定版为 **v1.0.0**。
+## 安装
 
-| 平台 | 下载文件 | 当前边界 |
+从 [最新发布](../../releases/latest) 下载。
+
+| 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | 按当前用户安装；目前未签名，SmartScreen 可能要求确认。 |
-| macOS | `VRAMRadar-1.0.0-macos.zip` | 内含 Apple Silicon 与 Intel 两个原生应用；目前未签名、未公证，首次从 Finder 右击 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
+| macOS | `VRAMRadar-1.0.0-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
 
-Latest Release 只保留用户实际需要下载的两个文件。Windows 推荐下载安装包，原位
-更新会保留开始菜单或桌面快捷方式；公开 Release 不再提供 Windows 便携 ZIP。
-macOS 版本未使用 Apple Developer ID 签名、未经公证，首次启动请在 Finder 中右击
-**打开**，不要关闭 Gatekeeper。
+请勿全局关闭 SmartScreen 或 Gatekeeper。详见
+[Windows 安装与更新](docs/windows-install-and-update.md)、
+[Windows 签名状态](docs/windows-code-signing.md) 和
+[macOS 说明](docs/macos-desktop.md)。
 
-Apple Silicon 当前验证边界为 macOS 14 或更新版本，Intel x86_64 为 macOS 15 或更新版本。请勿全局关闭 SmartScreen 或 Gatekeeper。详细边界见 [Windows 安装说明](docs/windows-install-and-update.md)、[Windows 签名状态](docs/windows-code-signing.md)、[macOS 兼容性说明](docs/macos-desktop.md)和 [v1.0.0 发布说明](docs/release-notes-v1.0.0.md)。
+## 使用
 
-## 本地优先，不接管你的基础设施
+1. 启动 VRAM Radar，检查自动发现的 SSH 别名。
+2. 确认每台服务器是 Direct SSH 还是 Slurm，保存后打开资源视图。监控本机时，添加
+   服务器并选择 **本地 NVIDIA GPU**。
+3. 在 **设置** 中选择任务完成和收藏 GPU 的通知。
+4. 显示 AI 额度：打开 **设置 → 扩展功能**，开启 **Codex 额度**。
 
-- Profile、缓存、日志、运行锁和服务器目录都留在当前电脑，不会进入公开安装包。
-- 密码只保存在 Windows Credential Manager 或 macOS Keychain，不写入 Profile、日志、命令行参数或子进程环境。
-- 首次出现的 SSH Host Key 由 OpenSSH 自动保存；已经变化的 Host Key 会继续阻止连接。
-- 监控保持只读；任务提交、GPU 预约和站点策略仍由 Slurm 或现有平台负责。
+### 任务栏额度条
 
-需要完整实现边界时，可查看[隐私说明](PRIVACY.md)与[服务器可靠性审计](docs/server-reliability-audit-2026-08-29.md)。
+- **单击**：打开 GPU 总览窗口。
+- **双击**：打开设置中的额度详情。
+- **右键** 菜单：
 
-## 文档
+<img src="docs/assets/readme/context-menu-zh.png" width="200" alt="额度条右键菜单">
 
-- [SSH 配置自动发现与排查](docs/server-config-discovery.md)
-- [Windows 安装、通知区域与更新](docs/windows-install-and-update.md)
-- [macOS 构建与兼容性](docs/macos-desktop.md)
-- [产品与桌面架构](docs/productization-design.md)
-- [界面设计系统](docs/design-system.md)
-- [隐私说明](PRIVACY.md)
+| 菜单项 | 作用 |
+|---|---|
+| 刷新额度 | 立即重新读取所有已选应用。 |
+| 隐藏额度条 | 关闭额度条并打开设置（可在扩展功能中重新开启）。 |
+| 切换为自由移动 / 固定到任务栏 | 让额度条脱离任务栏自由拖动，或放回任务栏。 |
+| 显示设置 | **背景**：透明（无背景）、与任务栏同色、深色半透明胶囊、浅色胶囊、主题色调。**名称显示**：文字或图标。 |
+| 显示模型 | 最多选择 4 个应用；**重新检测** 重新扫描已安装的应用。 |
+| 自动读取额度 | 按应用允许或撤销自动读取（只读，不保存登录）。 |
+| 退出 VRAM Radar | 退出程序。 |
 
-## 开发
+## 配置
 
-在「设置 → 扩展功能 → Codex 额度」开启监测，通过任务栏旁的小条或菜单栏显示剩余额度和重置倒计时；设置中只保留紧凑开关和折叠详情。
-此功能默认关闭，需要先安装 Codex 并登录 ChatGPT 账号。打开一次开关即可自动保存、查找程序并连接，重启后自动恢复；安装或登录完成后会自动重试，无需填路径、密钥或再点“应用”，不触发服务器连接。手动路径仅作为高级选项保留。
-详见 [Codex 额度说明](docs/subscription-usage.md)。
+- 配置、偏好、缓存和日志按用户保存在系统的应用数据目录中。运行
+  `VRAMRadar.exe --show-paths` 可打印具体位置。
+- 密码只保存在 Windows 凭据管理器或 macOS 钥匙串中；SSH 私钥保留在你选择的路径。
+- 命令行参数：`--profile`、`--home`（替代存储根目录）、`--servers-config`（导入并
+  同步 `servers.toml`）、`--once`（不启动界面，输出一次 JSON 快照）、`--show-paths`、
+  `--debug`。
+- 额度条设置（已选应用、名称显示、背景、位置、授权）保存在配置中；额度数值只保存在内存中。
 
-<details>
-<summary><strong>本地构建与测试</strong></summary>
+## 隐私
+
+- 没有统计分析、广告、崩溃上传或账号系统。
+- 网络访问仅限于你配置的 SSH 服务器、用于更新的 GitHub Releases，以及开启后所选
+  AI 应用的额度服务。
+- 服务器地址、凭据、GPU 状态和日志不会发送到任何 VRAM Radar 服务。监控全程只读。
+
+详见 [PRIVACY.md](PRIVACY.md) 和 [AI 应用支持说明](docs/ai-app-providers.md)。
+
+## 常见问题
+
+| 现象 | 检查项 |
+|---|---|
+| 服务器未监控就绪 | 卡片会区分网络、认证、配置和资源读取错误。先确认终端中 `ssh <别名>` 可用，再点 **重新验证**。 |
+| 额度条不显示 | 开启 **设置 → 扩展功能 → Codex 额度**。如果移动过位置，选择 **固定到任务栏**。 |
+| 某个应用没有额度 | 确认应用已安装并登录，使用 **显示模型 → 重新检测**；Grok、Kimi 需允许 **自动读取额度**。 |
+| SmartScreen 或 Gatekeeper 阻止启动 | 见 [安装](#安装)。 |
+| 反馈问题 | 使用 **复制诊断信息**（本地脱敏），在 [Issues](../../issues) 中附上系统和应用版本。不要上传密码、私钥或真实服务器地址。 |
+
+截图中的服务器数据为示例数据；任务栏额度条截自真实的 Windows 11 任务栏。
+
+## 从源码构建
+
+需要 Python 与 [uv](https://docs.astral.sh/uv/)，以及 Node.js。
 
 Windows：
 
@@ -164,10 +163,8 @@ uv sync --extra build --frozen
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 node --check src\vram_radar\web\app.js
 node --check src\vram_radar\web\localization.js
-.\.venv\Scripts\python.exe -m compileall -q src tests tools
-.\.venv\Scripts\python.exe tools\benchmark_webview_ui.py --timeout-seconds 120
+.\.venv\Scripts\python.exe tools\validate_usage_surface.py
 .\Build-VramRadar.ps1 -SkipSync
-.\.venv\Scripts\python.exe tools\validate_packaged_askpass.py
 .\.venv\Scripts\python.exe tools\validate_packaged_tray.py
 ```
 
@@ -177,19 +174,21 @@ macOS：
 uv sync --extra build --frozen
 ./.venv/bin/python -m unittest discover -s tests -v
 node --check src/vram_radar/web/app.js
-node --check src/vram_radar/web/localization.js
-./.venv/bin/python -m compileall -q src tests tools
-./.venv/bin/python tools/benchmark_webview_ui.py --timeout-seconds 120
+./.venv/bin/python tools/validate_usage_surface.py
 bash Build-VramRadar-macOS.sh --skip-sync
 ./.venv/bin/python tools/validate_macos_bundle.py
 ```
 
-界面基准使用合成数据，并会短暂显示原生窗口以验证滚动与动画帧。发布验证必须使用空的临时 Profile 和 `--no-auto-import`，避免接触维护者自己的服务器配置。发布前，还应使用临时 `--home`、`--profile`、`--no-auto-import` 和 `--show-paths` 启动一次打包程序；macOS 打包验证会检查其原生启动路径。
+发布验证请使用空的临时配置（`--home`、`--profile`、`--no-auto-import`），避免连接真实服务器。
 
-</details>
+## 文档
 
-## 反馈与许可证
+- [更新日志：v1.0.0 发布说明](docs/release-notes-v1.0.0.md)
+- [SSH 配置发现](docs/server-config-discovery.md)
+- [Codex 额度](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
+- [Windows 安装与更新](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
+- [产品与架构说明](docs/productization-design.md) · [设计规范](docs/design-system.md)
 
-如果自动发现遗漏了某种 SSH 配置，或应用无法启动，请在 [Issues](../../issues) 中提供系统版本、应用版本和应用生成的**脱敏诊断**。不要上传密码、私钥、真实服务器地址或未经检查的完整日志。
+## 许可
 
-VRAM Radar 采用 [MIT License](LICENSE) 开源。
+[MIT](LICENSE)

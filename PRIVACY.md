@@ -28,20 +28,25 @@ optional executable path are saved locally; quota values are kept in memory.
 Turning the feature off cancels its pending query. See [Codex usage](docs/subscription-usage.md).
 
 The usage strip's **Models** menu can also show other AI desktop apps found on
-this computer (DeepSeek Harness, Grok, Kimi, Claude, GLM, Qwen, Tencent Yuanbao).
-Detection reads only installation facts (uninstall registry entries, registered
-packages, process names) and small non-secret status files or log lines those
-apps write themselves. Encrypted credential stores (Grok, Kimi) are checked for
-existence and size only and are never opened, decrypted or copied.
+this computer (DeepSeek Harness, Grok, Kimi, Claude, GLM, Qwen, Tencent Yuanbao),
+up to four at a time. Detection reads only installation facts (uninstall registry
+entries, registered packages, process names) and small non-secret status files or
+log lines those apps write themselves.
 
-While **Grok** is selected, VRAM Radar may read the usage figure Grok itself
-shows in its own account menu, through Windows UI Automation (the accessibility
-interface screen readers use). It only looks while the Grok window is in the
-foreground, only inside open menus (never chat text or input fields), keeps
-only a percentage, a short reset phrase and the time it was seen, in memory,
-and never clicks, types or changes anything in Grok.
+**Read quota automatically** (Grok, Kimi) is off until the user allows it in a
+consent dialog; the choice is saved per app and can be revoked from the strip's
+right-click menu. Only with that consent, VRAM Radar decrypts the app's own stored
+sign-in in memory and sends the same read-only quota request the app makes for
+its own account page (Grok: one `GetSandUsageStatus` request; Kimi: its
+subscription and usage queries), at most every 5 minutes. The login data is never
+refreshed, saved, logged, shown or uploaded elsewhere, and results stay in memory.
+Without consent no such request is made and encrypted credential stores are not
+opened. While **Grok** is selected, VRAM Radar may also read the usage figure Grok
+shows in its own account menu through Windows UI Automation, only while the Grok
+window is in the foreground and only inside open menus; it never clicks, types or
+changes anything in Grok.
 
-One network read exists, and only while **DeepSeek** is selected in the Models
+A further network read exists only while **DeepSeek** is selected in the Models
 menu: VRAM Radar repeats the same read-only wallet query DeepSeek Harness makes
 for its own account page (`GET https://platform.deepseek.com/api/v0/users/get_user_summary`,
 or the public `GET https://api.deepseek.com/user/balance` for a plain API key),

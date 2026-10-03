@@ -15,8 +15,8 @@ Each provider is one module in `src/vram_radar/providers/` exposing
 |---|---|---|---|
 | Codex | MSIX `OpenAI.Codex_*`, `find_codex()` CLI | Quota windows (existing) | — |
 | DeepSeek Harness | Uninstall entry, `%LOCALAPPDATA%\Programs\DeepSeek Harness`, process | **Live account balance** (topped-up + granted wallets, CNY/USD), plus local token totals from `~\.dsh\storages\session_projcache\sessions\*.json` | Same read-only `GET /api/v0/users/get_user_summary` the app uses (or public `GET /user/balance` for an API key); every 5 min, backoff on errors, only while selected |
-| Grok (Grok Bot) | Uninstall entry, process, known folders | Signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | Grok's weekly usage comes from a Connect RPC POST (`DashboardService/GetSandUsageStatus`) authenticated by a DPAPI-encrypted token and is kept only in memory; Radar does not decrypt the token or impersonate the app. Instead, while Grok is the foreground window and its account (avatar) menu is open, the usage row it renders ("NN%" + reset hint) is read via UI Automation (menus only) and shown as "已用 NN%（HH:MM 读取）" until a newer reading |
-| Kimi | Uninstall entry (`DisplayIcon`), process | Membership level, exhausted / overdrawn / send-blocked and reset time, taken from Kimi's own `logs\main.log` refresh lines; signed in = the encrypted token store exists (not opened) | Kimi fetches quota online with an encrypted token; the log snapshot is only as fresh as Kimi's last run and is marked "As of" when older than 6 h |
+| Grok (Grok Bot) | Uninstall entry, process, known folders | Weekly usage and reset time; signed in (from `%APPDATA%\Grok Bot\desktop-status.json`), running, version | With **Read quota automatically** consent only: the app's DPAPI-protected sign-in is decrypted in memory for one read-only Connect RPC POST (`DashboardService/GetSandUsageStatus`), the same request Grok makes for its avatar menu; never refreshed, saved or logged; at most every 5 min. Fallback without consent: while Grok is the foreground window and its account menu is open, the usage row it renders is read via UI Automation (menus only) |
+| Kimi | Uninstall entry (`DisplayIcon`), process | Membership quota and reset time | With **Read quota automatically** consent only: the app's sign-in is decrypted in memory for its read-only subscription and usage queries (`GetSubscription`, `GetSubscriptionStats`); no token refresh, 10 s timeout, at most every 5 min. Without consent, the membership state is taken from Kimi's own `logs\main.log` refresh lines and marked "As of" when older than 6 h |
 | Claude, GLM 智谱清言, Qwen, 腾讯元宝 | Uninstall entries, MSIX, known folders, processes, sibling folders of other detected apps | Installed / version / running / last data change; "leftover data" when only an old data folder remains | No documented local usage data |
 
 ## Failure handling
@@ -30,7 +30,7 @@ Each provider is one module in `src/vram_radar/providers/` exposing
   errors; a failing probe is isolated and shown as "Probe failed".
 * Locked files are read through a private temporary copy; JSON is size-bounded
   (2 MB) and logs are tail-bounded (4 MB); damaged files read as "unknown".
-* Encrypted secrets are never decrypted; the DeepSeek sign-in token is read
+* Encrypted secrets are decrypted only for Grok and Kimi after per-app consent, in memory, for their read-only quota request; the DeepSeek sign-in token is read
   only in memory for its read-only wallet GET and never logged or displayed;
   log lines are parsed for
   a fixed whitelist of fields only; exceptions are logged by type name only.
@@ -57,9 +57,9 @@ Each provider is one module in `src/vram_radar/providers/` exposing
 ## Strip options (round 3)
 
 * **Tooltip**: one line per selected app — name, key quota/balance, reset if any.
-* **At most 6 apps** (`providers.MAX_SELECTED`): the Models menu disables further
-  ticks with a hint; the strip lays them out in three two-row columns and shrinks
-  the type (down to 72 %) to stay inside the empty area left of Start.
+* **At most 4 apps** (`providers.MAX_SELECTED`): the Models menu disables further
+  ticks with a hint; the strip lays them out in two-row columns and shrinks
+  the type when needed to stay inside the empty area left of Start.
 * **Background** (Display options > Background, saved as `usage_background`):
   `transparent` (default; colour-keyed so only text is drawn over the real
   taskbar — clicks between glyphs fall through to the taskbar), `match`
