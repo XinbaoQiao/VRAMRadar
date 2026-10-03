@@ -156,7 +156,7 @@ def system_dark() -> bool:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
             return int(winreg.QueryValueEx(key, "AppsUseLightTheme")[0]) == 0
-    except (OSError, ValueError, TypeError):
+    except (ImportError, OSError, ValueError, TypeError):
         return False
 
 
@@ -167,7 +167,7 @@ def taskbar_light() -> bool:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                             r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
             return int(winreg.QueryValueEx(key, "SystemUsesLightTheme")[0]) == 1
-    except (OSError, ValueError, TypeError):
+    except (ImportError, OSError, ValueError, TypeError):
         return False
 
 
@@ -177,7 +177,7 @@ def system_accent():
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\DWM") as key:
             value = int(winreg.QueryValueEx(key, "AccentColor")[0]) & 0xFFFFFFFF
             return (value & 255, (value >> 8) & 255, (value >> 16) & 255)  # ABGR
-    except (OSError, ValueError, TypeError):
+    except (ImportError, OSError, ValueError, TypeError):
         return None
 
 
@@ -337,7 +337,7 @@ def letter_tile(name: str, px: int, accent=None):
     graphics = Graphics.FromImage(bitmap)
     graphics.SmoothingMode = SmoothingMode.AntiAlias
     graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
-    path = _rounded(0, 0, px - 1, px - 1, max(2, px // 5))
+    path = _rounded(1, 1, px - 3, px - 3, max(2, px // 5))  # 1 px clear like fitted icons
     brush, white = SolidBrush(Color.FromArgb(*colour)), SolidBrush(Color.White)
     font = Font(FONT, max(6.0, px * 0.5), FontStyle.Bold, GraphicsUnit.Pixel)
     fmt = StringFormat()

@@ -118,7 +118,7 @@ def run(save=None):
                         image = None
                         if mode == "icons":
                             path = paths.get(name)
-                            image = provider_icon(path, px, name) if path else letter_tile(name, px)
+                            image = provider_icon(path, px, name)  # as the strip: bundled art even when not installed
                         set_name_cell(name_label, image, name, strip_scale, factor)
                     width = place_columns(used, strip_scale, factor)
                     height = scale(40)

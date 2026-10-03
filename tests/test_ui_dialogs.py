@@ -186,5 +186,15 @@ class StripIconTests(unittest.TestCase):
             self.assertEqual(len(found), 1)
             self.assertTrue(found[0].endswith("Square44x44Logo.targetsize-32_altform-unplated.png"))
 
+class NonWindowsThemeTests(unittest.TestCase):
+    def test_theme_probes_without_winreg_fall_back(self):
+        # macOS has no winreg: icon lookup must not raise ModuleNotFoundError.
+        import sys
+        from unittest.mock import patch
+        with patch.dict(sys.modules, {"winreg": None}):
+            self.assertFalse(ui.taskbar_light())
+            ui.system_accent()
+
+
 if __name__ == "__main__":
     unittest.main()
