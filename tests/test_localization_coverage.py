@@ -91,6 +91,62 @@ process.stdout.write(JSON.stringify(values.map(value => i18n.translateText(value
             'researcher@192.0.2.10:10022 · 经中转命令',
         ])
 
+    def test_main_window_banners_navigator_and_durations(self):
+        self.assert_covered([
+            '1 台服务器尚未监控就绪', '3 台服务器尚未监控就绪',
+            '每台卡片会区分网络、认证、配置和资源读取错误；上次读取的数据不会计入当前可用容量。',
+            '全部重新验证', '复制诊断', '打开日志', '已置顶', '取消收藏服务器', '恢复监控这台服务器',
+            '41分钟10秒', '2小时5秒', '1天30秒', '3天2小时', '12秒',
+            '2 排队', '1 暂停', '3 个我的 GPU 进程', '30.5 GiB 可用', '3/8 GPU 调度器报告空闲 · 240 GiB 可用',
+            '4090 Workstation，监控就绪，2 GPU · 30.5 GiB 可用，1 个我的 GPU 进程',
+            'Lab A6000，数据已过期，数据已过期', 'Local GPU，正在配置中，正在配置中',
+            '服务器目录在右侧；拖动或按回车移至左侧', '拖动以调整服务器顺序', '打开通知中心，3 条未读',
+            '错误代码：ssh_timeout · 约 240 秒后自动重试。当前没有可显示的 GPU 数据。',
+            '正在连接 SSH、检查 GPU 监控组件并读取第一份 GPU 数据；完成前不会显示为错误。',
+            '在线显存池，可用 679.1 GiB，共 1648 GiB，可用率 41%，状态充足',
+            '过去 48 小时结果', '正在刷新 · 上次目录数据 · 12 项 · 已截断', '未知（共 8 张）',
+            '已解析 3 台服务器候选（合并 2 个来源）；尚未保存，尚未连接验证；已保留 1 台本次移除项',
+            '配置已保存，正在自动识别 2 台服务器', '2 台服务器未能自动识别，请在设置中手动确认连接类型或私钥路径',
+            '当前已是最新版本 1.0.0', '发现新版本 1.0.1', '应用初始化失败：timeout',
+            'finetune-7b 已结束。', 'VRAM Radar 1.0.1 已可下载。', 'user[已隐藏]@host',
+        ])
+
+    def test_backend_messages_shown_in_the_main_window(self):
+        self.assert_covered([
+            'SSH 已连接，但远端账号检测失败（远端退出码 1）：当前账号无权读取该类 Slurm 信息',
+            '不支持的后端：foo', 'Intel UHD · 共享显存',
+            'OpenSSH 静态配置无法判断直连或 Slurm；将在保存验证时自动识别，失败时可手动选择',
+            '服务器设置文件不存在：servers.toml', '无法读取 OpenSSH 配置文件：denied',
+            '已跳过 2 条条件 Host/Match 中的 Include；这类规则需由 OpenSSH 在实际连接时判断',
+            '已确认 3 台服务器由 OpenSSH 配置管理私钥；不会固化路径', '已安全解析 2 个 OpenSSH Include 文件',
+            'lab: 缺少 OpenSSH Alias，已跳过', 'config: lab: 与 lab2 重复，保留优先来源',
+            'config: lab: ID 与 lab 冲突，已保存为 lab-2', 'GPU 数量必须在 1 到 10000 之间',
+            '连接地址或账号已变化；为避免向新端点发送旧密码，已移除 2 台服务器的已保存密码，请重新确认后输入',
+            '服务器自动同步失败，当前列表未按本地配置更新：bad。请在设置中检查服务器配置文件路径和内容。',
+            '请选择SSH 私钥', 'SSH 私钥路径无效', '找不到SSH 公钥', 'GitHub 返回 HTTP 503，请稍后重试',
+            '找不到对应的服务器', '服务器配置版本缺失或已经变化，请重新打开设置',
+        ])
+
+    def test_specific_english_wording(self):
+        sources = ['41分钟10秒', '1 台服务器尚未监控就绪', '全部重新验证', '。',
+                   '4090 Workstation，监控就绪，2 GPU · 30.5 GiB 可用']
+        self.assertEqual(self.translate(sources), [
+            '41m 10s', '1 server is not monitoring ready yet', 'Revalidate all', '.',
+            '4090 Workstation, monitoring ready, 2 GPU · 30.5 GiB free',
+        ])
+
+    def test_chinese_mode_is_unchanged(self):
+        script = """
+const fs = require('fs');
+const i18n = require('./src/vram_radar/web/localization.js');
+const values = JSON.parse(fs.readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify(values.map(value => i18n.translateText(value, 'zh-CN'))));
+"""
+        values = ['41分钟10秒', '全部重新验证', '。', '4090 Workstation，监控就绪，2 GPU · 30.5 GiB 可用']
+        result = subprocess.run([shutil.which("node"), "-e", script], cwd=ROOT, input=json.dumps(values),
+                                text=True, encoding="utf-8", capture_output=True, check=True)
+        self.assertEqual(json.loads(result.stdout), values)
+
     def test_user_content_is_not_erased_or_replaced(self):
         values = ['实验服务器甲', './中文目录', 'python train.py --name 中文实验']
         self.assertEqual(self.translate(values), values)

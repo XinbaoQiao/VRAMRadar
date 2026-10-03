@@ -2040,11 +2040,11 @@ class AppApi:
         if not completed:
             self._attach_notification_state(snapshot)
             return
-        names = "、".join(task["label"] for task in completed[:3])
+        english = profile.ui_language == "en"
+        names = (", " if english else "、").join(task["label"] for task in completed[:3])
         remaining = len(completed) - 3
         if remaining > 0:
-            names += f" 等 {len(completed)} 个任务"
-        english = profile.ui_language == "en"
+            names += f" and {remaining} more" if english else f" 等 {len(completed)} 个任务"
         title = "Task completed" if english else "任务已完成"
         message = (
             f"{names} finished." if english else f"{names} 已结束。"
@@ -4849,7 +4849,7 @@ def build_runtime(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="显存雷达：本地优先的 SSH/Slurm GPU 显存桌面监控")
+    parser = argparse.ArgumentParser(description="VRAM Radar: local-first desktop monitor for SSH and Slurm GPU memory")
     parser.add_argument("--profile", default="default", help="local Profile ID")
     parser.add_argument("--home", type=Path, help="override per-user storage root (development and portable testing)")
     parser.add_argument("--servers-config", type=Path, help="import and auto-sync a servers.toml from this address")

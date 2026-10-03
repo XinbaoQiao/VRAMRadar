@@ -746,6 +746,62 @@ class ShellApiTests(unittest.TestCase):
             self.assertEqual(api.get_profile()["task_completion_watches"], [])
             self.assertEqual(store.load("local").task_completion_watches, ())
 
+    def _completion_message_for_four_processes(self, language: str) -> tuple[str, str]:
+        pids = ("7312", "7313", "7314", "7315")
+        profile = Profile.from_dict({
+            "schema_version": 1,
+            "id": "local",
+            "display_name": "Local",
+            "ui_language": language,
+            "task_completion_alert_enabled": False,
+            "task_completion_watches": [{
+                "server_id": "gpu", "task_key": f"process:{pid}", "task_kind": "process",
+                "task_id": pid, "label": f"job-{pid}", "owner_scope": "unknown",
+            } for pid in pids],
+            "servers": [{
+                "id": "gpu", "display_name": "GPU", "backend": "direct_ssh", "host": "gpu.test"
+            }],
+        })
+
+        def snapshot(active: bool, revision: int, sampled_at: str) -> dict[str, object]:
+            return {
+                "monitoring": {"paused": False, "in_flight": False, "revision": revision},
+                "servers": [{
+                    "server_id": "gpu",
+                    "connection": {"state": "online", "data_origin": "live", "last_success_at": sampled_at},
+                    "processes": {"supported": True, "active": ([
+                        {"pid": pid, "name": f"job-{pid}", "owner_scope": "unknown"} for pid in pids
+                    ] if active else [])},
+                }],
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = storage_paths(Path(temporary))
+            store = ProfileStore(paths)
+            store.save(profile)
+            service = Mock()
+            service.snapshot.return_value = snapshot(True, 1, "2026-09-02T10:00:01Z")
+            api = AppApi(profile, store=store, paths=paths, service=service)
+            notify = Mock(return_value=True)
+            api.bind_notification_callback(notify)
+            service.snapshot.return_value = snapshot(False, 2, "2026-09-02T10:00:02Z")
+            api.get_snapshot()
+            api.get_snapshot()
+            service.snapshot.return_value = snapshot(False, 3, "2026-09-02T10:00:03Z")
+            api.get_snapshot()
+            notify.assert_called_once()
+            return notify.call_args.args
+
+    def test_multi_task_completion_message_is_fully_english(self):
+        title, message = self._completion_message_for_four_processes("en")
+        self.assertEqual(title, "Task completed")
+        self.assertEqual(message, "job-7312, job-7313, job-7314 and 1 more finished.")
+
+    def test_multi_task_completion_message_keeps_chinese_wording(self):
+        title, message = self._completion_message_for_four_processes("zh-CN")
+        self.assertEqual(title, "任务已完成")
+        self.assertEqual(message, "job-7312、job-7313、job-7314 等 4 个任务 已结束。")
+
     def test_unsupported_process_sample_does_not_claim_completion(self):
         profile = Profile.from_dict({
             "schema_version": 1,

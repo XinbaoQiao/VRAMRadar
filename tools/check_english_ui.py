@@ -7,7 +7,10 @@ and walks every menu item (text, status column, tooltip), strip label,
 tooltip/accessible text, plus the dialog/toast/notice specs.  Nothing is
 sent anywhere; consent is never changed.
 
-Usage: python tools/check_english_ui.py [--zh]   -> JSON; exit 1 on CJK hits
+Usage: python tools/check_english_ui.py [--zh] [--web]   -> JSON; exit 1 on CJK hits
+
+``--web`` also renders the main window headlessly (tools/check_english_web_ui.py)
+and adds its result under "web"; it is skipped when no browser is available.
 """
 from __future__ import annotations
 
@@ -169,5 +172,10 @@ def run(language: str = "en") -> dict:
 
 if __name__ == "__main__":
     out = run("zh-CN" if "--zh" in sys.argv else "en")
+    if "--web" in sys.argv:
+        from check_english_web_ui import run as run_web
+        out["web"] = run_web("zh-CN" if "--zh" in sys.argv else "en")
+        if out["web"]["ok"] is False:
+            out["ok"] = False
     print(json.dumps(out, ensure_ascii=False))
     raise SystemExit(0 if out["ok"] else 1)
