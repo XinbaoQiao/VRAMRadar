@@ -52,15 +52,16 @@ no Authenticode claim.
 Minimizing the main window keeps the installed app in the Windows notification
 area. Local Settings lets the close button either do the same or exit. Activate
 the tray icon to restore the window. Its right-click menu includes the current
-online-server/GPU summary, **显示 VRAM Radar**, **立即刷新**, **打开设置**,
-**暂停/继续自动监控** and **退出**. These actions reuse the running instance and
+online-server/GPU summary, **Show VRAM Radar**, **Refresh now**, **Open settings**,
+**Pause/Resume automatic monitoring** and **Exit** (shown in Chinese when the
+interface language is Chinese). These actions reuse the running instance and
 do not create a second monitor process.
 
 ## What the in-app update notice does
 
 The desktop app checks the public GitHub Release feed after startup. It never
-installs in the background: the user must select **安全一键更新** and confirm the
-operation. The updater then accepts only the exact official VRAMRadar Release
+installs in the background: the user must select **Safe one-click update**
+(安全一键更新) and confirm the operation. The updater then accepts only the exact official VRAMRadar Release
 asset name and URL, limits the download size,
 and verifies the SHA-256 digest published by GitHub before executing anything.
 If metadata, size, redirect destination, or digest does not match, the update
@@ -68,7 +69,7 @@ stops and the current installation is left unchanged.
 
 For an installer-managed copy with the update executor:
 
-1. Select **安全一键更新** and review the confirmation.
+1. Select **Safe one-click update** and review the confirmation.
 2. VRAM Radar downloads and verifies the official installer.
 3. The independent updater closes the current process, preserves the old
    installation as a rollback copy, runs the verified installer, and

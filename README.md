@@ -44,7 +44,7 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 
 | Capability | Description |
 |---|---|
-| Multiple servers | Direct SSH workstations, Slurm clusters and **Local NVIDIA GPU** (requires `nvidia-smi`) in one view, with search, filters, favorites and per-server pause. |
+| Multiple servers | Direct SSH workstations, Slurm clusters and this computer's **Local GPU** (NVIDIA through NVML or `nvidia-smi`; on Windows also AMD and Intel through performance counters) in one view, with search, filters, favorites and per-server pause. |
 | Per-GPU detail | Used and free VRAM, utilization and temperature where the backend provides them; Slurm partitions, node state and scheduled allocation. |
 | Jobs and processes | Running and queued Slurm jobs and Direct SSH GPU processes for your account, with GPU allocation and available timing metadata. |
 | Notifications | Native alerts for task completion and for favorite servers or GPUs that become idle or reach a free-memory threshold, with unread history in the notification center. |
@@ -60,9 +60,10 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 - On Windows, a compact strip sits on the taskbar to the right of the Widgets
   (weather) button, follows the weather widget's visible width, and samples the
   taskbar colour so it blends in.
-- Up to **4** apps at a time, each showing the remaining quota and the time until
-  reset. Supported apps: Codex, DeepSeek (wallet balance), Grok, Kimi, Claude,
-  GLM, Qwen and Tencent Yuanbao. Codex is selected by default; installed apps are
+- Up to **4** apps at a time (Windows). Codex, Grok and Kimi show the remaining
+  quota and the time until reset; DeepSeek shows its wallet balance. Claude, GLM,
+  Qwen and Tencent Yuanbao show install and sign-in status only (they keep no
+  readable local usage data). Codex is selected by default; installed apps are
   detected locally.
 - Labels can be app **Icons** or **Text** names:
 
@@ -78,16 +79,18 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
   ![Consent dialog](docs/assets/readme/consent-en.png)
 
 - On macOS, the menu-bar item shows the Codex quota and reset countdowns, with a
-  menu for details, refresh and settings.
+  menu for details, usage settings, refresh, turning the display off and quitting.
 
 ### General
 
 - Bilingual interface (Simplified Chinese and English); the first run follows the
   system language and can be changed under **Settings → Interface language**.
-- Automatic updates from GitHub Releases. Downloads are checked against the
-  release asset's SHA-256 digest and size before use. The Windows installed
-  version updates silently and restores the previous version if installation
-  fails; on macOS the verified zip is revealed in Finder.
+- Update checks against GitHub Releases. Nothing installs in the background:
+  on Windows, **Safe one-click update** runs after you confirm it, checks the
+  installer's SHA-256 digest and size, installs silently and restores the
+  previous version if installation fails; on macOS the verified zip is revealed
+  in Finder. A release rebuilt under the same version number from a newer
+  commit is offered as a repair update.
 
 ## Installation
 
@@ -115,7 +118,7 @@ Do not disable SmartScreen or Gatekeeper globally. See
 1. Start VRAM Radar and review the SSH aliases it finds.
 2. Confirm whether each server uses Direct SSH or Slurm, save, and open the
    resource view. To monitor this computer, add a server and choose
-   **Local NVIDIA GPU**.
+   **Local GPU (NVIDIA / AMD / Intel)** as the connection type.
 3. In **Settings**, choose task-completion and favorite-GPU alerts.
 4. To show AI quota, open **Settings → Extensions** and turn on **Codex usage**.
 

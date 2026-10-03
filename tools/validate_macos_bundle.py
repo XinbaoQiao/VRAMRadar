@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import signal
 import subprocess
 import sys
 from uuid import uuid4
@@ -169,6 +170,25 @@ def validate_packaged_askpass() -> None:
         raise RuntimeError("packaged askpass private loopback exchange failed")
 
 
+def smoke_process_group(pgid: int) -> list[str]:
+    """Bounded `ps` listing of the smoke's process group (diagnostics only).
+
+    The smoke starts in its own session, so helpers it spawned stay in this
+    group even after the app exits and they are re-parented.
+    """
+    try:
+        listing = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat=,comm="], capture_output=True,
+                                 text=True, timeout=5, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ["ps unavailable"]
+    found = []
+    for line in listing.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) == 4 and parts[1] == str(pgid):
+            found.append(f"{parts[0]} {parts[2]} {Path(parts[3]).name}")
+    return found[:20]
+
+
 def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
     command = [
         str(EXECUTABLE),
@@ -179,29 +199,44 @@ def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
         "--no-auto-import",
         *extra_args,
     ]
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=finder_like_environment(),
+        start_new_session=True,
+    )
     try:
-        result = subprocess.run(
-            command,
-            cwd=ROOT,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            env=finder_like_environment(),
-        )
+        stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         # This home is an empty validation Profile with auto-import disabled.
         # Preserve bounded diagnostics before main() removes its temporary home.
+        # Record whether the app itself was still running or had exited while a
+        # helper it spawned kept the output pipes open (communicate waits for
+        # both), then end the whole group so nothing outlives the validation.
+        app_state = "running" if process.poll() is None else f"exited {process.returncode}"
+        group = smoke_process_group(process.pid)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            process.kill()
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
         log_path = home / "logs" / "app.log"
         log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:] if log_path.is_file() else "no app log"
-        stderr = exc.stderr or ""
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", errors="replace")
+        partial = exc.stderr or ""
+        if isinstance(partial, bytes):
+            partial = partial.decode("utf-8", errors="replace")
         raise RuntimeError(
-            f"packaged macOS smoke timed out ({extra_args!r}, {timeout}s); "
-            f"stderr={stderr[-2000:]!r}; app_log={log_tail!r}"
+            f"packaged macOS smoke timed out ({extra_args!r}, {timeout}s); app={app_state}; "
+            f"process_group={group!r}; stderr={partial[-2000:]!r}; app_log={log_tail!r}"
         ) from exc
+    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     if result.returncode != 0:
         detail = result.stderr.strip()[-500:] or "no diagnostic detail"
         raise RuntimeError(

@@ -45,9 +45,11 @@ Each provider is one module in `src/vram_radar/providers/` exposing
   Explorer's UI Automation tree (`WidgetsButton`, `StartButton`,
   `SearchButton`) in physical pixels and are re-read every 5 s and whenever
   the taskbar window or size changes (Explorer restart, scale/DPI change,
-  alignment change). When the gap is too narrow, the taskbar is left-aligned,
-  or UI Automation is unavailable, it falls back to the old spot before the
-  notification area (and before Widgets when Widgets sits on the right).
+  alignment change). When the gap is narrower than the strip, it stays in the
+  gap and is compacted (smaller type, down to 90 %), then clipped, so it never
+  covers Start. Only a left-aligned taskbar (no gap left of Start) or missing
+  UI Automation data falls back to the spot before the notification area (and
+  before Widgets when Widgets sits on the right).
 * The background is the colour actually painted by the taskbar (median of a
   few pixels away from icons, refreshed every 5 s and immediately when
   `SystemUsesLightTheme` / `AppsUseLightTheme` / `EnableTransparency` /
@@ -59,7 +61,8 @@ Each provider is one module in `src/vram_radar/providers/` exposing
 * **Tooltip**: one line per selected app — name, key quota/balance, reset if any.
 * **At most 4 apps** (`providers.MAX_SELECTED`): the Models menu disables further
   ticks with a hint; the strip lays them out in two-row columns and shrinks
-  the type when needed to stay inside the empty area left of Start.
+  the type when needed to stay inside the empty area left of Start (the
+  Codex-only strip does the same).
 * **Background** (Display options > Background, saved as `usage_background`):
   `transparent` (default; colour-keyed so only text is drawn over the real
   taskbar — clicks between glyphs fall through to the taskbar), `match`
