@@ -78,6 +78,7 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 
   ![Consent dialog](docs/assets/readme/consent-en.png)
 
+- Hover the strip for a compact detail card (icons, full names, quota or balance, reset time, and last update); it does not take focus or start extra polling.
 - On macOS, the menu-bar item shows the Codex quota and reset countdowns, with a
   menu for details, usage settings, refresh, turning the display off and quitting.
 

@@ -20,6 +20,7 @@
 - 修复主窗口打开文件夹面板且服务器响应缓慢时，重复读取请求不断累积、线程与内存持续增长的问题。
 - 仅选择 Codex 时，任务栏额度条也会在空间不足时先缩小字号、再裁切，不再遮挡「开始」按钮；多应用布局也不会超出可用空间。
 - 英文界面补全剩余中文文本，单复数正确（如 1 GPU、1 server）；服务器导航提示不再重复状态（如「数据已过期，数据已过期」）。
+- **悬停详情卡**：鼠标悬停在 Windows 任务栏额度条上约 0.4 秒后，显示各应用图标、全名、已核验的额度／余额与重置时间、灰色状态与「多久前更新」；不抢焦点、不额外轮询，跟随系统浅色／深色。macOS 菜单栏使用更完整的工具提示。
 - 更新 README、隐私说明与截图。
 
 下载：Windows x64 为 `VRAMRadar-Setup-1.0.0.exe`，macOS 为包含 Apple Silicon 与 Intel 原生应用的 `VRAMRadar-1.0.0-macos.zip`。已安装 0.9.x 的 Windows 用户会在应用内收到更新提示（经 SHA-256 与文件大小校验）。
@@ -50,6 +51,7 @@ Windows 安装包未签名；macOS 应用未签名、未公证，首次启动如
 - Fixed repeated folder reads piling up threads and memory when a folder panel was open in the main window for a slow server.
 - With only Codex selected, the taskbar strip now shrinks its type and then clips when space is short, so it no longer covers Start; the multi-app layout never exceeds the gap either.
 - The English UI translates the remaining Chinese text and uses correct singular/plural counts (1 GPU, 1 server); the server navigator no longer repeats the state (e.g. "Data is stale, Data is stale").
+- **Hover detail card**: after about 0.4 s over the Windows taskbar strip, a compact no-activate card shows each app's icon, full name, verified quota or balance and reset time, grey inactive status, and an "updated … ago" line when known — no extra polling, system light/dark. macOS keeps a richer menu-bar tooltip.
 - Refreshed README, privacy notes and screenshots.
 
 Downloads: `VRAMRadar-Setup-1.0.0.exe` for Windows x64 and `VRAMRadar-1.0.0-macos.zip` containing native Apple Silicon and Intel apps. Windows installs of 0.9.x are offered this update in the app, verified by SHA-256 and size.
