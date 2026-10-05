@@ -47,15 +47,21 @@ class CodexRowTests(unittest.TestCase):
 
     def test_zh_and_no_invention(self):
         state = {"enabled": True, "state": "ready", "windows": [
-            {"remaining_percent": 40, "window_minutes": 300, "resets_at": NOW + 3600},
+            {"name": "5 hour", "remaining_percent": 40, "window_minutes": 300, "resets_at": NOW + 3600},
         ]}
         row = codex_hover_row(state, "zh-CN", now=NOW)
+        self.assertIn("5 小时", row["lines"][0]["text"])
         self.assertIn("剩余 40%", row["lines"][0]["text"])
+        weekly = codex_hover_row(
+            {"enabled": True, "state": "ready", "windows": [
+                {"name": "Weekly", "remaining_percent": 10, "window_minutes": 10080}]},
+            "zh-CN", now=NOW)
+        self.assertIn("每周", weekly["lines"][0]["text"])
         # No absolute when reset missing
         empty = codex_hover_row({"enabled": True, "state": "ready", "windows": [
             {"remaining_percent": 10, "window_minutes": 300},
         ]}, "en", now=NOW)
-        self.assertEqual([line["text"] for line in empty["lines"]], ["5h · 10% left"])
+        self.assertEqual([line["text"] for line in empty["lines"]], ["5 hour · 10% left"])
 
 
 class ProviderRowTests(unittest.TestCase):
@@ -157,6 +163,34 @@ class PositionTests(unittest.TestCase):
         self.assertLessEqual(x + 280, 0 - 8)
 
 
+class IconPipelineTests(unittest.TestCase):
+    def test_rows_carry_strip_icon_fields(self):
+        rows = build_hover_rows(
+            {"enabled": True, "state": "ready", "windows": [
+                {"name": "5 hour", "remaining_percent": 50, "window_minutes": 300}]},
+            {"deepseek": {"installed": True, "running": True,
+                          "quota": {"en": "¥1", "zh": "¥1"}, "headline": {"en": "¥1", "zh": "¥1"},
+                          "install_path": r"D:\Apps\DeepSeek\DeepSeek.exe"},
+             "claude": {"installed": False, "running": False}},
+            ["codex", "deepseek", "claude"], language="en", now=NOW,
+            names={"deepseek": "DeepSeek", "claude": "Claude"},
+            icon_paths={"codex": None, "deepseek": r"D:\Apps\DeepSeek\DeepSeek.exe", "claude": None},
+            icon_names={"codex": "Codex", "deepseek": "DeepSeek", "claude": "Claude"},
+        )
+        by_id = {r["id"]: r for r in rows}
+        self.assertEqual(by_id["codex"]["icon_name"], "Codex")
+        self.assertEqual(by_id["deepseek"]["icon_path"], r"D:\Apps\DeepSeek\DeepSeek.exe")
+        self.assertEqual(by_id["deepseek"]["icon_name"], "DeepSeek")
+        self.assertEqual(by_id["claude"]["icon_name"], "Claude")
+
+    def test_window_title_stock_forms(self):
+        from vram_radar.hover_detail import window_title
+        self.assertEqual(window_title({"name": "5 hour", "window_minutes": 300}, False), "5 小时")
+        self.assertEqual(window_title({"name": "Weekly", "window_minutes": 10080}, False), "每周")
+        self.assertEqual(window_title({"name": "5 hour", "window_minutes": 300}, True), "5 hour")
+        self.assertEqual(window_title({"name": "Custom", "window_minutes": 300}, True), "Custom")
+
+
 @unittest.skipUnless(sys.platform == "win32", "WinForms offscreen render")
 class HoverRenderTests(unittest.TestCase):
     def test_offscreen_zh_en_light_dark(self):
@@ -177,7 +211,10 @@ class HoverRenderTests(unittest.TestCase):
             },
             ["codex", "deepseek", "claude"], language="zh-CN", now=NOW,
             names={"deepseek": "DeepSeek", "claude": "Claude"},
+            icon_names={"codex": "Codex", "deepseek": "DeepSeek", "claude": "Claude"},
         )
+        self.assertIn("5 小时", rows[0]["lines"][0]["text"])
+        self.assertIn("每周", rows[0]["lines"][2]["text"])
         for language, lang_rows in (("zh-CN", rows), ("en", build_hover_rows(
                 {"enabled": True, "state": "ready", "fetched_at": NOW - 180, "windows": [
                     {"name": "5 hour", "remaining_percent": 85, "window_minutes": 300, "resets_at": NOW + 7200}]},

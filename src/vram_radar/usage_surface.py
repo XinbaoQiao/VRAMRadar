@@ -2769,13 +2769,24 @@ class CodexUsageSurface:
                 from .hover_detail import build_hover_rows, hover_card_spec
                 from .providers import PROVIDERS
                 names = {spec.id: spec.label(english) for spec in PROVIDERS}
+                # Canonical English registry names for provider_icon (strip/menu parity).
+                icon_names = {spec.id: spec.name for spec in PROVIDERS}
                 paths = {}
-                for spec in others:
+                for spec in PROVIDERS:
+                    if spec.id == "codex":
+                        # Codex often has no install_path on the usage snapshot; the
+                        # provider probe may. Bundled OpenAI art still wins via icon_name.
+                        cpath = state.get("install_path") if isinstance(state, dict) else None
+                        if not cpath:
+                            cstate = provider_states.get("codex")
+                            cpath = cstate.get("install_path") if isinstance(cstate, dict) else None
+                        paths["codex"] = cpath
+                        continue
                     pstate = provider_states.get(spec.id)
                     paths[spec.id] = pstate.get("install_path") if isinstance(pstate, dict) else None
                 hover_rows = build_hover_rows(
                     state if "codex" in selected else None, provider_states, selected,
-                    language=language, names=names, icon_paths=paths)
+                    language=language, names=names, icon_paths=paths, icon_names=icon_names)
                 self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
                 if self._hovered and self._hover_spec is not None:
                     from . import ui_dialogs

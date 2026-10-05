@@ -16,6 +16,37 @@ from .reset_format import reset_full, reset_short, valid_epoch
 THIN = "\u2009"
 HOVER_DELAY_MS = 400
 
+def window_title(window: dict, english: bool) -> str:
+    """Localized Codex window label; prefer duration when the name is a stock English title."""
+    minutes = window.get("window_minutes")
+    name = window.get("name")
+    stock = {
+        300: ("5 hour", "5 小时"),
+        10080: ("Weekly", "每周"),
+    }
+    if isinstance(minutes, (int, float)) and int(minutes) in stock:
+        en, zh = stock[int(minutes)]
+        # Use stock title when the provider name is missing or is the English stock form.
+        if not (isinstance(name, str) and name.strip()) or name.strip().lower() in {
+            en.lower(), "5h", "5 hours", "week", "weekly", "7d", "7 day", "7 days"
+        }:
+            return en if english else zh
+    if isinstance(name, str) and name.strip():
+        key = name.strip().lower()
+        if key in {"5 hour", "5h", "5 hours"}:
+            return "5 hour" if english else "5 小时"
+        if key in {"weekly", "week", "7d", "7 day", "7 days"}:
+            return "Weekly" if english else "每周"
+        return name.strip()
+    if isinstance(minutes, (int, float)) and minutes > 0:
+        if minutes % 1440 == 0:
+            return f"{minutes / 1440:g}d"
+        if minutes % 60 == 0:
+            return f"{minutes / 60:g}h"
+        return f"{minutes:g}m"
+    return "Window" if english else "窗口"
+
+
 
 def _pair(value, english: bool) -> str:
     if isinstance(value, dict):
@@ -96,7 +127,8 @@ def _timestamp(state: dict | None) -> float | None:
     return None
 
 
-def codex_hover_row(state: dict, language: str = "zh-CN", *, now: float | None = None) -> dict:
+def codex_hover_row(state: dict, language: str = "zh-CN", *, now: float | None = None,
+                    icon_path: str | None = None) -> dict:
     """One hover block for Codex from the usage-monitor snapshot."""
     english = language == "en"
     now = time.time() if now is None else now
@@ -105,21 +137,7 @@ def codex_hover_row(state: dict, language: str = "zh-CN", *, now: float | None =
     for window in windows:
         if not isinstance(window, dict):
             continue
-        minutes = window.get("window_minutes")
-        label = ""
-        if isinstance(minutes, (int, float)) and minutes > 0:
-            if minutes % 1440 == 0:
-                label = f"{minutes / 1440:g}d"
-            elif minutes % 60 == 0:
-                label = f"{minutes / 60:g}h"
-            else:
-                label = f"{minutes:g}m"
-        name = window.get("name")
-        if isinstance(name, str) and name.strip():
-            # Prefer the provider's own window name when present.
-            title = name.strip()
-        else:
-            title = label or ("Window" if english else "窗口")
+        title = window_title(window, english)
         value = window.get("remaining_percent")
         reset = window.get("resets_at")
         expired = valid_epoch(reset) and reset <= now
@@ -153,8 +171,9 @@ def codex_hover_row(state: dict, language: str = "zh-CN", *, now: float | None =
     return {
         "id": "codex",
         "name": "Codex",
+        # Canonical id/name so provider_icon hits the bundled OpenAI art (same as the strip).
         "icon_name": "Codex",
-        "icon_path": None,
+        "icon_path": icon_path or (state.get("install_path") if isinstance(state.get("install_path"), str) else None),
         "lines": lines,
         "inactive": any(line.get("tone") == "status" for line in lines),
     }
@@ -224,24 +243,34 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
                      selected: list[str] | tuple[str, ...], *,
                      language: str = "zh-CN", now: float | None = None,
                      names: dict[str, str] | None = None,
-                     icon_paths: dict[str, str | None] | None = None) -> list[dict]:
-    """Rows for every selected app, in selection order."""
+                     icon_paths: dict[str, str | None] | None = None,
+                     icon_names: dict[str, str] | None = None) -> list[dict]:
+    """Rows for every selected app, in selection order.
+
+    ``icon_paths`` / ``icon_names`` feed the same ``provider_icon`` pipeline as
+    the taskbar strip (installed app icon, else bundled brand art, else letter).
+    """
     now = time.time() if now is None else now
     provider_states = provider_states if isinstance(provider_states, dict) else {}
     names = names or {}
     icon_paths = icon_paths or {}
+    icon_names = icon_names or {}
     rows = []
     for pid in selected:
         if not isinstance(pid, str):
             continue
         if pid == "codex":
             if isinstance(codex_state, dict) and codex_state.get("enabled", True):
-                rows.append(codex_hover_row(codex_state, language, now=now))
+                rows.append(codex_hover_row(
+                    codex_state, language, now=now, icon_path=icon_paths.get("codex")))
             continue
         name = names.get(pid) or pid
-        rows.append(provider_hover_row(
+        row = provider_hover_row(
             provider_states.get(pid), provider_id=pid, name=name, language=language,
-            now=now, icon_path=icon_paths.get(pid)))
+            now=now, icon_path=icon_paths.get(pid))
+        # Prefer the registry English name for icon lookup (matches strip/menu).
+        row["icon_name"] = icon_names.get(pid) or row.get("icon_name") or name
+        rows.append(row)
     return rows
 
 

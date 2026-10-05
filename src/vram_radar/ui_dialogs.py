@@ -32,7 +32,7 @@ TOKENS = {
     "toast_width": 320, "toast_pad": 14, "toast_icon": 24, "toast_gap": 12,
     "toast_headline_px": 13, "toast_body_px": 12, "toast_ms": 3500, "toast_offset": 8,
     # Compact hover card above the taskbar strip (one reusable window).
-    "hover_width": 300, "hover_pad": 12, "hover_icon": 18, "hover_gap": 10,
+    "hover_width": 300, "hover_pad": 12, "hover_icon": 20, "hover_gap": 10,
     "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
     "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
 }
@@ -516,7 +516,10 @@ def provider_icon(path: str | None, px: int, name: str = "", accent=None):
         source = _SOURCES.get(bundled) if bundled in _SOURCES else None
         if bundled and source is None:
             source = _remember(_SOURCES, bundled, _load_image(bundled))
-        source = source if bundled else icon_source(path)
+        # Same order as the strip: bundled brand art when registered, else the
+        # installed app icon. Fall back to the install path if bundled load fails.
+        if source is None:
+            source = icon_source(path)
         if source is not None:
             bitmap = fit_icon(source, int(px))
     except Exception as exc:
@@ -929,6 +932,8 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             y += s(t["hover_row_gap"])
         name_h = measure(row["name"], fonts["name"], text_w)
         row_top = y
+        # Icon vertically centred on the name line (same optical alignment as the strip).
+        icon_top = row_top + max(0, (name_h - icon_px) // 2)
         blocks.append(("name", row["name"], text_x, y, text_w, name_h, pal["text"]))
         y += name_h
         for line in row.get("lines") or []:
@@ -942,8 +947,8 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             y += s(t["hover_line_gap"])
             blocks.append((font_key, text, text_x, y, text_w, h, colour))
             y += h
-        icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], row_top))
-        y = max(y, row_top + icon_px)
+        icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], icon_top))
+        y = max(y, icon_top + icon_px, row_top + name_h)
     height = max(y + pad, pad * 2 + icon_px)
     bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
     g = Graphics.FromImage(bitmap)
