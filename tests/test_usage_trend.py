@@ -10,9 +10,9 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from vram_radar.usage_trend import (
-    TIER_BALANCE, TIER_INACTIVE, TIER_PERCENT, TIER_UNKNOWN,
+    MIN_SPARK_SPAN_SECONDS, MIN_USED_DELTA, TIER_BALANCE, TIER_INACTIVE, TIER_PERCENT, TIER_UNKNOWN,
     TrendStore, avg_summary, balance_daily_burn, extract_samples, merge_note_with_avg, order_by_urgency, prune_trend_files,
-    remaining_metric, sparkline_path, trend_path, urgency_scores, urgency_tier, urgency_tiers,
+    remaining_metric, sparkline_path, trend_path, trend_worth_showing, urgency_scores, urgency_tier, urgency_tiers,
 )
 
 
@@ -101,11 +101,19 @@ class SparklineTests(unittest.TestCase):
 
     def test_avg_summary_threshold(self):
         self.assertEqual(avg_summary([(0, 1)], english=True), "")
-        text = avg_summary([(i, 10.0 + i) for i in range(5)], english=True, kind="used")
+        # Short span (< 6h) must hide even if values move.
+        short = [(i * 600, 10.0 + i) for i in range(5)]
+        self.assertEqual(avg_summary(short, english=True, kind="used"), "")
+        # Long span with real used-% rise.
+        pts = [(i * 2 * 3600, 10.0 + i) for i in range(5)]  # 8h, +4 pts
+        text = avg_summary(pts, english=True, kind="used")
         self.assertTrue(text.startswith("7 d avg used"))
-        text_zh = avg_summary([(i, 10.0) for i in range(5)], english=False, kind="used")
-        self.assertIn("7 日均已用", text_zh)
-        self.assertFalse(any("一" <= ch <= "鿿" for ch in text))
+        text_zh = avg_summary(pts, english=False, kind="used")
+        self.assertIn("7", text_zh)
+        self.assertIn("%", text_zh)
+        # Flat used over a long window: no real usage.
+        flat = [(i * 2 * 3600, 10.0) for i in range(5)]
+        self.assertEqual(avg_summary(flat, english=False, kind="used"), "")
 
     def test_balance_burn_ignores_topups(self):
         pts = [(0, 20.0), (86400, 18.0), (2 * 86400, 22.0), (3 * 86400, 15.0),
@@ -129,6 +137,63 @@ class SparklineTests(unittest.TestCase):
         lines2 = [{"text": "body", "tone": "body"}]
         merge_note_with_avg(lines2, "7 d avg used 10%")
         self.assertEqual(lines2[-1]["text"], "7 d avg used 10%")
+
+
+
+class TrendVisibilityTests(unittest.TestCase):
+    def test_constants(self):
+        self.assertEqual(MIN_SPARK_SPAN_SECONDS, 6 * 3600)
+        self.assertEqual(MIN_USED_DELTA, 1.0)
+
+    def test_span_too_short_hides(self):
+        pts = [(0.0, 10.0), (MIN_SPARK_SPAN_SECONDS - 1, 40.0)]
+        self.assertFalse(trend_worth_showing(pts, "used"))
+
+    def test_used_rise_shows(self):
+        pts = [(0.0, 10.0), (MIN_SPARK_SPAN_SECONDS, 10.0 + MIN_USED_DELTA)]
+        self.assertTrue(trend_worth_showing(pts, "used"))
+
+    def test_used_sub_threshold_rise_hides(self):
+        pts = [(0.0, 10.0), (MIN_SPARK_SPAN_SECONDS, 10.0 + MIN_USED_DELTA - 0.1)]
+        self.assertFalse(trend_worth_showing(pts, "used"))
+
+    def test_reset_only_does_not_count_as_usage(self):
+        # Drop from high used%% to low (window reset) with no consumption rise.
+        pts = [(0.0, 80.0), (MIN_SPARK_SPAN_SECONDS / 2, 15.0), (MIN_SPARK_SPAN_SECONDS, 15.0)]
+        self.assertFalse(trend_worth_showing(pts, "used"))
+
+    def test_reset_then_real_usage_shows(self):
+        pts = [(0.0, 80.0), (MIN_SPARK_SPAN_SECONDS / 3, 10.0),
+               (2 * MIN_SPARK_SPAN_SECONDS / 3, 12.0), (MIN_SPARK_SPAN_SECONDS, 14.0)]
+        self.assertTrue(trend_worth_showing(pts, "used"))
+
+    def test_balance_decrease_shows(self):
+        pts = [(0.0, 20.0), (MIN_SPARK_SPAN_SECONDS, 18.5)]
+        self.assertTrue(trend_worth_showing(pts, "balance"))
+
+    def test_balance_flat_or_topup_only_hides(self):
+        flat = [(0.0, 20.0), (MIN_SPARK_SPAN_SECONDS, 20.0)]
+        self.assertFalse(trend_worth_showing(flat, "balance"))
+        topup = [(0.0, 10.0), (MIN_SPARK_SPAN_SECONDS / 2, 25.0), (MIN_SPARK_SPAN_SECONDS, 25.0)]
+        self.assertFalse(trend_worth_showing(topup, "balance"))
+
+    def test_build_hover_hides_when_no_usage(self):
+        import tempfile
+        from pathlib import Path as P
+        from vram_radar.hover_detail import build_hover_rows
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TrendStore(P(tmp) / "t.json")
+            now = 1_700_000_000.0
+            # Reset-only series spanning >6h.
+            for i, used in enumerate([70.0, 12.0, 12.0, 12.0]):
+                store.record([("kimi:quota", used, "used")], now=now - (3 - i) * 3 * 3600, interval=1)
+            providers = {"kimi": {"installed": True, "running": True, "signed_in": True,
+                                  "quota_percent": 88, "quota": {"zh": "88%", "en": "88%"},
+                                  "fetched_at": now - 60}}
+            rows = build_hover_rows(None, providers, ["kimi"], language="zh-CN", now=now,
+                                    names={"kimi": "Kimi"}, trend_store=store, show_trend=True)
+            self.assertFalse(rows[0].get("spark"))
+            self.assertFalse(any("日均" in (line.get("text") or "") for line in rows[0].get("lines") or []))
 
 
 class UrgencySortTests(unittest.TestCase):

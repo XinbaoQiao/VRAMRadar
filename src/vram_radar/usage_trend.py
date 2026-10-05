@@ -19,6 +19,9 @@ SCHEMA = 1
 SAMPLE_INTERVAL = 30 * 60          # seconds between kept points per series
 RETENTION_SECONDS = 30 * 24 * 3600
 SPARK_SECONDS = 7 * 24 * 3600
+# Show sparkline + 7-day avg only when samples span this long and show real usage.
+MIN_SPARK_SPAN_SECONDS = 6 * 3600
+MIN_USED_DELTA = 1.0              # used-% points consumed (resets ignored)
 HYSTERESIS_POINTS = 5.0           # remaining-% points before reorder
 HYSTERESIS_SECONDS = 10 * 60
 MAX_POINTS_PER_SERIES = int(RETENTION_SECONDS / SAMPLE_INTERVAL) + 8  # ~1448 + slack
@@ -575,8 +578,40 @@ def balance_daily_burn(points: list[tuple[float, float]]) -> float | None:
     return dropped / span_days
 
 
+def trend_worth_showing(points: list[tuple[float, float]], kind: str = "used") -> bool:
+    """True when sparkline + 7-day avg should appear for this series.
+
+    Requires a span of at least `MIN_SPARK_SPAN_SECONDS` and real usage in
+    that window: used-% rose by at least `MIN_USED_DELTA` (reset drops are
+    ignored), or a balance series decreased. Flat / reset-only / short history
+    stay hidden.
+    """
+    if not isinstance(points, list) or len(points) < 2:
+        return False
+    ordered = sorted((float(t), float(v)) for t, v in points
+                     if isinstance(t, (int, float)) and isinstance(v, (int, float))
+                     and math.isfinite(t) and math.isfinite(v))
+    if len(ordered) < 2:
+        return False
+    if (ordered[-1][0] - ordered[0][0]) < MIN_SPARK_SPAN_SECONDS:
+        return False
+    if kind == "balance":
+        for (_t0, v0), (_t1, v1) in zip(ordered, ordered[1:]):
+            if v1 < v0:
+                return True
+        return False
+    # used %: sum positive steps (consumption); ignore downward resets.
+    rise = 0.0
+    for (_t0, v0), (_t1, v1) in zip(ordered, ordered[1:]):
+        if v1 > v0:
+            rise += (v1 - v0)
+    return rise >= MIN_USED_DELTA
+
+
 def avg_summary(points: list[tuple[float, float]], *, english: bool, kind: str = "used") -> str:
     """Compact 7-day summary fragment (no leading 'Updated'); '' when not meaningful."""
+    if not trend_worth_showing(points, kind):
+        return ""
     if kind == "balance":
         burn = balance_daily_burn(points)
         if burn is None:

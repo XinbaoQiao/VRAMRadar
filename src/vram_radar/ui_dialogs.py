@@ -35,7 +35,7 @@ TOKENS = {
     "hover_width": 300, "hover_pad": 12, "hover_icon": 20, "hover_gap": 10,
     "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
     "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
-    "hover_spark_w": 72, "hover_spark_h": 14, "hover_spark_gap": 8,
+    "hover_spark_w": 48, "hover_spark_h": 14, "hover_spark_gap": 6,
 }
 FONT = "Microsoft YaHei UI"   # Segoe-like Latin + CJK in one face (Windows 11 UI font for zh-CN)
 
@@ -949,7 +949,7 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     y = pad
     icons = []
     sparks = []
-    spark_w = s(t.get("hover_spark_w", 72))
+    spark_w = s(t.get("hover_spark_w", 48))
     spark_h = s(t.get("hover_spark_h", 14))
     spark_gap = s(t.get("hover_spark_gap", 8))
     for index, row in enumerate(rows):
@@ -957,16 +957,24 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             y += s(t["hover_row_gap"])
         spark_pts = row.get("spark") or []
         has_spark = isinstance(spark_pts, (list, tuple)) and len(spark_pts) >= 2
-        # Reserve a fixed right column for the spark so the name stays left.
-        name_w = max(40, text_w - (spark_w + spark_gap if has_spark else 0))
-        name_h = measure(row["name"], fonts["name"], name_w)
+        # Spark sits just after the model name (small gap), not flush to the card edge.
+        name_natural = int(math.ceil(probe.MeasureString(row["name"] or " ", fonts["name"]).Width))
+        if has_spark:
+            name_w = max(40, min(name_natural, text_w - spark_w - spark_gap))
+            draw_name_w = name_w
+        else:
+            name_w = text_w
+            draw_name_w = text_w
+        name_h = measure(row["name"], fonts["name"], draw_name_w)
         row_top = y
         title_h = max(name_h, spark_h if has_spark else 0)
         icon_top = row_top + max(0, (title_h - icon_px) // 2)
         blocks.append(("name", row["name"], text_x, row_top + max(0, (title_h - name_h) // 2),
-                       name_w, name_h, pal["text"]))
+                       draw_name_w, name_h, pal["text"]))
         if has_spark:
-            spark_x = width - pad - spark_w
+            spark_x = text_x + name_w + spark_gap
+            # Keep inside the card if the name was clipped to fit.
+            spark_x = min(spark_x, width - pad - spark_w)
             spark_y = row_top + max(0, (title_h - spark_h) // 2)
             sparks.append((list(spark_pts), spark_x, spark_y, spark_w, spark_h))
         y = row_top + title_h

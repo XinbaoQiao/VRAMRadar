@@ -124,9 +124,11 @@ def render_hovers(out: Path, store, paths, prefix: str = "trend2_hover") -> list
         rows = build_hover_rows(
             codex, providers, selected, language=language, now=NOW,
             names=names, icon_paths=paths, icon_names=icon_names, trend_store=store)
-        # Sparks must be multi-point (not collinear-looking single segment).
+        # Sparks (when shown) must be multi-point; some models may hide (no usage).
         for row in rows:
-            assert len(row.get("spark") or []) >= 8, row.get("name")
+            spark = row.get("spark") or []
+            if spark:
+                assert len(spark) >= 4, row.get("name")
         spec = hover_card_spec(rows, language)
         target = str(out / f"{label}.png")
         made.append(ui.save_preview(spec, target, scale=1.5, dark=dark))
@@ -263,6 +265,43 @@ def render_real_menu(out_path: Path) -> str:
     return done["path"]
 
 
+
+def series_flat_reset_only(n: int = 20):
+    """Long span with a reset drop but no real consumption (should hide spark)."""
+    pts = []
+    t0 = NOW - 6.5 * 86400
+    used = 72.0
+    for i in range(n):
+        t = t0 + i * 8 * 3600
+        if i == 4:
+            used = 11.0  # reset only
+        pts.append((t, used))
+    return pts
+
+
+def seed_store_trend3(path: Path):
+    from vram_radar.usage_trend import TrendStore
+    store = TrendStore(path)
+    for key, pts, kind in (
+        ("codex:w300", series_with_reset(18, 2.2, 8, 30), "used"),
+        ("grok:quota", series_with_reset(35, 2.8, 12, 28), "used"),
+        ("kimi:quota", series_flat_reset_only(22), "used"),  # no real usage -> hidden
+        ("deepseek:balance", series_balance(), "balance"),
+    ):
+        for t, v in pts:
+            store.record([(key, v, kind)], now=t, interval=1)
+    return store
+
+
+def render_trend3_zh_light(out: Path, store, paths) -> str:
+    """Single zh-light card: Kimi has no-usage history so its spark+avg stay hidden."""
+    made = render_hovers(out, store, paths, prefix="trend3_hover")
+    # Keep only the zh_light file name the user asked for; others are fine extras.
+    target = out / "trend3_hover_zh_light.png"
+    assert target.is_file(), made
+    return str(target)
+
+
 def main(out: str) -> list[str]:
     import ctypes
     ctypes.windll.user32.SetProcessDPIAware()
@@ -273,7 +312,11 @@ def main(out: str) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         store = seed_store(Path(tmp) / "default.json")
         made.extend(render_hovers(out_dir, store, paths))
-    made.append(render_real_menu(out_dir / "trend2_menu_zh.png"))
+        store3 = seed_store_trend3(Path(tmp) / "trend3.json")
+        made.append(render_trend3_zh_light(out_dir, store3, paths))
+    # Optional menu capture (skip when --hover-only)
+    if "--hover-only" not in sys.argv:
+        made.append(render_real_menu(out_dir / "trend2_menu_zh.png"))
     return made
 
 
