@@ -261,7 +261,7 @@ def msix_logo(folder: str, px: int, light: bool = False) -> str | None:
     return os.path.join(directory, chosen) if chosen else None
 
 
-def icon_candidates(path: str, px: int = 32) -> list[str]:
+def icon_candidates(path: str, px: int = 32, *, light: bool | None = None) -> list[str]:
     """Where an app's icon may live: an MSIX package's logo, the exe itself,
     then common resource files next to it (Electron/Tauri apps ship
     resources\\icon.ico/png)."""
@@ -270,7 +270,8 @@ def icon_candidates(path: str, px: int = 32) -> list[str]:
     if os.path.isdir(path):
         # The largest logo (targetsize-256 has ~1 px margin); the small
         # hinted sizes put the art right on the square edge.
-        logo = msix_logo(path, max(px, 256), light=taskbar_light())
+        theme = taskbar_light() if light is None else bool(light)
+        logo = msix_logo(path, max(px, 256), light=theme)
         return [logo] if logo else []
     folder = os.path.dirname(path)
     out = [path] if path.lower().endswith((".exe", ".ico", ".png")) else []
@@ -386,17 +387,18 @@ ICON_SOURCE_PX = 256
 _SOURCES: dict = {}
 
 
-def icon_source(path: str | None):
+def icon_source(path: str | None, *, light: bool | None = None):
     """Largest available frame of the app's icon (256 px exe/ico frame or
     the biggest MSIX logo PNG), cached; None when there is none."""
     folder = str(path or "")
     # MSIX logos come in light/dark variants: the theme is part of the key,
     # or a theme switch kept the old (low-contrast) logo until restart.
-    key = folder + ("|light" if taskbar_light() else "|dark") if folder and os.path.isdir(folder) else folder
+    theme = taskbar_light() if light is None else bool(light)
+    key = folder + ("|light" if theme else "|dark") if folder and os.path.isdir(folder) else folder
     if key in _SOURCES:
         return _SOURCES[key]
     source = None
-    for candidate in icon_candidates(folder, ICON_SOURCE_PX):
+    for candidate in icon_candidates(folder, ICON_SOURCE_PX, light=theme):
         try:
             if not os.path.isfile(candidate):
                 continue
@@ -496,6 +498,17 @@ def fit_icon(source, px: int, pad: int = 1):
 BUNDLED_ICONS = {"codex": ("openai-light.png", "openai-dark.png"), "chatgpt": ("openai-light.png", "openai-dark.png")}
 
 
+
+def surface_is_light(surface_rgb) -> bool:
+    """True when a card/strip fill is a light background (pick dark glyphs)."""
+    return _lum(tuple(surface_rgb)[:3]) >= 140
+
+
+def icon_contrast_ok(ink_rgb, surface_rgb, *, min_delta: float = 55.0) -> bool:
+    """Whether average icon ink contrasts enough with the surface fill."""
+    return abs(_lum(tuple(ink_rgb)[:3]) - _lum(tuple(surface_rgb)[:3])) >= min_delta
+
+
 def bundled_icon_path(name: str, light: bool | None = None) -> str | None:
     files = BUNDLED_ICONS.get((name or "").strip().lower())
     if not files:
@@ -505,10 +518,17 @@ def bundled_icon_path(name: str, light: bool | None = None) -> str | None:
     return path if os.path.isfile(path) else None
 
 
-def provider_icon(path: str | None, px: int, name: str = "", accent=None):
-    """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile."""
-    bundled = bundled_icon_path(name)
-    key = (str(bundled or path or ""), int(px), name, taskbar_light())
+def provider_icon(path: str | None, px: int, name: str = "", accent=None, *,
+                  light: bool | None = None):
+    """Bitmap of the installed app's own icon at ``px`` (cached), or a letter tile.
+
+    ``light`` selects light/dark brand variants (bundled Codex art, MSIX logos).
+    Default follows the taskbar theme (strip parity). Hover cards pass the card
+    surface theme so a dark card gets the light glyph, not a black silhouette.
+    """
+    theme_light = taskbar_light() if light is None else bool(light)
+    bundled = bundled_icon_path(name, light=theme_light)
+    key = (str(bundled or path or ""), int(px), name, theme_light)
     if key in _ICONS:
         return _ICONS[key]
     bitmap = None
@@ -519,7 +539,7 @@ def provider_icon(path: str | None, px: int, name: str = "", accent=None):
         # Same order as the strip: bundled brand art when registered, else the
         # installed app icon. Fall back to the install path if bundled load fails.
         if source is None:
-            source = icon_source(path)
+            source = icon_source(path, light=theme_light)
         if source is not None:
             bitmap = fit_icon(source, int(px))
     except Exception as exc:
@@ -958,8 +978,10 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     g.SmoothingMode = SmoothingMode.AntiAlias
     try:
         g.Clear(_color(pal["surface"]))
+        # Match brand glyph to THIS card's fill (not the taskbar theme).
+        theme_light = surface_is_light(pal["surface"])
         for path, name, top in icons:
-            icon = provider_icon(path, icon_px, name, accent)
+            icon = provider_icon(path, icon_px, name, accent, light=theme_light)
             if icon is not None:
                 g.DrawImage(icon, pad, top, icon_px, icon_px)
         for font_key, text, x, by, w, h, colour in blocks:

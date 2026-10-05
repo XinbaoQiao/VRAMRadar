@@ -4,6 +4,34 @@ from __future__ import annotations
 import sys
 import unittest
 
+
+def _avg_opaque(bitmap, threshold=40):
+    """Mean RGB of opaque pixels in a System.Drawing Bitmap."""
+    from System.Drawing import Rectangle
+    from System.Drawing.Imaging import ImageLockMode, PixelFormat
+    from System import Array, Byte
+    from System.Runtime.InteropServices import Marshal
+    w, h = bitmap.Width, bitmap.Height
+    data = bitmap.LockBits(Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb)
+    try:
+        arr = Array.CreateInstance(Byte, data.Stride * h)
+        Marshal.Copy(data.Scan0, arr, 0, len(arr))
+        stride = data.Stride
+    finally:
+        bitmap.UnlockBits(data)
+    rs = gs = bs = n = 0
+    buf = bytes(arr)
+    for y in range(h):
+        for x in range(w):
+            i = y * stride + x * 4
+            if buf[i + 3] <= threshold:
+                continue
+            bs += buf[i]; gs += buf[i + 1]; rs += buf[i + 2]; n += 1
+    if not n:
+        return (0, 0, 0)
+    return (rs // n, gs // n, bs // n)
+
+
 from vram_radar.hover_detail import (
     THIN, build_hover_rows, card_position, codex_hover_row, hover_card_spec,
     hover_tooltip_text, inactive_status, provider_hover_row, thin_reset, updated_ago,
@@ -191,6 +219,37 @@ class IconPipelineTests(unittest.TestCase):
         self.assertEqual(window_title({"name": "Custom", "window_minutes": 300}, True), "Custom")
 
 
+
+class IconThemeContrastTests(unittest.TestCase):
+    def test_bundled_variant_follows_surface_not_only_taskbar(self):
+        from vram_radar import ui_dialogs as ui
+        light = ui.bundled_icon_path("Codex", light=True)
+        dark = ui.bundled_icon_path("Codex", light=False)
+        self.assertIsNotNone(light)
+        self.assertIsNotNone(dark)
+        self.assertIn("openai-light.png", light.replace("\\", "/"))
+        self.assertIn("openai-dark.png", dark.replace("\\", "/"))
+        self.assertNotEqual(light, dark)
+
+    def test_surface_theme_and_contrast_helpers(self):
+        from vram_radar import ui_dialogs as ui
+        self.assertTrue(ui.surface_is_light((255, 255, 255)))
+        self.assertFalse(ui.surface_is_light((44, 44, 44)))
+        self.assertTrue(ui.icon_contrast_ok((240, 240, 240), (44, 44, 44)))
+        self.assertTrue(ui.icon_contrast_ok((20, 20, 20), (255, 255, 255)))
+        self.assertFalse(ui.icon_contrast_ok((30, 30, 30), (44, 44, 44)))
+
+    def test_palette_surfaces_need_matching_glyph(self):
+        from vram_radar import ui_dialogs as ui
+        light_pal = ui.palette(False)
+        dark_pal = ui.palette(True)
+        self.assertTrue(ui.surface_is_light(light_pal["surface"]))
+        self.assertFalse(ui.surface_is_light(dark_pal["surface"]))
+        self.assertFalse(ui.icon_contrast_ok((20, 20, 20), dark_pal["surface"]))
+        self.assertTrue(ui.icon_contrast_ok((230, 230, 230), dark_pal["surface"]))
+        self.assertTrue(ui.icon_contrast_ok((20, 20, 20), light_pal["surface"]))
+
+
 @unittest.skipUnless(sys.platform == "win32", "WinForms offscreen render")
 class HoverRenderTests(unittest.TestCase):
     def test_offscreen_zh_en_light_dark(self):
@@ -228,6 +287,9 @@ class HoverRenderTests(unittest.TestCase):
                     self.assertGreater(layout["width"], 100)
                     self.assertGreater(layout["height"], 40)
                     self.assertEqual(bitmap.Width, layout["width"])
+                    icon = ui.provider_icon(None, 24, "Codex", light=ui.surface_is_light(pal["surface"]))
+                    ink = _avg_opaque(icon)
+                    self.assertTrue(ui.icon_contrast_ok(ink, pal["surface"]), (language, dark, ink, pal["surface"]))
                 finally:
                     bitmap.Dispose()
 
