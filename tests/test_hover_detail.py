@@ -358,3 +358,91 @@ class HoverRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HoverMenuGateTests(unittest.TestCase):
+    """Hover card must not share the screen with the strip context menu."""
+
+    def test_hover_may_show_requires_arm_and_idle_ui(self):
+        from vram_radar.hover_detail import hover_may_show, hover_rearm_allowed
+        self.assertTrue(hover_may_show(armed=True, pointer_over=True, menu_open=False,
+                                       dialog_open=False, has_spec=True))
+        self.assertFalse(hover_may_show(armed=False, pointer_over=True, menu_open=False,
+                                        dialog_open=False, has_spec=True))
+        self.assertFalse(hover_may_show(armed=True, pointer_over=True, menu_open=True,
+                                        dialog_open=False, has_spec=True))
+        self.assertFalse(hover_may_show(armed=True, pointer_over=True, menu_open=False,
+                                        dialog_open=True, has_spec=True))
+        self.assertFalse(hover_may_show(armed=True, pointer_over=False, menu_open=False,
+                                        dialog_open=False, has_spec=True))
+        self.assertFalse(hover_may_show(armed=True, pointer_over=True, menu_open=False,
+                                        dialog_open=False, has_spec=False))
+        self.assertTrue(hover_rearm_allowed(menu_open=False, dialog_open=False))
+        self.assertFalse(hover_rearm_allowed(menu_open=True, dialog_open=False))
+        self.assertFalse(hover_rearm_allowed(menu_open=False, dialog_open=True))
+
+
+class HoverSuspendSurfaceTests(unittest.TestCase):
+    """In-process: click/menu/dialog suspend hover; re-arm only on re-enter path."""
+
+    def setUp(self):
+        from unittest.mock import Mock
+        from vram_radar.usage_surface import CodexUsageSurface
+        self.surface = CodexUsageSurface(
+            Mock(), lambda: {}, language=lambda: "en",
+            open_settings=lambda: None, refresh=lambda: None,
+            disable=lambda: None, quit_application=lambda: None)
+        self.surface._hover_armed = True
+        self.surface._hover_dialog_open = False
+        self.surface._hover_spec = {"kind": "hover", "rows": [{"name": "Codex"}]}
+        self.surface._menu = Mock(Visible=False)
+        self.hidden = []
+
+        def hide():
+            self.hidden.append(True)
+
+        import vram_radar.ui_dialogs as ui
+        self._orig_hide = ui.hide_hover_card
+        ui.hide_hover_card = hide
+
+    def tearDown(self):
+        import vram_radar.ui_dialogs as ui
+        ui.hide_hover_card = self._orig_hide
+
+    def test_suspend_hides_and_disarms(self):
+        self.surface._suspend_hover()
+        self.assertFalse(self.surface._hover_armed)
+        self.assertEqual(self.hidden, [True])
+        self.assertFalse(self.surface._hover_interaction_allowed(True))
+
+    def test_menu_open_blocks_even_when_armed(self):
+        self.surface._menu.Visible = True
+        self.assertFalse(self.surface._hover_interaction_allowed(True))
+        # Rearm refused while the menu is open; armed flag is unchanged.
+        was = self.surface._hover_armed
+        self.assertFalse(self.surface._try_rearm_hover())
+        self.assertEqual(self.surface._hover_armed, was)
+
+    def test_menu_close_does_not_rearm_until_try_rearm(self):
+        self.surface._suspend_hover()
+        self.surface._menu.Visible = False
+        # Closed path leaves armed False; tick must not revive the card.
+        self.assertFalse(self.surface._hover_interaction_allowed(True))
+        # Simulated pointer move / re-enter:
+        self.assertTrue(self.surface._try_rearm_hover())
+        self.assertTrue(self.surface._hover_armed)
+        self.assertTrue(self.surface._hover_interaction_allowed(True))
+
+    def test_dialog_suppresses_and_leaves_disarmed(self):
+        seen = []
+
+        def dialog():
+            seen.append(self.surface._hover_dialog_open)
+            seen.append(self.surface._hover_armed)
+            return True
+
+        self.assertTrue(self.surface._with_hover_dialog(dialog))
+        self.assertEqual(seen, [True, False])
+        self.assertFalse(self.surface._hover_dialog_open)
+        self.assertFalse(self.surface._hover_armed)
+        self.assertFalse(self.surface._hover_interaction_allowed(True))

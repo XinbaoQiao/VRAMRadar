@@ -322,3 +322,20 @@ def card_position(anchor: tuple[int, int, int, int], size: tuple[int, int],
         y = min(ay1 + gap, bottom - height - gap)
     y = max(top + gap, min(y, bottom - height - gap))
     return x, y
+
+
+def hover_may_show(*, armed: bool, pointer_over: bool, menu_open: bool,
+                   dialog_open: bool, has_spec: bool) -> bool:
+    """Whether the Windows hover card is allowed to appear right now."""
+    return bool(
+        armed
+        and pointer_over
+        and has_spec
+        and not menu_open
+        and not dialog_open
+    )
+
+
+def hover_rearm_allowed(*, menu_open: bool, dialog_open: bool) -> bool:
+    """Pointer re-enter/move may re-arm only when menu and dialogs are closed."""
+    return not bool(menu_open) and not bool(dialog_open)

@@ -1645,8 +1645,10 @@ class CodexUsageSurface:
                 logging.getLogger("vram_radar").warning("session consent notice failed")
             return False
         try:
-            accepted = self.confirm_consent(name if spec.session_app in ("", spec.name) else spec.session_app,
-                                            spec.session_server or name) is True
+            accepted = self._with_hover_dialog(
+                lambda: self.confirm_consent(
+                    name if spec.session_app in ("", spec.name) else spec.session_app,
+                    spec.session_server or name) is True)
         except Exception:
             logging.getLogger("vram_radar").warning("session consent dialog failed")
             accepted = False
@@ -1678,7 +1680,8 @@ class CodexUsageSurface:
             self._dialog_icon = state.get("install_path") if isinstance(state, dict) else None
             try:
                 english = self._lang() == "en"
-                confirmed = self.confirm_revoke(spec.label(english)) is True
+                confirmed = self._with_hover_dialog(
+                    lambda: self.confirm_revoke(spec.label(english)) is True)
             except Exception:
                 logging.getLogger("vram_radar").warning("revoke dialog failed")
                 confirmed = False
@@ -1716,6 +1719,51 @@ class CodexUsageSurface:
             icon = sys.executable if getattr(sys, "frozen", False) else None
         ui_dialogs.show_toast(ui_dialogs.toast_spec(headline, line, name or ("VRAM Radar" if self._lang() == "en" else "显存雷达")), anchor,
                               scale=self._dialog_scale(), icon_path=icon)
+
+
+    def _menu_is_open(self) -> bool:
+        menu = getattr(self, "_menu", None)
+        try:
+            return bool(menu is not None and menu.Visible)
+        except Exception:
+            return False
+
+    def _suspend_hover(self) -> None:
+        """Hide the card, cancel any delay timer, and require a later re-arm."""
+        self._hover_armed = False
+        try:
+            from . import ui_dialogs
+            ui_dialogs.hide_hover_card()
+        except Exception:
+            pass
+
+    def _try_rearm_hover(self) -> bool:
+        """Re-arm after menu/dialog close only on pointer re-enter/move."""
+        from .hover_detail import hover_rearm_allowed
+        if not hover_rearm_allowed(menu_open=self._menu_is_open(),
+                                   dialog_open=bool(getattr(self, "_hover_dialog_open", False))):
+            return False
+        self._hover_armed = True
+        return True
+
+    def _hover_interaction_allowed(self, pointer_over: bool) -> bool:
+        from .hover_detail import hover_may_show
+        return hover_may_show(
+            armed=bool(getattr(self, "_hover_armed", True)),
+            pointer_over=pointer_over,
+            menu_open=self._menu_is_open(),
+            dialog_open=bool(getattr(self, "_hover_dialog_open", False)),
+            has_spec=bool(getattr(self, "_hover_spec", None)),
+        )
+
+    def _with_hover_dialog(self, callback):
+        """Run a menu-spawned modal dialog with hover suppressed."""
+        self._hover_dialog_open = True
+        self._suspend_hover()
+        try:
+            return callback()
+        finally:
+            self._hover_dialog_open = False
 
     def _store_consent(self, provider_id, granted: bool) -> None:
         try:
@@ -1779,6 +1827,10 @@ class CodexUsageSurface:
         self._reading = widget_reading({})
         self._selected_id = None
         self._hovered = False
+        # Hover card stays off after a click/menu/dialog until the pointer
+        # re-enters or moves over the strip (no instant pop-back).
+        self._hover_armed = True
+        self._hover_dialog_open = False
 
         def rounded_path(inset=0):
             path = GraphicsPath()
@@ -1867,10 +1919,12 @@ class CodexUsageSurface:
                 form.Invalidate()
             # Rich hover card: short delay, then one reused no-activate window.
             # Never triggers extra provider polling; content comes from the last tick.
+            # Suppressed while the context menu / a menu dialog is open, and after
+            # any click until the pointer re-enters or moves over the strip.
             try:
                 from . import ui_dialogs
                 from .hover_detail import HOVER_DELAY_MS
-                if hovered and getattr(self, "_hover_spec", None):
+                if self._hover_interaction_allowed(hovered):
                     anchor = (form.Left, form.Top, form.Right, form.Bottom)
                     already = bool(ui_dialogs._HOVER.get("shown"))
                     ui_dialogs.show_hover_card(
@@ -1880,8 +1934,13 @@ class CodexUsageSurface:
                     ui_dialogs.hide_hover_card()
             except Exception:
                 pass
+
+        def on_hover_enter(*_):
+            self._try_rearm_hover()
+            update_hover()
+
         for control in [form, *text_controls]:
-            control.MouseEnter += update_hover
+            control.MouseEnter += on_hover_enter
             control.MouseLeave += update_hover
 
         # 2 s: a growing weather text is re-measured within a few seconds.
@@ -1927,6 +1986,8 @@ class CodexUsageSurface:
             form.Location = Point(x, y)
 
         def mouse_down(sender, event):
+            # Left or right: drop the hover card immediately and cancel its delay.
+            self._suspend_hover()
             if event.Button == MouseButtons.Right:
                 cancel_click()
             if event.Button == MouseButtons.Left:
@@ -1936,6 +1997,10 @@ class CodexUsageSurface:
                 sender.Capture = True
 
         def mouse_move(sender, event):
+            if (not getattr(self, "_hover_armed", True)
+                    and form.Visible and form.Bounds.Contains(Cursor.Position)
+                    and self._try_rearm_hover()):
+                update_hover()
             if self._drag is not None and self._placement == "free":
                 if max(abs(Cursor.Position.X-self._drag_origin[0]), abs(Cursor.Position.Y-self._drag_origin[1])) > scale(3):
                     self._drag_moved = True
@@ -1988,7 +2053,10 @@ class CodexUsageSurface:
             control.MouseUp += mouse_up
         menu = ContextMenuStrip()
         self._menu = menu
-        menu.Opening += cancel_click
+        def on_menu_opening(*_):
+            cancel_click()
+            self._suspend_hover()
+        menu.Opening += on_menu_opening
         menu.AutoClose = True
         user32.SetForegroundWindow.argtypes = [wintypes.HWND]
         user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -1999,6 +2067,13 @@ class CodexUsageSurface:
         menu.Opening += activate_menu_owner
         def menu_closed(*_):
             user32.PostMessageW(handle, 0, 0, 0)
+            # Keep hover disarmed until the pointer re-enters/moves over the strip.
+            self._hover_armed = False
+            try:
+                from . import ui_dialogs
+                ui_dialogs.hide_hover_card()
+            except Exception:
+                pass
             if getattr(self, "_tick_deferred", False):
                 self._tick_deferred = False
                 self._tick()
@@ -2327,7 +2402,7 @@ class CodexUsageSurface:
         catcher.MouseDown += mouse_down
         catcher.MouseMove += mouse_move
         catcher.MouseUp += mouse_up
-        catcher.MouseEnter += update_hover
+        catcher.MouseEnter += on_hover_enter
         catcher.MouseLeave += update_hover
         self._catcher_state = None
         def sync_catcher(*_):
@@ -2367,7 +2442,7 @@ class CodexUsageSurface:
                 label.Location = Point(scale(5), 0)
                 label.Size = Size(scale(47), scale(20))
                 label.ContextMenuStrip = menu
-                label.MouseEnter += update_hover
+                label.MouseEnter += on_hover_enter
                 label.MouseLeave += update_hover
                 label.MouseDown += mouse_down
                 label.MouseMove += mouse_move
@@ -2788,12 +2863,12 @@ class CodexUsageSurface:
                     language=language, names=names, icon_paths=paths, icon_names=icon_names)
                 self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
                 from . import ui_dialogs
-                if self._hovered and self._hover_spec is not None and form.Visible:
+                if self._hover_interaction_allowed(bool(self._hovered) and form.Visible):
                     ui_dialogs.show_hover_card(
                         self._hover_spec, (form.Left, form.Top, form.Right, form.Bottom),
                         scale=self._scale, delay_ms=0)
                 else:
-                    # Leave, empty selection, or strip not visible: never leave a stuck card.
+                    # Leave, empty selection, menu/dialog, or disarmed: never leave a stuck card.
                     ui_dialogs.hide_hover_card()
             except Exception:
                 self._hover_spec = None
