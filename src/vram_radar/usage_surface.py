@@ -1834,6 +1834,7 @@ class CodexUsageSurface:
         self._trend_store = None
         self._urgency_order = None
         self._urgency_scores = {}
+        self._urgency_tiers = {}
         self._urgency_reorder_at = 0.0
         self._sort_urgency_item = None
         self._show_trend_item = None
@@ -2523,7 +2524,7 @@ class CodexUsageSurface:
             try:
                 from .storage import storage_paths
                 from .usage_trend import (TrendStore, extract_samples, order_by_urgency,
-                                         trend_path, urgency_scores)
+                                         trend_path, urgency_scores, urgency_tiers)
                 opts = options if isinstance(options, dict) else {}
                 profile_id = opts.get("profile_id") or "default"
                 if self._trend_store is None or getattr(self, "_trend_profile", None) != profile_id:
@@ -2542,19 +2543,24 @@ class CodexUsageSurface:
                     self._show_trend_item.Text = ("Show trend chart" if language == "en"
                                                  else "显示走势图")
                 if sort_urgency:
-                    scores = urgency_scores(selected, state if "codex" in selected else None,
+                    codex_for_sort = state if "codex" in selected else None
+                    scores = urgency_scores(selected, codex_for_sort,
                                             provider_states, self._trend_store)
+                    tiers = urgency_tiers(selected, codex_for_sort, provider_states)
                     ordered, changed, when = order_by_urgency(
                         selected, scores, self._urgency_order,
                         previous_scores=self._urgency_scores,
-                        last_reorder_at=self._urgency_reorder_at)
+                        last_reorder_at=self._urgency_reorder_at,
+                        tiers=tiers, previous_tiers=self._urgency_tiers)
                     if changed:
                         self._urgency_order = list(ordered)
                         self._urgency_scores = dict(scores)
+                        self._urgency_tiers = dict(tiers)
                         self._urgency_reorder_at = when
                     display_order = list(self._urgency_order or ordered)
                 else:
                     self._urgency_order = None
+                    self._urgency_tiers = {}
             except Exception:
                 display_order = list(selected)
                 sort_urgency = False

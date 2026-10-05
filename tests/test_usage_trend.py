@@ -10,8 +10,9 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from vram_radar.usage_trend import (
+    TIER_BALANCE, TIER_INACTIVE, TIER_PERCENT, TIER_UNKNOWN,
     TrendStore, avg_summary, balance_daily_burn, extract_samples, merge_note_with_avg, order_by_urgency, prune_trend_files,
-    remaining_metric, sparkline_path, trend_path, urgency_scores,
+    remaining_metric, sparkline_path, trend_path, urgency_scores, urgency_tier, urgency_tiers,
 )
 
 
@@ -187,7 +188,90 @@ class UrgencySortTests(unittest.TestCase):
         self.assertTrue(hasattr(surface, "_trend_store") or True)
 
 
+
+    def test_balance_ranks_below_percent_even_when_low(self):
+        """DeepSeek at low balance still after a 90%-remaining weekly quota."""
+        selected = ["deepseek", "codex", "grok"]
+        codex = {"windows": [{"remaining_percent": 90, "window_minutes": 10080}]}
+        providers = {
+            "deepseek": {
+                "balance": {"CNY": 1.0}, "signed_in": True, "running": True, "installed": True,
+            },
+            "grok": {
+                "quota_percent": 10, "signed_in": True, "running": True, "installed": True,
+            },
+        }
+        scores = urgency_scores(selected, codex, providers)
+        tiers = urgency_tiers(selected, codex, providers)
+        self.assertEqual(tiers["grok"], TIER_PERCENT)
+        self.assertEqual(tiers["codex"], TIER_PERCENT)
+        self.assertEqual(tiers["deepseek"], TIER_BALANCE)
+        order, changed, _ = order_by_urgency(selected, scores, previous=None, tiers=tiers)
+        self.assertTrue(changed)
+        self.assertEqual(order, ["grok", "codex", "deepseek"])
+        # Explicit: low balance must not leap ahead of a healthy resetting % quota.
+        self.assertLess(order.index("codex"), order.index("deepseek"))
+
+    def test_tier_order_percent_balance_unknown_inactive(self):
+        selected = ["deepseek", "ghost", "signedout", "kimi", "codex"]
+        codex = {"windows": [{"remaining_percent": 55, "window_minutes": 300}]}
+        providers = {
+            "deepseek": {
+                "balance": {"CNY": 0.5}, "signed_in": True, "running": True, "installed": True,
+            },
+            "kimi": {
+                "quota_percent": 8, "signed_in": True, "running": True, "installed": True,
+            },
+            "ghost": {
+                "quota_available": True, "signed_in": True, "running": True, "installed": True,
+            },
+            "signedout": {
+                "signed_in": False, "installed": True, "running": False,
+            },
+        }
+        scores = urgency_scores(selected, codex, providers)
+        tiers = urgency_tiers(selected, codex, providers)
+        self.assertEqual(tiers["kimi"], TIER_PERCENT)
+        self.assertEqual(tiers["codex"], TIER_PERCENT)
+        self.assertEqual(tiers["deepseek"], TIER_BALANCE)
+        self.assertEqual(tiers["ghost"], TIER_UNKNOWN)
+        self.assertEqual(tiers["signedout"], TIER_INACTIVE)
+        order, _, _ = order_by_urgency(selected, scores, previous=None, tiers=tiers)
+        self.assertEqual(order[:2], ["kimi", "codex"])
+        self.assertEqual(order[2], "deepseek")
+        self.assertEqual(order[3], "ghost")
+        self.assertEqual(order[4], "signedout")
+
+    def test_balances_sort_among_themselves(self):
+        selected = ["deepseek", "wallet2"]
+        providers = {
+            "deepseek": {
+                "balance": {"CNY": 20.0}, "signed_in": True, "running": True, "installed": True,
+            },
+            "wallet2": {
+                "balance": {"USD": 3.0}, "signed_in": True, "running": True, "installed": True,
+            },
+        }
+        scores = urgency_scores(selected, None, providers)
+        tiers = urgency_tiers(selected, None, providers)
+        self.assertTrue(all(tiers[p] == TIER_BALANCE for p in selected))
+        order, _, _ = order_by_urgency(selected, scores, previous=None, tiers=tiers)
+        self.assertEqual(order, ["wallet2", "deepseek"])
+
+    def test_urgency_tier_helpers(self):
+        self.assertEqual(
+            urgency_tier("codex", {"windows": [{"remaining_percent": 40}]}, None), TIER_PERCENT)
+        self.assertEqual(
+            urgency_tier("deepseek", None, {
+                "deepseek": {"balance": {"CNY": 5}, "signed_in": True, "installed": True},
+            }), TIER_BALANCE)
+        self.assertEqual(
+            urgency_tier("grok", None, {"grok": {"stale": True, "quota_percent": 1}}),
+            TIER_INACTIVE)
+
+
 class HoverSparkRenderTests(unittest.TestCase):
+
     @classmethod
     def setUpClass(cls):
         try:

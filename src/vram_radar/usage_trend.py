@@ -285,7 +285,7 @@ def sparkline_path(points: list[tuple[float, float]], width: int, height: int,
 
 def remaining_metric(provider_id: str, codex_state: dict | None, provider_states: dict | None
                      ) -> float | None:
-    """Remaining % (0–100) for urgency; None when unknown/inactive."""
+    """Remaining % (0-100) for urgency; None when unknown/inactive/non-percent."""
     if provider_id == "codex":
         if not isinstance(codex_state, dict) or codex_state.get("stale"):
             return None
@@ -302,20 +302,90 @@ def remaining_metric(provider_id: str, codex_state: dict | None, provider_states
     state = (provider_states or {}).get(provider_id) if isinstance(provider_states, dict) else None
     if not isinstance(state, dict) or state.get("stale"):
         return None
-    if state.get("running") is False and state.get("installed") is True:
-        # Still may have quota; only treat as inactive when no percent/balance.
-        pass
     rem = state.get("quota_percent")
     if isinstance(rem, (int, float)) and math.isfinite(rem):
         return float(max(0.0, min(100.0, rem)))
-    if provider_id == "deepseek":
-        # Balance has no %; inactive for % urgency unless we can project — treat unknown.
-        return None
-    if state.get("installed") is False or state.get("signed_in") is False:
-        return None
-    if state.get("running") is False:
-        return None
     return None
+
+
+def _balance_amount(state: dict) -> float | None:
+    """Wallet / fixed-amount total when present (DeepSeek or similar)."""
+    bal = state.get("balance")
+    if isinstance(bal, dict):
+        for currency in ("CNY", "USD", "USDT"):
+            raw = bal.get(currency)
+            if raw is None:
+                continue
+            try:
+                amount = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(amount):
+                return amount
+        for raw in bal.values():
+            try:
+                amount = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(amount):
+                return amount
+    elif isinstance(bal, (int, float)) and math.isfinite(bal):
+        return float(bal)
+    return None
+
+
+def _is_inactive(provider_id: str, codex_state: dict | None, provider_states: dict | None) -> bool:
+    """True for stale / not installed / signed-out / not-running without live quota."""
+    if provider_id == "codex":
+        if not isinstance(codex_state, dict):
+            return True
+        if codex_state.get("stale"):
+            return True
+        return False
+    state = (provider_states or {}).get(provider_id) if isinstance(provider_states, dict) else None
+    if not isinstance(state, dict):
+        return True
+    if state.get("stale"):
+        return True
+    if state.get("installed") is False:
+        return True
+    if state.get("signed_in") is False:
+        return True
+    if state.get("running") is False:
+        if remaining_metric(provider_id, codex_state, provider_states) is not None:
+            return False
+        if _balance_amount(state) is not None:
+            return False
+        return True
+    return False
+
+
+# Urgency tiers (lower = earlier in strip / hover when sort-by-urgency is on):
+# 1 = resetting percentage quotas (Codex, Grok, Kimi windows)
+# 2 = balance / fixed-amount without a reset window (DeepSeek wallet, ...)
+# 3 = available-only / unknown
+# 4 = inactive (stale / not running / signed-out / not installed)
+TIER_PERCENT = 1
+TIER_BALANCE = 2
+TIER_UNKNOWN = 3
+TIER_INACTIVE = 4
+
+
+def urgency_tier(provider_id: str, codex_state: dict | None, provider_states: dict | None) -> int:
+    """Classify a provider into an urgency sort tier (1-4)."""
+    if _is_inactive(provider_id, codex_state, provider_states):
+        return TIER_INACTIVE
+    rem = remaining_metric(provider_id, codex_state, provider_states)
+    if rem is not None:
+        return TIER_PERCENT
+    state = None
+    if provider_id == "codex":
+        state = codex_state if isinstance(codex_state, dict) else None
+    elif isinstance(provider_states, dict):
+        state = provider_states.get(provider_id)
+    if isinstance(state, dict) and _balance_amount(state) is not None:
+        return TIER_BALANCE
+    return TIER_UNKNOWN
 
 
 def projected_remaining(provider_id: str, remaining: float | None, store: TrendStore | None,
@@ -329,7 +399,6 @@ def projected_remaining(provider_id: str, remaining: float | None, store: TrendS
     pts = store.provider_spark_points(provider_id, now=now)
     if len(pts) < 3:
         return remaining
-    # Rate of used% per second from first→last (need rising used).
     t0, v0 = pts[0]
     t1, v1 = pts[-1]
     if t1 <= t0 or v1 <= v0:
@@ -337,7 +406,6 @@ def projected_remaining(provider_id: str, remaining: float | None, store: TrendS
     rate = (v1 - v0) / (t1 - t0)  # used % / sec
     if rate <= 1e-9:
         return remaining
-    # Time to reset from Codex primary window when available.
     reset_in = None
     if provider_id == "codex" and isinstance(codex_state, dict):
         windows = codex_state.get("windows") if isinstance(codex_state.get("windows"), list) else []
@@ -357,81 +425,88 @@ def projected_remaining(provider_id: str, remaining: float | None, store: TrendS
 def urgency_scores(selected: list[str] | tuple[str, ...], codex_state: dict | None,
                    provider_states: dict | None, store: TrendStore | None = None,
                    *, now: float | None = None) -> dict[str, float | None]:
-    """Map provider id → urgency score (lower = more urgent); None = inactive/unknown."""
+    """Map provider id -> within-tier urgency score (lower = more urgent); None = n/a.
+
+    Callers that need tier-aware ordering should also use `urgency_tiers`.
+    Percent tiers use remaining % (optionally projected); balance tiers use the
+    wallet amount; unknown/inactive leave score as None.
+    """
     now = time.time() if now is None else float(now)
-    scores = {}
+    scores: dict[str, float | None] = {}
     for pid in selected:
-        rem = remaining_metric(pid, codex_state, provider_states)
-        if rem is None:
-            # DeepSeek balance: lower balance = more urgent when we have a number.
-            if pid == "deepseek" and isinstance(provider_states, dict):
-                st = provider_states.get(pid)
-                if isinstance(st, dict) and not st.get("stale"):
-                    bal = st.get("balance")
-                    amount = None
-                    if isinstance(bal, dict):
-                        for currency in ("CNY", "USD", "USDT"):
-                            raw = bal.get(currency)
-                            if raw is None:
-                                continue
-                            try:
-                                amount = float(raw)
-                            except (TypeError, ValueError):
-                                continue
-                            if math.isfinite(amount):
-                                break
-                            amount = None
-                    elif isinstance(bal, (int, float)) and math.isfinite(bal):
-                        amount = float(bal)
-                    scores[pid] = amount
-                else:
-                    scores[pid] = None
-            else:
-                scores[pid] = None
-            continue
-        proj = projected_remaining(pid, rem, store, codex_state, now=now)
-        scores[pid] = rem if proj is None else proj
+        tier = urgency_tier(pid, codex_state, provider_states)
+        if tier == TIER_PERCENT:
+            rem = remaining_metric(pid, codex_state, provider_states)
+            proj = projected_remaining(pid, rem, store, codex_state, now=now)
+            scores[pid] = rem if proj is None else proj
+        elif tier == TIER_BALANCE:
+            state = (provider_states or {}).get(pid) if isinstance(provider_states, dict) else None
+            scores[pid] = _balance_amount(state) if isinstance(state, dict) else None
+        else:
+            scores[pid] = None
     return scores
+
+
+def urgency_tiers(selected: list[str] | tuple[str, ...], codex_state: dict | None,
+                  provider_states: dict | None) -> dict[str, int]:
+    """Map provider id -> urgency tier (1-4)."""
+    return {pid: urgency_tier(pid, codex_state, provider_states) for pid in selected}
 
 
 def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, float | None],
                      previous: list[str] | None = None, *, previous_scores: dict[str, float | None] | None = None,
                      last_reorder_at: float = 0.0, now: float | None = None,
-                     min_delta: float = HYSTERESIS_POINTS, min_interval: float = HYSTERESIS_SECONDS
+                     min_delta: float = HYSTERESIS_POINTS, min_interval: float = HYSTERESIS_SECONDS,
+                     tiers: dict[str, int] | None = None,
+                     previous_tiers: dict[str, int] | None = None,
                      ) -> tuple[list[str], bool, float]:
-    """Stable urgency order with hysteresis.
+    """Stable urgency order with hysteresis and hard tiers.
 
+    Tier order (always): resetting % -> balance/fixed -> available/unknown -> inactive.
+    Within a tier, lower score first; None scores sort last inside the tier.
     Returns (order, did_reorder, reorder_time).
-    Inactive/unknown (score is None) sort last; among actives, lower score first.
     """
     now = time.time() if now is None else float(now)
     selected = [x for x in selected if isinstance(x, str)]
-    ideal = sorted(
-        selected,
-        key=lambda pid: (
-            1 if scores.get(pid) is None else 0,
-            0.0 if scores.get(pid) is None else float(scores[pid]),
+    tiers = tiers or {}
+    previous_tiers = previous_tiers or {}
+
+    def tier_of(pid: str) -> int:
+        t = tiers.get(pid)
+        if isinstance(t, int):
+            return t
+        return TIER_INACTIVE if scores.get(pid) is None else TIER_PERCENT
+
+    def sort_key(pid: str):
+        score = scores.get(pid)
+        return (
+            tier_of(pid),
+            1 if score is None else 0,
+            0.0 if score is None else float(score),
             selected.index(pid),
             pid,
-        ),
-    )
+        )
+
+    ideal = sorted(selected, key=sort_key)
     if not previous:
         return ideal, True, now
-    # Keep previous relative order unless enough change or enough time.
     if (now - last_reorder_at) < min_interval:
-        # Still drop ids no longer selected; append new ones by ideal position.
         kept = [pid for pid in previous if pid in selected]
         for pid in ideal:
             if pid not in kept:
                 kept.append(pid)
         return kept, False, last_reorder_at
-    # Compare ideal vs previous: reorder only if any adjacent pair inverted by > min_delta
-    # or membership changed.
     if previous_scores is None:
         previous_scores = {}
-    changed_membership = [pid for pid in selected if pid not in previous] or [pid for pid in previous if pid not in selected]
+    changed_membership = [pid for pid in selected if pid not in previous] or [
+        pid for pid in previous if pid not in selected]
     if changed_membership:
         return ideal, True, now
+    for pid in selected:
+        cur = tier_of(pid)
+        prev_t = previous_tiers.get(pid)
+        if prev_t is not None and int(prev_t) != cur:
+            return ideal, True, now
     needs = False
     pos = {pid: i for i, pid in enumerate(previous) if pid in selected}
     for i, pid in enumerate(ideal):
@@ -441,7 +516,6 @@ def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, fl
             break
         if abs(old - i) == 0:
             continue
-        # Score delta vs whoever currently occupies that slot
         old_score = previous_scores.get(pid)
         new_score = scores.get(pid)
         if old_score is None or new_score is None:
@@ -450,14 +524,15 @@ def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, fl
                 break
             continue
         if abs(float(old_score) - float(new_score)) >= min_delta or abs(old - i) >= 2:
-            # Also require the ideal score gap vs neighbour to exceed hysteresis
             needs = True
             break
-    # Stronger check: max |score difference| that would swap order
     if not needs and ideal != [pid for pid in previous if pid in selected]:
         for a, b in zip([p for p in previous if p in selected], ideal):
             if a == b:
                 continue
+            if tier_of(a) != tier_of(b):
+                needs = True
+                break
             sa, sb = scores.get(a), scores.get(b)
             if sa is None and sb is None:
                 continue
@@ -468,7 +543,6 @@ def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, fl
                 needs = True
                 break
         else:
-            # order differs but gaps small — keep previous
             kept = [pid for pid in previous if pid in selected]
             return kept, False, last_reorder_at
     if needs:
