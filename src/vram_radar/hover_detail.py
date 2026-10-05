@@ -279,16 +279,15 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
         rows.append(row)
     if trend_store is not None:
         try:
-            from .usage_trend import avg_summary
+            from .usage_trend import avg_summary, merge_note_with_avg
             for row in rows:
-                pid = row.get("provider_id") or ""
+                pid = row.get("provider_id") or row.get("id") or ""
                 points = trend_store.provider_spark_points(pid, now=now)
                 if len(points) >= 2:
-                    row["spark"] = [(float(t), float(v)) for t, v in points]
+                    row["spark"] = [(float(t0), float(v0)) for t0, v0 in points]
                     kind = "balance" if pid == "deepseek" else "used"
                     summary = avg_summary(points, english=english, kind=kind)
-                    if summary:
-                        row.setdefault("lines", []).append({"text": summary, "tone": "note"})
+                    merge_note_with_avg(row.setdefault("lines", []), summary)
         except Exception:
             pass
     return rows

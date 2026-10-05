@@ -480,19 +480,52 @@ def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, fl
     return kept, False, last_reorder_at
 
 
+def balance_daily_burn(points: list[tuple[float, float]]) -> float | None:
+    """Average ¥/day consumed from declining segments only (top-ups ignored).
+
+    Returns None when there is not enough decreasing history to be meaningful.
+    """
+    if len(points) < 4:
+        return None
+    ordered = sorted((float(t), float(v)) for t, v in points)
+    dropped = 0.0
+    for (t0, v0), (t1, v1) in zip(ordered, ordered[1:]):
+        if t1 <= t0:
+            continue
+        if v1 < v0:
+            dropped += (v0 - v1)
+        # upward jump = top-up / refund; ignore
+    span_days = (ordered[-1][0] - ordered[0][0]) / 86400.0
+    if span_days < 1.5 or dropped <= 0:
+        return None
+    return dropped / span_days
+
+
 def avg_summary(points: list[tuple[float, float]], *, english: bool, kind: str = "used") -> str:
-    """Optional one-line '7 d avg' when there are enough points; '' otherwise."""
+    """Compact 7-day summary fragment (no leading 'Updated'); '' when not meaningful."""
+    if kind == "balance":
+        burn = balance_daily_burn(points)
+        if burn is None:
+            return ""
+        text = f"{burn:.2f}"
+        return (f"7 d avg spend ¥{text}/day" if english else f"7 日均消耗 ¥{text}/天")
     if len(points) < 4:
         return ""
     values = [v for _, v in points]
     avg = sum(values) / len(values)
-    if kind == "balance":
-        text = f"{avg:.2f}"
-        return (f"7 d avg {text}" if english else f"7 日均 {text}")
     text = f"{avg:.0f}%"
-    # Average of used % — label clearly.
     return (f"7 d avg used {text}" if english else f"7 日均已用 {text}")
 
+
+def merge_note_with_avg(lines: list[dict], avg: str) -> None:
+    """Attach ``avg`` to the existing 'Updated…' note, or append as a note."""
+    if not avg:
+        return
+    for line in lines:
+        if line.get("tone") == "note" and isinstance(line.get("text"), str) and line["text"].strip():
+            line["text"] = f"{line['text']} · {avg}"
+            return
+    lines.append({"text": avg, "tone": "note"})
 
 def prune_trend_files(cache: Path, *, now: float | None = None) -> int:
     """Housekeeping entry: prune every trend file under cache/usage-trend."""

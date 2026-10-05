@@ -35,7 +35,7 @@ TOKENS = {
     "hover_width": 300, "hover_pad": 12, "hover_icon": 20, "hover_gap": 10,
     "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
     "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
-    "hover_spark_w": 72, "hover_spark_h": 16, "hover_spark_gap": 6,
+    "hover_spark_w": 72, "hover_spark_h": 14, "hover_spark_gap": 8,
 }
 FONT = "Microsoft YaHei UI"   # Segoe-like Latin + CJK in one face (Windows 11 UI font for zh-CN)
 
@@ -950,17 +950,26 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     icons = []
     sparks = []
     spark_w = s(t.get("hover_spark_w", 72))
-    spark_h = s(t.get("hover_spark_h", 16))
-    spark_gap = s(t.get("hover_spark_gap", 6))
+    spark_h = s(t.get("hover_spark_h", 14))
+    spark_gap = s(t.get("hover_spark_gap", 8))
     for index, row in enumerate(rows):
         if index:
             y += s(t["hover_row_gap"])
-        name_h = measure(row["name"], fonts["name"], text_w)
+        spark_pts = row.get("spark") or []
+        has_spark = isinstance(spark_pts, (list, tuple)) and len(spark_pts) >= 2
+        # Reserve a fixed right column for the spark so the name stays left.
+        name_w = max(40, text_w - (spark_w + spark_gap if has_spark else 0))
+        name_h = measure(row["name"], fonts["name"], name_w)
         row_top = y
-        # Icon vertically centred on the name line (same optical alignment as the strip).
-        icon_top = row_top + max(0, (name_h - icon_px) // 2)
-        blocks.append(("name", row["name"], text_x, y, text_w, name_h, pal["text"]))
-        y += name_h
+        title_h = max(name_h, spark_h if has_spark else 0)
+        icon_top = row_top + max(0, (title_h - icon_px) // 2)
+        blocks.append(("name", row["name"], text_x, row_top + max(0, (title_h - name_h) // 2),
+                       name_w, name_h, pal["text"]))
+        if has_spark:
+            spark_x = width - pad - spark_w
+            spark_y = row_top + max(0, (title_h - spark_h) // 2)
+            sparks.append((list(spark_pts), spark_x, spark_y, spark_w, spark_h))
+        y = row_top + title_h
         for line in row.get("lines") or []:
             text = (line.get("text") or "").strip()
             if not text:
@@ -973,12 +982,7 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             blocks.append((font_key, text, text_x, y, text_w, h, colour))
             y += h
         icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], icon_top))
-        spark_pts = row.get("spark") or []
-        if isinstance(spark_pts, (list, tuple)) and len(spark_pts) >= 2:
-            y += spark_gap
-            sparks.append((list(spark_pts), text_x, y, spark_w, spark_h))
-            y += spark_h
-        y = max(y, icon_top + icon_px, row_top + name_h)
+        y = max(y, icon_top + icon_px, row_top + title_h)
     height = max(y + pad, pad * 2 + icon_px)
     bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
     g = Graphics.FromImage(bitmap)
@@ -997,21 +1001,33 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
         for font_key, text, x, by, w, h, colour in blocks:
             brush = SolidBrush(_color(colour)); disposables.append(brush)
             g.DrawString(text, fonts[font_key], brush, RectangleF(x, by, w + 1, h + s(2)), fmt)
-        # Tiny 7-day sparklines (theme-aware; omit when caller sent <2 points).
+        # Compact 7-day sparklines on the name row (theme-aware; omit if <2 pts).
         if sparks:
             from .usage_trend import sparkline_path
             from .quota_colors import quota_color as quota_rule_color
+            from System.Drawing import PointF
+            from System.Drawing.Drawing2D import GraphicsPath
             for pts, sx, sy, sw, sh in sparks:
-                coords = sparkline_path([(float(a), float(b)) for a, b in pts], sw, sh)
+                coords = sparkline_path([(float(a), float(b)) for a, b in pts], sw, sh, pad=1)
                 if len(coords) < 2:
                     continue
                 last_v = float(pts[-1][1])
-                # used% → remaining for colour; balance uses mid gradient.
-                rem = max(0.0, min(100.0, 100.0 - last_v)) if last_v <= 100 else 50.0
-                ink = quota_rule_color(rem, bright=not theme_light, surface=pal["surface"])
-                pen = Pen(_color(ink), max(1, s(1.25))); disposables.append(pen)
-                from System.Drawing import PointF
+                rem = max(0.0, min(100.0, 100.0 - last_v)) if last_v <= 100.0 else 50.0
+                ink = quota_rule_color(rem, known=True, bright=not theme_light, surface=pal["surface"])
                 points = [PointF(sx + x, sy + y) for x, y in coords]
+                # Soft fill under the line, then a 1.5 DIP stroke.
+                path = GraphicsPath()
+                try:
+                    path.AddLines(points)
+                    path.AddLine(points[-1], PointF(points[-1].X, sy + sh - 1))
+                    path.AddLine(PointF(points[-1].X, sy + sh - 1), PointF(points[0].X, sy + sh - 1))
+                    path.CloseFigure()
+                    fill_rgb = _mix(ink, pal["surface"], 0.72)
+                    fill = SolidBrush(_color(fill_rgb)); disposables.append(fill)
+                    g.FillPath(fill, path)
+                finally:
+                    path.Dispose()
+                pen = Pen(_color(ink), max(1.0, 1.5 * scale)); disposables.append(pen)
                 g.DrawLines(pen, points)
         border = Pen(_color(pal["border"]), 1); disposables.append(border)
         g.DrawRectangle(border, 0, 0, width - 1, height - 1)

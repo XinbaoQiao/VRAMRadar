@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from vram_radar.usage_trend import (
-    TrendStore, avg_summary, extract_samples, order_by_urgency, prune_trend_files,
+    TrendStore, avg_summary, balance_daily_burn, extract_samples, merge_note_with_avg, order_by_urgency, prune_trend_files,
     remaining_metric, sparkline_path, trend_path, urgency_scores,
 )
 
@@ -104,8 +104,30 @@ class SparklineTests(unittest.TestCase):
         self.assertTrue(text.startswith("7 d avg used"))
         text_zh = avg_summary([(i, 10.0) for i in range(5)], english=False, kind="used")
         self.assertIn("7 日均已用", text_zh)
-        # No CJK in English
-        self.assertFalse(any("\u4e00" <= ch <= "\u9fff" for ch in text))
+        self.assertFalse(any("一" <= ch <= "鿿" for ch in text))
+
+    def test_balance_burn_ignores_topups(self):
+        pts = [(0, 20.0), (86400, 18.0), (2 * 86400, 22.0), (3 * 86400, 15.0),
+               (4 * 86400, 12.0), (5 * 86400, 10.0)]
+        burn = balance_daily_burn(pts)
+        self.assertIsNotNone(burn)
+        self.assertGreater(burn, 0)
+        zh = avg_summary(pts, english=False, kind="balance")
+        self.assertIn("¥", zh)
+        self.assertIn("/天", zh)
+        en = avg_summary(pts, english=True, kind="balance")
+        self.assertTrue(en.startswith("7 d avg spend ¥"))
+        self.assertIn("/day", en)
+        self.assertFalse(any("一" <= ch <= "鿿" for ch in en))
+        self.assertIsNone(balance_daily_burn([(0, 10.0), (86400, 12.0), (2 * 86400, 14.0), (3 * 86400, 16.0)]))
+
+    def test_merge_note_with_avg(self):
+        lines = [{"text": "Updated 3 min ago", "tone": "note"}]
+        merge_note_with_avg(lines, "7 d avg used 31%")
+        self.assertEqual(lines[0]["text"], "Updated 3 min ago · 7 d avg used 31%")
+        lines2 = [{"text": "body", "tone": "body"}]
+        merge_note_with_avg(lines2, "7 d avg used 10%")
+        self.assertEqual(lines2[-1]["text"], "7 d avg used 10%")
 
 
 class UrgencySortTests(unittest.TestCase):

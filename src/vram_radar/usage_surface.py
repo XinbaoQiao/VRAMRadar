@@ -2248,12 +2248,15 @@ class CodexUsageSurface:
             item = self._display_menu.DropDownItems.Add(zh)
             item.Click += lambda _s, _e, v=value: save_choice("usage_labels", v)
             self._display_choices.append((item, "usage_labels", value, zh, en))
-        menu.Items.Add(ToolStripSeparator())
-        self._sort_urgency_item = menu.Items.Add("按紧迫程度排序")
-        self._sort_urgency_item.Padding = Padding(4, 4, 8, 4)
+        self._display_menu.DropDownItems.Add(ToolStripSeparator())
+        self._sort_urgency_item = self._display_menu.DropDownItems.Add("按紧迫程度排序")
         def toggle_urgency(*_):
             on = not bool((self.display_options() or {}).get("usage_sort_urgency"))
             save_choice("usage_sort_urgency", on)
+            try:
+                self._sort_urgency_item.Checked = on
+            except Exception:
+                pass
         self._sort_urgency_item.Click += toggle_urgency
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
