@@ -1,0 +1,508 @@
+"""Bounded local usage-trend samples for hover sparklines and urgency sort.
+
+Only real fetched quota values are stored (no secrets, no raw responses).
+Crash-safe atomic JSON writes; downsampled to about one point per 30 minutes;
+auto-pruned to 30 days. Housekeeping also prunes the store file.
+"""
+from __future__ import annotations
+
+import json
+import math
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from .storage import atomic_write_text
+
+SCHEMA = 1
+SAMPLE_INTERVAL = 30 * 60          # seconds between kept points per series
+RETENTION_SECONDS = 30 * 24 * 3600
+SPARK_SECONDS = 7 * 24 * 3600
+HYSTERESIS_POINTS = 5.0           # remaining-% points before reorder
+HYSTERESIS_SECONDS = 10 * 60
+MAX_POINTS_PER_SERIES = int(RETENTION_SECONDS / SAMPLE_INTERVAL) + 8  # ~1448 + slack
+
+_LOCK = threading.RLock()
+
+
+def trend_path(cache_dir: Path | str, profile_id: str = "default") -> Path:
+    root = Path(cache_dir)
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (profile_id or "default"))[:64]
+    return root / "usage-trend" / f"{safe}.json"
+
+
+def _empty() -> dict:
+    return {"v": SCHEMA, "series": {}}
+
+
+def _clamp_pct(value: float) -> float | None:
+    if not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(max(0.0, min(100.0, value)))
+
+
+def extract_samples(codex_state: dict | None, provider_states: dict | None,
+                    selected: list[str] | tuple[str, ...], *, now: float | None = None
+                    ) -> list[tuple[str, float, str]]:
+    """(series_key, value, kind) for every selected app with a real fetched metric.
+
+    kind is ``used`` (0–100 used %) or ``balance`` (DeepSeek wallet total).
+    """
+    now = time.time() if now is None else float(now)
+    selected = [x for x in selected if isinstance(x, str)]
+    out: list[tuple[str, float, str]] = []
+    states = provider_states if isinstance(provider_states, dict) else {}
+
+    if "codex" in selected and isinstance(codex_state, dict) and not codex_state.get("stale"):
+        windows = codex_state.get("windows") if isinstance(codex_state.get("windows"), list) else []
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            rem = window.get("remaining_percent")
+            if not isinstance(rem, (int, float)) or not math.isfinite(rem):
+                continue
+            used = _clamp_pct(100.0 - float(rem))
+            if used is None:
+                continue
+            minutes = window.get("window_minutes")
+            if isinstance(minutes, (int, float)) and minutes > 0:
+                key = f"codex:w{int(minutes)}"
+            else:
+                name = str(window.get("name") or "window").strip().lower()[:32] or "window"
+                key = f"codex:{name}"
+            out.append((key, used, "used"))
+
+    for pid in selected:
+        if pid == "codex":
+            continue
+        state = states.get(pid)
+        if not isinstance(state, dict) or state.get("stale"):
+            continue
+        if pid == "deepseek":
+            bal = state.get("balance")
+            amount = None
+            if isinstance(bal, dict):
+                for currency in ("CNY", "USD", "USDT"):
+                    raw = bal.get(currency)
+                    if raw is None:
+                        continue
+                    try:
+                        amount = float(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(amount) and amount >= 0:
+                        break
+                    amount = None
+                if amount is None:
+                    for raw in bal.values():
+                        try:
+                            amount = float(raw)
+                        except (TypeError, ValueError):
+                            continue
+                        if math.isfinite(amount) and amount >= 0:
+                            break
+                        amount = None
+            elif isinstance(bal, (int, float)) and math.isfinite(bal) and bal >= 0:
+                amount = float(bal)
+            if amount is not None:
+                out.append((f"{pid}:balance", float(amount), "balance"))
+            continue
+        rem = state.get("quota_percent")
+        if isinstance(rem, (int, float)) and math.isfinite(rem):
+            used = _clamp_pct(100.0 - float(rem))
+            if used is not None:
+                out.append((f"{pid}:quota", used, "used"))
+    return out
+
+
+class TrendStore:
+    """Thread-safe on-disk trend samples under the app cache directory."""
+
+    def __init__(self, path: Path | str):
+        self.path = Path(path)
+        self._lock = threading.RLock()
+        self._data = _empty()
+        self._load()
+
+    def _load(self) -> None:
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict) or raw.get("v") != SCHEMA:
+                self._data = _empty()
+                return
+            series = raw.get("series")
+            if not isinstance(series, dict):
+                self._data = _empty()
+                return
+            cleaned = {}
+            for key, entry in series.items():
+                if not isinstance(key, str) or not isinstance(entry, dict):
+                    continue
+                points = entry.get("points")
+                kind = entry.get("kind") or "used"
+                if kind not in {"used", "balance"} or not isinstance(points, list):
+                    continue
+                kept = []
+                for item in points:
+                    if (isinstance(item, (list, tuple)) and len(item) >= 2
+                            and isinstance(item[0], (int, float)) and isinstance(item[1], (int, float))
+                            and math.isfinite(item[0]) and math.isfinite(item[1])):
+                        kept.append([float(item[0]), float(item[1])])
+                cleaned[key] = {"kind": kind, "points": kept}
+            self._data = {"v": SCHEMA, "series": cleaned}
+        except FileNotFoundError:
+            self._data = _empty()
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            self._data = _empty()
+
+    def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(self.path, json.dumps(self._data, separators=(",", ":"), ensure_ascii=True))
+
+    def prune(self, *, now: float | None = None, retention: float = RETENTION_SECONDS) -> int:
+        """Drop points older than retention; return number of points removed."""
+        now = time.time() if now is None else float(now)
+        cutoff = now - retention
+        removed = 0
+        with self._lock:
+            for entry in self._data["series"].values():
+                before = len(entry["points"])
+                entry["points"] = [p for p in entry["points"] if p[0] >= cutoff]
+                if len(entry["points"]) > MAX_POINTS_PER_SERIES:
+                    entry["points"] = entry["points"][-MAX_POINTS_PER_SERIES:]
+                removed += before - len(entry["points"])
+            # Drop empty series
+            self._data["series"] = {k: v for k, v in self._data["series"].items() if v["points"]}
+            try:
+                self._save()
+            except OSError:
+                pass
+        return removed
+
+    def record(self, samples: list[tuple[str, float, str]], *, now: float | None = None,
+               interval: float = SAMPLE_INTERVAL) -> int:
+        """Append downsampled samples. Returns number of new points written."""
+        if not samples:
+            return 0
+        now = time.time() if now is None else float(now)
+        added = 0
+        with self._lock:
+            series = self._data["series"]
+            for key, value, kind in samples:
+                if not isinstance(key, str) or not key or kind not in {"used", "balance"}:
+                    continue
+                if not isinstance(value, (int, float)) or not math.isfinite(value):
+                    continue
+                entry = series.get(key)
+                if entry is None:
+                    entry = {"kind": kind, "points": []}
+                    series[key] = entry
+                entry["kind"] = kind
+                points = entry["points"]
+                if points and (now - points[-1][0]) < interval:
+                    # Refresh the bucket's value in place (latest fetch wins).
+                    points[-1] = [points[-1][0], float(value)]
+                    continue
+                points.append([now, float(value)])
+                added += 1
+                if len(points) > MAX_POINTS_PER_SERIES:
+                    entry["points"] = points[-MAX_POINTS_PER_SERIES:]
+            cutoff = now - RETENTION_SECONDS
+            for entry in series.values():
+                entry["points"] = [p for p in entry["points"] if p[0] >= cutoff]
+            try:
+                self._save()
+            except OSError:
+                pass
+        return added
+
+    def series_points(self, key: str, *, since: float | None = None,
+                      now: float | None = None) -> list[tuple[float, float]]:
+        now = time.time() if now is None else float(now)
+        since = (now - SPARK_SECONDS) if since is None else float(since)
+        with self._lock:
+            entry = self._data["series"].get(key)
+            if not entry:
+                return []
+            return [(t, v) for t, v in entry["points"] if t >= since]
+
+    def provider_spark_points(self, provider_id: str, *, now: float | None = None
+                              ) -> list[tuple[float, float]]:
+        """Best series for a model sparkline (7-day window)."""
+        now = time.time() if now is None else float(now)
+        since = now - SPARK_SECONDS
+        with self._lock:
+            keys = [k for k in self._data["series"] if k == provider_id or k.startswith(provider_id + ":")]
+            best: list[tuple[float, float]] = []
+            # Prefer shorter Codex window, then quota, then balance.
+            def rank(key: str) -> tuple:
+                if key.startswith("codex:w"):
+                    try:
+                        return (0, int(key.split("w", 1)[1]))
+                    except ValueError:
+                        return (0, 10**9)
+                if key.endswith(":quota"):
+                    return (1, 0)
+                if key.endswith(":balance"):
+                    return (2, 0)
+                return (3, 0)
+            for key in sorted(keys, key=rank):
+                pts = [(t, v) for t, v in self._data["series"][key]["points"] if t >= since]
+                if len(pts) >= len(best):
+                    best = pts
+            return best
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return json.loads(json.dumps(self._data))
+
+
+def sparkline_path(points: list[tuple[float, float]], width: int, height: int,
+                   pad: int = 1) -> list[tuple[float, float]]:
+    """Map (t, v) samples to pixel coordinates inside a sparkline box."""
+    if len(points) < 2 or width < 2 or height < 2:
+        return []
+    ts = [p[0] for p in points]
+    vs = [p[1] for p in points]
+    t0, t1 = min(ts), max(ts)
+    v0, v1 = min(vs), max(vs)
+    if t1 <= t0:
+        t1 = t0 + 1.0
+    if abs(v1 - v0) < 1e-9:
+        v1 = v0 + 1.0
+    inner_w = max(1, width - 2 * pad)
+    inner_h = max(1, height - 2 * pad)
+    out = []
+    for t, v in points:
+        x = pad + (t - t0) / (t1 - t0) * inner_w
+        # Higher used%/balance draws lower? Prefer "usage up = line up" for used;
+        # normalize so max value is at top of chart.
+        y = pad + (1.0 - (v - v0) / (v1 - v0)) * inner_h
+        out.append((x, y))
+    return out
+
+
+def remaining_metric(provider_id: str, codex_state: dict | None, provider_states: dict | None
+                     ) -> float | None:
+    """Remaining % (0–100) for urgency; None when unknown/inactive."""
+    if provider_id == "codex":
+        if not isinstance(codex_state, dict) or codex_state.get("stale"):
+            return None
+        windows = codex_state.get("windows") if isinstance(codex_state.get("windows"), list) else []
+        best = None
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            rem = window.get("remaining_percent")
+            if isinstance(rem, (int, float)) and math.isfinite(rem):
+                rem = float(max(0.0, min(100.0, rem)))
+                best = rem if best is None else min(best, rem)
+        return best
+    state = (provider_states or {}).get(provider_id) if isinstance(provider_states, dict) else None
+    if not isinstance(state, dict) or state.get("stale"):
+        return None
+    if state.get("running") is False and state.get("installed") is True:
+        # Still may have quota; only treat as inactive when no percent/balance.
+        pass
+    rem = state.get("quota_percent")
+    if isinstance(rem, (int, float)) and math.isfinite(rem):
+        return float(max(0.0, min(100.0, rem)))
+    if provider_id == "deepseek":
+        # Balance has no %; inactive for % urgency unless we can project — treat unknown.
+        return None
+    if state.get("installed") is False or state.get("signed_in") is False:
+        return None
+    if state.get("running") is False:
+        return None
+    return None
+
+
+def projected_remaining(provider_id: str, remaining: float | None, store: TrendStore | None,
+                        codex_state: dict | None, *, now: float | None = None) -> float | None:
+    """If recent used-% rate is known, project remaining at next reset; else remaining."""
+    if remaining is None:
+        return None
+    now = time.time() if now is None else float(now)
+    if store is None:
+        return remaining
+    pts = store.provider_spark_points(provider_id, now=now)
+    if len(pts) < 3:
+        return remaining
+    # Rate of used% per second from first→last (need rising used).
+    t0, v0 = pts[0]
+    t1, v1 = pts[-1]
+    if t1 <= t0 or v1 <= v0:
+        return remaining
+    rate = (v1 - v0) / (t1 - t0)  # used % / sec
+    if rate <= 1e-9:
+        return remaining
+    # Time to reset from Codex primary window when available.
+    reset_in = None
+    if provider_id == "codex" and isinstance(codex_state, dict):
+        windows = codex_state.get("windows") if isinstance(codex_state.get("windows"), list) else []
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            secs = window.get("reset_in_seconds")
+            if isinstance(secs, (int, float)) and math.isfinite(secs) and secs > 0:
+                reset_in = float(secs) if reset_in is None else min(reset_in, float(secs))
+    if reset_in is None:
+        return remaining
+    used_now = 100.0 - remaining
+    used_at_reset = used_now + rate * reset_in
+    return float(max(0.0, min(100.0, 100.0 - used_at_reset)))
+
+
+def urgency_scores(selected: list[str] | tuple[str, ...], codex_state: dict | None,
+                   provider_states: dict | None, store: TrendStore | None = None,
+                   *, now: float | None = None) -> dict[str, float | None]:
+    """Map provider id → urgency score (lower = more urgent); None = inactive/unknown."""
+    now = time.time() if now is None else float(now)
+    scores = {}
+    for pid in selected:
+        rem = remaining_metric(pid, codex_state, provider_states)
+        if rem is None:
+            # DeepSeek balance: lower balance = more urgent when we have a number.
+            if pid == "deepseek" and isinstance(provider_states, dict):
+                st = provider_states.get(pid)
+                if isinstance(st, dict) and not st.get("stale"):
+                    bal = st.get("balance")
+                    amount = None
+                    if isinstance(bal, dict):
+                        for currency in ("CNY", "USD", "USDT"):
+                            raw = bal.get(currency)
+                            if raw is None:
+                                continue
+                            try:
+                                amount = float(raw)
+                            except (TypeError, ValueError):
+                                continue
+                            if math.isfinite(amount):
+                                break
+                            amount = None
+                    elif isinstance(bal, (int, float)) and math.isfinite(bal):
+                        amount = float(bal)
+                    scores[pid] = amount
+                else:
+                    scores[pid] = None
+            else:
+                scores[pid] = None
+            continue
+        proj = projected_remaining(pid, rem, store, codex_state, now=now)
+        scores[pid] = rem if proj is None else proj
+    return scores
+
+
+def order_by_urgency(selected: list[str] | tuple[str, ...], scores: dict[str, float | None],
+                     previous: list[str] | None = None, *, previous_scores: dict[str, float | None] | None = None,
+                     last_reorder_at: float = 0.0, now: float | None = None,
+                     min_delta: float = HYSTERESIS_POINTS, min_interval: float = HYSTERESIS_SECONDS
+                     ) -> tuple[list[str], bool, float]:
+    """Stable urgency order with hysteresis.
+
+    Returns (order, did_reorder, reorder_time).
+    Inactive/unknown (score is None) sort last; among actives, lower score first.
+    """
+    now = time.time() if now is None else float(now)
+    selected = [x for x in selected if isinstance(x, str)]
+    ideal = sorted(
+        selected,
+        key=lambda pid: (
+            1 if scores.get(pid) is None else 0,
+            0.0 if scores.get(pid) is None else float(scores[pid]),
+            selected.index(pid),
+            pid,
+        ),
+    )
+    if not previous:
+        return ideal, True, now
+    # Keep previous relative order unless enough change or enough time.
+    if (now - last_reorder_at) < min_interval:
+        # Still drop ids no longer selected; append new ones by ideal position.
+        kept = [pid for pid in previous if pid in selected]
+        for pid in ideal:
+            if pid not in kept:
+                kept.append(pid)
+        return kept, False, last_reorder_at
+    # Compare ideal vs previous: reorder only if any adjacent pair inverted by > min_delta
+    # or membership changed.
+    if previous_scores is None:
+        previous_scores = {}
+    changed_membership = [pid for pid in selected if pid not in previous] or [pid for pid in previous if pid not in selected]
+    if changed_membership:
+        return ideal, True, now
+    needs = False
+    pos = {pid: i for i, pid in enumerate(previous) if pid in selected}
+    for i, pid in enumerate(ideal):
+        old = pos.get(pid)
+        if old is None:
+            needs = True
+            break
+        if abs(old - i) == 0:
+            continue
+        # Score delta vs whoever currently occupies that slot
+        old_score = previous_scores.get(pid)
+        new_score = scores.get(pid)
+        if old_score is None or new_score is None:
+            if old_score != new_score:
+                needs = True
+                break
+            continue
+        if abs(float(old_score) - float(new_score)) >= min_delta or abs(old - i) >= 2:
+            # Also require the ideal score gap vs neighbour to exceed hysteresis
+            needs = True
+            break
+    # Stronger check: max |score difference| that would swap order
+    if not needs and ideal != [pid for pid in previous if pid in selected]:
+        for a, b in zip([p for p in previous if p in selected], ideal):
+            if a == b:
+                continue
+            sa, sb = scores.get(a), scores.get(b)
+            if sa is None and sb is None:
+                continue
+            if sa is None or sb is None:
+                needs = True
+                break
+            if abs(float(sa) - float(sb)) >= min_delta:
+                needs = True
+                break
+        else:
+            # order differs but gaps small — keep previous
+            kept = [pid for pid in previous if pid in selected]
+            return kept, False, last_reorder_at
+    if needs:
+        return ideal, True, now
+    kept = [pid for pid in previous if pid in selected]
+    for pid in ideal:
+        if pid not in kept:
+            kept.append(pid)
+    return kept, False, last_reorder_at
+
+
+def avg_summary(points: list[tuple[float, float]], *, english: bool, kind: str = "used") -> str:
+    """Optional one-line '7 d avg' when there are enough points; '' otherwise."""
+    if len(points) < 4:
+        return ""
+    values = [v for _, v in points]
+    avg = sum(values) / len(values)
+    if kind == "balance":
+        text = f"{avg:.2f}"
+        return (f"7 d avg {text}" if english else f"7 日均 {text}")
+    text = f"{avg:.0f}%"
+    # Average of used % — label clearly.
+    return (f"7 d avg used {text}" if english else f"7 日均已用 {text}")
+
+
+def prune_trend_files(cache: Path, *, now: float | None = None) -> int:
+    """Housekeeping entry: prune every trend file under cache/usage-trend."""
+    root = Path(cache) / "usage-trend"
+    if not root.is_dir():
+        return 0
+    total = 0
+    for path in root.glob("*.json"):
+        try:
+            total += TrendStore(path).prune(now=now)
+        except Exception:
+            continue
+    return total

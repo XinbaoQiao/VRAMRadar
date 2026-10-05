@@ -244,25 +244,30 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
                      language: str = "zh-CN", now: float | None = None,
                      names: dict[str, str] | None = None,
                      icon_paths: dict[str, str | None] | None = None,
-                     icon_names: dict[str, str] | None = None) -> list[dict]:
-    """Rows for every selected app, in selection order.
+                     icon_names: dict[str, str] | None = None,
+                     trend_store=None) -> list[dict]:
+    """Rows for every selected app, in ``selected`` order.
 
     ``icon_paths`` / ``icon_names`` feed the same ``provider_icon`` pipeline as
     the taskbar strip (installed app icon, else bundled brand art, else letter).
+    When ``trend_store`` is set, each row may carry a 7-day sparkline series.
     """
     now = time.time() if now is None else now
     provider_states = provider_states if isinstance(provider_states, dict) else {}
     names = names or {}
     icon_paths = icon_paths or {}
     icon_names = icon_names or {}
+    english = language == "en"
     rows = []
     for pid in selected:
         if not isinstance(pid, str):
             continue
         if pid == "codex":
             if isinstance(codex_state, dict) and codex_state.get("enabled", True):
-                rows.append(codex_hover_row(
-                    codex_state, language, now=now, icon_path=icon_paths.get("codex")))
+                row = codex_hover_row(
+                    codex_state, language, now=now, icon_path=icon_paths.get("codex"))
+                row["provider_id"] = "codex"
+                rows.append(row)
             continue
         name = names.get(pid) or pid
         row = provider_hover_row(
@@ -270,7 +275,22 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
             now=now, icon_path=icon_paths.get(pid))
         # Prefer the registry English name for icon lookup (matches strip/menu).
         row["icon_name"] = icon_names.get(pid) or row.get("icon_name") or name
+        row["provider_id"] = pid
         rows.append(row)
+    if trend_store is not None:
+        try:
+            from .usage_trend import avg_summary
+            for row in rows:
+                pid = row.get("provider_id") or ""
+                points = trend_store.provider_spark_points(pid, now=now)
+                if len(points) >= 2:
+                    row["spark"] = [(float(t), float(v)) for t, v in points]
+                    kind = "balance" if pid == "deepseek" else "used"
+                    summary = avg_summary(points, english=english, kind=kind)
+                    if summary:
+                        row.setdefault("lines", []).append({"text": summary, "tone": "note"})
+        except Exception:
+            pass
     return rows
 
 
@@ -286,6 +306,8 @@ def hover_card_spec(rows: list[dict], language: str = "zh-CN") -> dict:
                 "icon_path": row.get("icon_path"),
                 "lines": list(row.get("lines") or []),
                 "inactive": bool(row.get("inactive")),
+                "spark": list(row.get("spark") or []),
+                "provider_id": row.get("provider_id") or "",
             }
             for row in rows
             if row.get("name")

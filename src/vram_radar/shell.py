@@ -1362,9 +1362,11 @@ class AppApi:
         return result
 
     def save_codex_display(self, key: str, value: Any) -> dict[str, Any]:
-        if key not in {"codex_time_format", "usage_background", "usage_labels"}:
+        if key not in {"codex_time_format", "usage_background", "usage_labels", "usage_sort_urgency"}:
             return {"ok": False, "code": "invalid_codex_display"}
         if key == "usage_labels" and value not in ("text", "icons"):
+            return {"ok": False, "code": "invalid_codex_display"}
+        if key == "usage_sort_urgency" and not isinstance(value, bool):
             return {"ok": False, "code": "invalid_codex_display"}
         with self._profile_mutation_lock:
             raw = self.profile.to_dict()
@@ -5109,7 +5111,9 @@ def main(argv: list[str] | None = None) -> int:
                         open_settings=show_usage_settings,
                         display_options=lambda: {"codex_time_format": api.profile.codex_time_format,
                                                  "usage_background": api.profile.usage_background,
-                                                 "usage_labels": api.profile.usage_labels},
+                                                 "usage_labels": api.profile.usage_labels,
+                                                 "usage_sort_urgency": bool(api.profile.usage_sort_urgency),
+                                                 "profile_id": api.profile.id},
                         save_display=api.save_codex_display,
                         open_home=lambda: shutdown.restore(lambda: window.evaluate_js(
                             "document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());"

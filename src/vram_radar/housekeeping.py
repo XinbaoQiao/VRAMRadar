@@ -19,6 +19,8 @@ What can accumulate, and its cap:
 * ``cache/webview/<pid>`` WebView2 profile of each run -- deleted by pywebview
   on a clean exit; folders of processes that are no longer running (crash,
   forced stop, power loss) are removed at startup and daily.
+* ``cache/usage-trend/<profile>.json`` quota sparkline samples -- pruned to
+  30 days (one point per ~30 minutes per series).
 """
 from __future__ import annotations
 
@@ -183,6 +185,15 @@ def prune_webview_sessions(cache: Path, *, current_pid: int | None = None,
     return removed
 
 
+
+def _prune_usage_trend(cache: Path) -> int:
+    try:
+        from .usage_trend import prune_trend_files
+        return prune_trend_files(cache)
+    except Exception:
+        return 0
+
+
 def run_maintenance(paths: Any, profile_id: str, known_server_ids: Iterable[str] = (), *,
                     now: float | None = None, current_pid: int | None = None,
                     alive: Callable[[int], bool] = pid_alive) -> dict[str, Any]:
@@ -199,6 +210,7 @@ def run_maintenance(paths: Any, profile_id: str, known_server_ids: Iterable[str]
         "invalid_profiles": lambda: prune_invalid_profile_backups(config / "profiles"),
         "snapshots": lambda: prune_snapshot_cache(cache / profile_id, known_server_ids, now=now),
         "webview": lambda: prune_webview_sessions(cache, current_pid=current_pid, alive=alive),
+        "usage_trend": lambda: _prune_usage_trend(cache),
     }
     summary: dict[str, Any] = {}
     for name, step in steps.items():

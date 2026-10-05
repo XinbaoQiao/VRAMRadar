@@ -35,6 +35,7 @@ TOKENS = {
     "hover_width": 300, "hover_pad": 12, "hover_icon": 20, "hover_gap": 10,
     "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
     "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
+    "hover_spark_w": 72, "hover_spark_h": 16, "hover_spark_gap": 6,
 }
 FONT = "Microsoft YaHei UI"   # Segoe-like Latin + CJK in one face (Windows 11 UI font for zh-CN)
 
@@ -947,6 +948,10 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     blocks = []
     y = pad
     icons = []
+    sparks = []
+    spark_w = s(t.get("hover_spark_w", 72))
+    spark_h = s(t.get("hover_spark_h", 16))
+    spark_gap = s(t.get("hover_spark_gap", 6))
     for index, row in enumerate(rows):
         if index:
             y += s(t["hover_row_gap"])
@@ -968,6 +973,11 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             blocks.append((font_key, text, text_x, y, text_w, h, colour))
             y += h
         icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], icon_top))
+        spark_pts = row.get("spark") or []
+        if isinstance(spark_pts, (list, tuple)) and len(spark_pts) >= 2:
+            y += spark_gap
+            sparks.append((list(spark_pts), text_x, y, spark_w, spark_h))
+            y += spark_h
         y = max(y, icon_top + icon_px, row_top + name_h)
     height = max(y + pad, pad * 2 + icon_px)
     bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
@@ -987,6 +997,22 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
         for font_key, text, x, by, w, h, colour in blocks:
             brush = SolidBrush(_color(colour)); disposables.append(brush)
             g.DrawString(text, fonts[font_key], brush, RectangleF(x, by, w + 1, h + s(2)), fmt)
+        # Tiny 7-day sparklines (theme-aware; omit when caller sent <2 points).
+        if sparks:
+            from .usage_trend import sparkline_path
+            from .quota_colors import quota_color as quota_rule_color
+            for pts, sx, sy, sw, sh in sparks:
+                coords = sparkline_path([(float(a), float(b)) for a, b in pts], sw, sh)
+                if len(coords) < 2:
+                    continue
+                last_v = float(pts[-1][1])
+                # used% → remaining for colour; balance uses mid gradient.
+                rem = max(0.0, min(100.0, 100.0 - last_v)) if last_v <= 100 else 50.0
+                ink = quota_rule_color(rem, bright=not theme_light, surface=pal["surface"])
+                pen = Pen(_color(ink), max(1, s(1.25))); disposables.append(pen)
+                from System.Drawing import PointF
+                points = [PointF(sx + x, sy + y) for x, y in coords]
+                g.DrawLines(pen, points)
         border = Pen(_color(pal["border"]), 1); disposables.append(border)
         g.DrawRectangle(border, 0, 0, width - 1, height - 1)
     finally:
@@ -1053,7 +1079,9 @@ def _present_hover(spec, anchor, scale, dark, accent):
     signature = (spec.get("language"),
                  tuple((row.get("name"),
                         tuple((line.get("text"), line.get("tone")) for line in row.get("lines") or []),
-                        row.get("icon_path"))
+                        row.get("icon_path"),
+                        tuple((round(float(a), 1), round(float(b), 2))
+                              for a, b in (row.get("spark") or [])[:48]))
                        for row in spec.get("rows") or []),
                  round(float(scale_v), 3), bool(dark_v))
     form = _HOVER.get("form")

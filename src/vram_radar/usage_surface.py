@@ -1831,6 +1831,11 @@ class CodexUsageSurface:
         # re-enters or moves over the strip (no instant pop-back).
         self._hover_armed = True
         self._hover_dialog_open = False
+        self._trend_store = None
+        self._urgency_order = None
+        self._urgency_scores = {}
+        self._urgency_reorder_at = 0.0
+        self._sort_urgency_item = None
 
         def rounded_path(inset=0):
             path = GraphicsPath()
@@ -2243,6 +2248,13 @@ class CodexUsageSurface:
             item = self._display_menu.DropDownItems.Add(zh)
             item.Click += lambda _s, _e, v=value: save_choice("usage_labels", v)
             self._display_choices.append((item, "usage_labels", value, zh, en))
+        menu.Items.Add(ToolStripSeparator())
+        self._sort_urgency_item = menu.Items.Add("按紧迫程度排序")
+        self._sort_urgency_item.Padding = Padding(4, 4, 8, 4)
+        def toggle_urgency(*_):
+            on = not bool((self.display_options() or {}).get("usage_sort_urgency"))
+            save_choice("usage_sort_urgency", on)
+        self._sort_urgency_item.Click += toggle_urgency
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
         # Multi-provider picker (multi-select, persisted in the Profile).
@@ -2492,8 +2504,47 @@ class CodexUsageSurface:
             selected = [x for x in (overview.get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
             provider_states = overview.get("providers") if isinstance(overview.get("providers"), dict) else {}
             master_enabled = overview.get("enabled", True) is not False
-            others = [spec for pid, (item, spec) in self._model_items.items()
-                      if pid in selected and pid != "codex"] if master_enabled else []
+            display_order = list(selected)
+            sort_urgency = False
+            try:
+                from .storage import storage_paths
+                from .usage_trend import (TrendStore, extract_samples, order_by_urgency,
+                                         trend_path, urgency_scores)
+                opts = options if isinstance(options, dict) else {}
+                profile_id = opts.get("profile_id") or "default"
+                if self._trend_store is None or getattr(self, "_trend_profile", None) != profile_id:
+                    self._trend_store = TrendStore(trend_path(storage_paths().cache, str(profile_id)))
+                    self._trend_profile = profile_id
+                self._trend_store.record(extract_samples(state if "codex" in selected else None,
+                                                         provider_states, selected))
+                sort_urgency = bool(opts.get("usage_sort_urgency"))
+                if self._sort_urgency_item is not None:
+                    self._sort_urgency_item.Checked = sort_urgency
+                    self._sort_urgency_item.Text = ("Sort by urgency" if language == "en"
+                                                   else "按紧迫程度排序")
+                if sort_urgency:
+                    scores = urgency_scores(selected, state if "codex" in selected else None,
+                                            provider_states, self._trend_store)
+                    ordered, changed, when = order_by_urgency(
+                        selected, scores, self._urgency_order,
+                        previous_scores=self._urgency_scores,
+                        last_reorder_at=self._urgency_reorder_at)
+                    if changed:
+                        self._urgency_order = list(ordered)
+                        self._urgency_scores = dict(scores)
+                        self._urgency_reorder_at = when
+                    display_order = list(self._urgency_order or ordered)
+                else:
+                    self._urgency_order = None
+            except Exception:
+                display_order = list(selected)
+                sort_urgency = False
+            others = []
+            if master_enabled:
+                by_id = {pid: spec for pid, (item, spec) in self._model_items.items()}
+                for pid in display_order:
+                    if pid != "codex" and pid in by_id and pid in selected:
+                        others.append(by_id[pid])
             multi = bool(others)
             english = language == "en"
             self._models_menu.Text = "Models" if english else "显示模型"
@@ -2702,18 +2753,37 @@ class CodexUsageSurface:
                 label.Visible = bool(rows) and not multi
             cells = []
             cell_ids = []
-            if rows and multi:
-                cell_ids.append("codex")
-                countdown = reading["countdown"]
-                if RESET_RE.fullmatch(countdown):
-                    value, reset_txt = reading["value"], countdown
-                else:
-                    value = f"{reading['value']} {countdown}".strip() if countdown != "—" else reading["value"]
-                    reset_txt = ""
-                cells.append(("Codex", value, reset_txt, quota_color))
             provider_rows = []
             fg = menu.ForeColor
-            for spec in others:
+            column_specs = []
+            if multi:
+                if sort_urgency:
+                    by_id = {pid: spec for pid, (item, spec) in self._model_items.items()}
+                    for pid in display_order:
+                        if pid not in selected:
+                            continue
+                        if pid == "codex" and rows:
+                            column_specs.append(("codex", None))
+                        elif pid != "codex" and pid in by_id:
+                            column_specs.append((pid, by_id[pid]))
+                else:
+                    if rows:
+                        column_specs.append(("codex", None))
+                    for spec in others:
+                        column_specs.append((spec.id, spec))
+            for pid, spec in column_specs:
+                if pid == "codex":
+                    cell_ids.append("codex")
+                    countdown = reading["countdown"]
+                    if RESET_RE.fullmatch(countdown):
+                        value, reset_txt = reading["value"], countdown
+                    else:
+                        emdash = "—"
+                        value = (f"{reading['value']} {countdown}".strip()
+                                 if countdown != emdash else reading["value"])
+                        reset_txt = ""
+                    cells.append(("Codex", value, reset_txt, quota_color))
+                    continue
                 info = provider_reading(provider_states.get(spec.id),
                                          {"id": spec.id, "name": spec.label(english), "short": spec.label(english) if english else spec.short}, language)
                 granted = self._pending.get(spec.id)
@@ -2858,9 +2928,11 @@ class CodexUsageSurface:
                         continue
                     pstate = provider_states.get(spec.id)
                     paths[spec.id] = pstate.get("install_path") if isinstance(pstate, dict) else None
+                hover_order = display_order if sort_urgency else selected
                 hover_rows = build_hover_rows(
-                    state if "codex" in selected else None, provider_states, selected,
-                    language=language, names=names, icon_paths=paths, icon_names=icon_names)
+                    state if "codex" in selected else None, provider_states, hover_order,
+                    language=language, names=names, icon_paths=paths, icon_names=icon_names,
+                    trend_store=self._trend_store)
                 self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
                 from . import ui_dialogs
                 if self._hover_interaction_allowed(bool(self._hovered) and form.Visible):
