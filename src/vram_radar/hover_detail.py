@@ -245,7 +245,7 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
                      names: dict[str, str] | None = None,
                      icon_paths: dict[str, str | None] | None = None,
                      icon_names: dict[str, str] | None = None,
-                     trend_store=None) -> list[dict]:
+                     trend_store=None, show_trend: bool = True) -> list[dict]:
     """Rows for every selected app, in ``selected`` order.
 
     ``icon_paths`` / ``icon_names`` feed the same ``provider_icon`` pipeline as
@@ -277,7 +277,7 @@ def build_hover_rows(codex_state: dict | None, provider_states: dict | None,
         row["icon_name"] = icon_names.get(pid) or row.get("icon_name") or name
         row["provider_id"] = pid
         rows.append(row)
-    if trend_store is not None:
+    if trend_store is not None and show_trend:
         try:
             from .usage_trend import avg_summary, merge_note_with_avg
             for row in rows:

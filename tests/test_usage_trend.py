@@ -227,3 +227,99 @@ class HoverSparkRenderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ShowTrendToggleTests(unittest.TestCase):
+    def test_profile_default_on_and_persists(self):
+        from vram_radar.models import Profile
+        base = Profile.empty("default").to_dict()
+        self.assertTrue(base["usage_show_trend"])
+        self.assertIn("usage_sort_urgency", base)
+        raw = dict(base)
+        raw["usage_show_trend"] = False
+        updated = Profile.from_dict(raw)
+        self.assertFalse(updated.usage_show_trend)
+        self.assertEqual(updated.usage_labels, base["usage_labels"])
+
+    def test_build_hover_respects_show_trend_flag(self):
+        import tempfile
+        from pathlib import Path as P
+        from vram_radar.hover_detail import build_hover_rows
+        from vram_radar.usage_trend import TrendStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TrendStore(P(tmp) / "t.json")
+            now = 1_700_000_000.0
+            for i in range(8):
+                store.record([("grok:quota", 20.0 + i, "used")], now=now - (7 - i) * 86400, interval=1)
+            providers = {"grok": {"installed": True, "running": True, "signed_in": True,
+                                  "quota_percent": 40, "quota": {"zh": "40%", "en": "40%"},
+                                  "fetched_at": now - 60}}
+            on = build_hover_rows(None, providers, ["grok"], language="en", now=now,
+                                  names={"grok": "Grok"}, trend_store=store, show_trend=True)
+            off = build_hover_rows(None, providers, ["grok"], language="en", now=now,
+                                   names={"grok": "Grok"}, trend_store=store, show_trend=False)
+            self.assertGreaterEqual(len(on[0].get("spark") or []), 2)
+            self.assertTrue(any("7 d avg" in (line.get("text") or "") for line in on[0].get("lines") or []))
+            self.assertFalse(off[0].get("spark"))
+            self.assertFalse(any("7 d avg" in (line.get("text") or "") for line in off[0].get("lines") or []))
+
+    def test_menu_builds_show_trend_item(self):
+        try:
+            import clr
+            clr.AddReference("System.Drawing")
+            clr.AddReference("System.Windows.Forms")
+        except Exception as exc:
+            raise unittest.SkipTest("WinForms unavailable: %s" % exc) from exc
+        import logging, sys, threading, time, webview
+        from pathlib import Path as P
+        ROOT = P(__file__).resolve().parents[1]
+        sys.path.insert(0, str(ROOT / "tools"))
+        from benchmark_webview_ui import FakeApi, _wait_until_ready
+        from vram_radar.usage_surface import CodexUsageSurface, _dll
+        logging.disable(logging.CRITICAL)
+        window = webview.create_window(
+            "trend toggle menu", width=640, height=480,
+            url=(ROOT / "src/vram_radar/web/index.html").as_uri(),
+            js_api=FakeApi(), hidden=True, focus=False)
+        display = {"usage_sort_urgency": False, "usage_show_trend": True,
+                   "usage_labels": "text", "usage_background": "transparent",
+                   "profile_id": "default"}
+        state = {"enabled": True, "state": "ready",
+                 "windows": [{"name": "5 hour", "window_minutes": 300,
+                              "remaining_percent": 50, "resets_at": time.time() + 3600}]}
+        surface = CodexUsageSurface(
+            window, lambda: dict(state), language=lambda: "zh-CN",
+            open_settings=lambda: None, open_home=lambda: None, refresh=lambda: None,
+            display_options=lambda: dict(display),
+            save_display=lambda k, v: display.__setitem__(k, v) or {"ok": True},
+            disable=lambda: None, quit_application=lambda: None)
+        _dll("user32").SetForegroundWindow = lambda hwnd: 1
+        result = {}
+        label = "显示走势图"
+        def run():
+            try:
+                from System import Action
+                _wait_until_ready(window, time.monotonic() + 20)
+                surface.start()
+                def check():
+                    surface._tick()
+                    result["has_trend"] = surface._show_trend_item is not None and surface._show_trend_item.Text == label
+                    result["has_urgency"] = surface._sort_urgency_item is not None
+                    result["trend_checked"] = bool(surface._show_trend_item.Checked)
+                    items = list(surface._display_menu.DropDownItems)
+                    result["order_ok"] = items.index(surface._sort_urgency_item) < items.index(surface._show_trend_item)
+                window.native.Invoke(Action(check))
+            except Exception as exc:
+                result["error"] = repr(exc)
+            finally:
+                try:
+                    window.destroy()
+                except Exception:
+                    pass
+        threading.Thread(target=run, daemon=True).start()
+        webview.start()
+        if result.get("error"):
+            self.fail(result["error"])
+        self.assertTrue(result.get("has_trend"), result)
+        self.assertTrue(result.get("has_urgency"), result)
+        self.assertTrue(result.get("trend_checked"), result)
+        self.assertTrue(result.get("order_ok"), result)

@@ -732,6 +732,8 @@ class Profile:
     usage_labels: str = "text"
     # When true, the strip and hover card order apps by soonest-to-run-out.
     usage_sort_urgency: bool = False
+    # Hover card 7-day sparkline + avg note (recording always continues).
+    usage_show_trend: bool = True
     favorite_server_ids: tuple[str, ...] = ()
     pinned_server_ids: tuple[str, ...] = ()
     favorite_gpus: tuple[dict[str, Any], ...] = ()
@@ -963,6 +965,7 @@ class Profile:
             usage_background=normalize_usage_background(raw.get("usage_background", "transparent")),
             usage_labels=normalize_usage_labels(raw.get("usage_labels"), raw.get("usage_icons")),
             usage_sort_urgency=require_bool(raw.get("usage_sort_urgency", False), "usage_sort_urgency"),
+            usage_show_trend=require_bool(raw.get("usage_show_trend", True), "usage_show_trend"),
             favorite_server_ids=favorites,
             pinned_server_ids=pins,
             favorite_gpus=favorite_gpu_entries,
@@ -995,6 +998,7 @@ class Profile:
             "usage_background": self.usage_background,
             "usage_labels": self.usage_labels,
             "usage_sort_urgency": self.usage_sort_urgency,
+            "usage_show_trend": self.usage_show_trend,
             "favorite_server_ids": list(self.favorite_server_ids),
             "pinned_server_ids": list(self.pinned_server_ids),
             "favorite_gpus": [dict(entry) for entry in self.favorite_gpus],

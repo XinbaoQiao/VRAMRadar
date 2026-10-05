@@ -1836,6 +1836,7 @@ class CodexUsageSurface:
         self._urgency_scores = {}
         self._urgency_reorder_at = 0.0
         self._sort_urgency_item = None
+        self._show_trend_item = None
 
         def rounded_path(inset=0):
             path = GraphicsPath()
@@ -2258,6 +2259,15 @@ class CodexUsageSurface:
             except Exception:
                 pass
         self._sort_urgency_item.Click += toggle_urgency
+        self._show_trend_item = self._display_menu.DropDownItems.Add("显示走势图")
+        def toggle_trend(*_):
+            on = not bool((self.display_options() or {}).get("usage_show_trend", True))
+            save_choice("usage_show_trend", on)
+            try:
+                self._show_trend_item.Checked = on
+            except Exception:
+                pass
+        self._show_trend_item.Click += toggle_trend
         for item in (self._dock_item, self._window_menu):
             item.Padding = Padding(4, 4, 8, 4)
         # Multi-provider picker (multi-select, persisted in the Profile).
@@ -2509,6 +2519,7 @@ class CodexUsageSurface:
             master_enabled = overview.get("enabled", True) is not False
             display_order = list(selected)
             sort_urgency = False
+            show_trend = True
             try:
                 from .storage import storage_paths
                 from .usage_trend import (TrendStore, extract_samples, order_by_urgency,
@@ -2521,10 +2532,15 @@ class CodexUsageSurface:
                 self._trend_store.record(extract_samples(state if "codex" in selected else None,
                                                          provider_states, selected))
                 sort_urgency = bool(opts.get("usage_sort_urgency"))
+                show_trend = bool(opts.get("usage_show_trend", True))
                 if self._sort_urgency_item is not None:
                     self._sort_urgency_item.Checked = sort_urgency
                     self._sort_urgency_item.Text = ("Sort by urgency" if language == "en"
                                                    else "按紧迫程度排序")
+                if self._show_trend_item is not None:
+                    self._show_trend_item.Checked = show_trend
+                    self._show_trend_item.Text = ("Show trend chart" if language == "en"
+                                                 else "显示走势图")
                 if sort_urgency:
                     scores = urgency_scores(selected, state if "codex" in selected else None,
                                             provider_states, self._trend_store)
@@ -2542,6 +2558,7 @@ class CodexUsageSurface:
             except Exception:
                 display_order = list(selected)
                 sort_urgency = False
+                show_trend = True
             others = []
             if master_enabled:
                 by_id = {pid: spec for pid, (item, spec) in self._model_items.items()}
@@ -2935,7 +2952,7 @@ class CodexUsageSurface:
                 hover_rows = build_hover_rows(
                     state if "codex" in selected else None, provider_states, hover_order,
                     language=language, names=names, icon_paths=paths, icon_names=icon_names,
-                    trend_store=self._trend_store)
+                    trend_store=self._trend_store, show_trend=show_trend)
                 self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
                 from . import ui_dialogs
                 if self._hover_interaction_allowed(bool(self._hovered) and form.Visible):
