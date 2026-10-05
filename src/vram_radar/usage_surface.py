@@ -1872,8 +1872,7 @@ class CodexUsageSurface:
                 from .hover_detail import HOVER_DELAY_MS
                 if hovered and getattr(self, "_hover_spec", None):
                     anchor = (form.Left, form.Top, form.Right, form.Bottom)
-                    already = (ui_dialogs._HOVER.get("form") is not None
-                               and getattr(ui_dialogs._HOVER["form"], "Visible", False))
+                    already = bool(ui_dialogs._HOVER.get("shown"))
                     ui_dialogs.show_hover_card(
                         self._hover_spec, anchor, scale=self._scale,
                         delay_ms=0 if already else HOVER_DELAY_MS)

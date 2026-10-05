@@ -908,7 +908,7 @@ def close_toast() -> None:
 
 # -- hover detail card --------------------------------------------------------
 
-_HOVER = {"form": None, "image": None, "delay": None, "signature": None, "on_tick": None}
+_HOVER = {"form": None, "image": None, "delay": None, "signature": None, "on_tick": None, "shown": False}
 
 
 def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
@@ -1001,10 +1001,12 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
 
 def hide_hover_card() -> None:
     """Hide and keep the single hover window for reuse."""
+    import ctypes
     delay = _HOVER.get("delay")
     form = _HOVER.get("form")
     on_tick = _HOVER.get("on_tick")
     _HOVER["signature"] = None
+    _HOVER["shown"] = False
     try:
         if delay is not None and on_tick is not None:
             delay.Tick -= on_tick
@@ -1013,8 +1015,16 @@ def hide_hover_card() -> None:
         pass
     _HOVER["on_tick"] = None
     try:
-        if form is not None and form.Visible:
-            form.Hide()
+        if form is not None:
+            handle = int(form.Handle.ToInt64())
+            user32 = ctypes.windll.user32
+            user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+            # SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_HIDEWINDOW
+            user32.SetWindowPos(ctypes.c_void_p(handle), ctypes.c_void_p(0), 0, 0, 0, 0,
+                                0x0001 | 0x0002 | 0x0010 | 0x0080)
+            if form.Visible:
+                form.Hide()
     except Exception:
         pass
 
@@ -1023,7 +1033,7 @@ def close_hover_card() -> None:
     """Full teardown used when the strip shuts down."""
     hide_hover_card()
     form, image, delay = _HOVER.get("form"), _HOVER.get("image"), _HOVER.get("delay")
-    _HOVER.update(form=None, image=None, delay=None, signature=None, on_tick=None)
+    _HOVER.update(form=None, image=None, delay=None, signature=None, on_tick=None, shown=False)
     try:
         if delay is not None:
             delay.Dispose()
@@ -1104,6 +1114,7 @@ def _present_hover(spec, anchor, scale, dark, accent):
     # HWND_TOPMOST, SWP_NOACTIVATE | SWP_SHOWWINDOW
     user32.SetWindowPos(ctypes.c_void_p(handle), ctypes.c_void_p(-1), int(x), int(y), int(width), int(height),
                         0x0010 | 0x0040)
+    _HOVER["shown"] = True
     return form
 
 
