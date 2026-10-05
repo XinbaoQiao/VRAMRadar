@@ -6,6 +6,8 @@ Two components share the same tokens (see docs/dialog-design.md):
   bullet lines, an optional small note, primary/secondary buttons.
 * ``show_toast(spec, anchor)`` -- non-activating notice above the strip that
   fades out on its own (progress, limits, confirmations).
+* ``show_hover_card(spec, anchor)`` -- non-activating detail card on strip
+  hover (one reused window; never takes focus).
 
 ``spec`` dicts are built by the pure helpers below (testable without .NET);
 the whole surface is drawn into one bitmap (crisp at any DPI, identical in
@@ -29,6 +31,10 @@ TOKENS = {
     "corner": 8,
     "toast_width": 320, "toast_pad": 14, "toast_icon": 24, "toast_gap": 12,
     "toast_headline_px": 13, "toast_body_px": 12, "toast_ms": 3500, "toast_offset": 8,
+    # Compact hover card above the taskbar strip (one reusable window).
+    "hover_width": 300, "hover_pad": 12, "hover_icon": 18, "hover_gap": 10,
+    "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
+    "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
 }
 FONT = "Microsoft YaHei UI"   # Segoe-like Latin + CJK in one face (Windows 11 UI font for zh-CN)
 
@@ -675,9 +681,12 @@ def framed(bitmap, scale: float, pal: dict):
 def save_preview(spec: dict, target: str, *, scale: float = 1.5, dark: bool = False, accent=None,
                  icon_path: str | None = None) -> str:
     pal = palette(dark, accent)
-    icon_px = int(round((TOKENS["toast_icon"] if spec.get("kind") == "toast" else TOKENS["icon"]) * scale))
-    icon = provider_icon(icon_path, icon_px, spec.get("icon_name", ""), accent)
-    bitmap, _ = render(spec, scale, pal, icon)
+    if spec.get("kind") == "hover":
+        bitmap, _ = render_hover(spec, scale, pal, accent=accent)
+    else:
+        icon_px = int(round((TOKENS["toast_icon"] if spec.get("kind") == "toast" else TOKENS["icon"]) * scale))
+        icon = provider_icon(icon_path, icon_px, spec.get("icon_name", ""), accent)
+        bitmap, _ = render(spec, scale, pal, icon)
     out = framed(bitmap, scale, pal)
     out.Save(target)
     out.Dispose(); bitmap.Dispose()
@@ -871,3 +880,234 @@ def close_toast() -> None:
             image.Dispose()
     except Exception:
         pass
+
+
+
+# -- hover detail card --------------------------------------------------------
+
+_HOVER = {"form": None, "image": None, "delay": None, "signature": None, "on_tick": None}
+
+
+def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
+    """(Bitmap, layout) for a multi-app hover detail card."""
+    import math
+    from System.Drawing import (Bitmap, Font, FontStyle, Graphics, GraphicsUnit, Pen, RectangleF, SizeF,
+                                SolidBrush, StringFormat)
+    from System.Drawing.Drawing2D import InterpolationMode, SmoothingMode
+    from System.Drawing.Imaging import PixelFormat
+    from System.Drawing.Text import TextRenderingHint
+
+    s = lambda v: int(round(v * scale))
+    t = TOKENS
+    width = s(t["hover_width"])
+    pad = s(t["hover_pad"])
+    icon_px = s(t["hover_icon"])
+    gap = s(t["hover_gap"])
+    text_x = pad + icon_px + gap
+    text_w = max(40, width - text_x - pad)
+    fonts = {
+        "name": Font(FONT, float(s(t["hover_name_px"])), FontStyle.Bold, GraphicsUnit.Pixel),
+        "body": Font(FONT, float(s(t["hover_body_px"])), FontStyle.Regular, GraphicsUnit.Pixel),
+        "note": Font(FONT, float(s(t["hover_note_px"])), FontStyle.Regular, GraphicsUnit.Pixel),
+    }
+    fmt = StringFormat(StringFormat.GenericTypographic)
+    probe_bitmap = Bitmap(1, 1)
+    probe = Graphics.FromImage(probe_bitmap)
+    probe.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+
+    def measure(text, font, w):
+        return int(math.ceil(probe.MeasureString(text or " ", font, SizeF(w, 10000), fmt).Height))
+
+    muted = pal["secondary"]
+    status = _mix(pal["secondary"], pal["surface"], 0.15)
+    rows = [row for row in (spec.get("rows") or []) if row.get("name")]
+    blocks = []
+    y = pad
+    icons = []
+    for index, row in enumerate(rows):
+        if index:
+            y += s(t["hover_row_gap"])
+        name_h = measure(row["name"], fonts["name"], text_w)
+        row_top = y
+        blocks.append(("name", row["name"], text_x, y, text_w, name_h, pal["text"]))
+        y += name_h
+        for line in row.get("lines") or []:
+            text = (line.get("text") or "").strip()
+            if not text:
+                continue
+            tone = line.get("tone") or "body"
+            colour = status if tone == "status" else muted if tone in {"note", "secondary"} else pal["text"]
+            font_key = "note" if tone in {"note", "secondary", "status"} else "body"
+            h = measure(text, fonts[font_key], text_w)
+            y += s(t["hover_line_gap"])
+            blocks.append((font_key, text, text_x, y, text_w, h, colour))
+            y += h
+        icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], row_top))
+        y = max(y, row_top + icon_px)
+    height = max(y + pad, pad * 2 + icon_px)
+    bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
+    g = Graphics.FromImage(bitmap)
+    disposables = list(fonts.values()) + [fmt, probe, probe_bitmap]
+    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+    g.InterpolationMode = InterpolationMode.HighQualityBicubic
+    g.SmoothingMode = SmoothingMode.AntiAlias
+    try:
+        g.Clear(_color(pal["surface"]))
+        for path, name, top in icons:
+            icon = provider_icon(path, icon_px, name, accent)
+            if icon is not None:
+                g.DrawImage(icon, pad, top, icon_px, icon_px)
+        for font_key, text, x, by, w, h, colour in blocks:
+            brush = SolidBrush(_color(colour)); disposables.append(brush)
+            g.DrawString(text, fonts[font_key], brush, RectangleF(x, by, w + 1, h + s(2)), fmt)
+        border = Pen(_color(pal["border"]), 1); disposables.append(border)
+        g.DrawRectangle(border, 0, 0, width - 1, height - 1)
+    finally:
+        for item in disposables:
+            try:
+                item.Dispose()
+            except Exception:
+                pass
+        g.Dispose()
+    return bitmap, {"width": width, "height": height, "buttons": [], "content_h": height}
+
+
+def hide_hover_card() -> None:
+    """Hide and keep the single hover window for reuse."""
+    delay = _HOVER.get("delay")
+    form = _HOVER.get("form")
+    on_tick = _HOVER.get("on_tick")
+    _HOVER["signature"] = None
+    try:
+        if delay is not None and on_tick is not None:
+            delay.Tick -= on_tick
+            delay.Stop()
+    except Exception:
+        pass
+    _HOVER["on_tick"] = None
+    try:
+        if form is not None and form.Visible:
+            form.Hide()
+    except Exception:
+        pass
+
+
+def close_hover_card() -> None:
+    """Full teardown used when the strip shuts down."""
+    hide_hover_card()
+    form, image, delay = _HOVER.get("form"), _HOVER.get("image"), _HOVER.get("delay")
+    _HOVER.update(form=None, image=None, delay=None, signature=None, on_tick=None)
+    try:
+        if delay is not None:
+            delay.Dispose()
+        if form is not None:
+            form.Close(); form.Dispose()
+        if image is not None:
+            image.Dispose()
+    except Exception:
+        pass
+
+
+def _present_hover(spec, anchor, scale, dark, accent):
+    import ctypes
+    from System.Drawing import Point, Size
+    from System.Windows.Forms import (AutoScaleMode, Form, FormBorderStyle, FormStartPosition,
+                                      ImageLayout, Screen)
+
+    if not spec or not spec.get("rows"):
+        hide_hover_card()
+        return None
+    scale_v = scale or system_scale()
+    dark_v = system_dark() if dark is None else dark
+    accent_v = accent or system_accent()
+    pal = palette(dark_v, accent_v)
+    signature = (spec.get("language"),
+                 tuple((row.get("name"),
+                        tuple((line.get("text"), line.get("tone")) for line in row.get("lines") or []),
+                        row.get("icon_path"))
+                       for row in spec.get("rows") or []),
+                 round(float(scale_v), 3), bool(dark_v))
+    form = _HOVER.get("form")
+    if form is None:
+        form = Form()
+        form.AutoScaleMode = getattr(AutoScaleMode, "None")
+        form.FormBorderStyle = getattr(FormBorderStyle, "None")
+        form.StartPosition = FormStartPosition.Manual
+        form.ShowInTaskbar = False
+        form.TopMost = True
+        form.BackgroundImageLayout = getattr(ImageLayout, "None")
+        _ = form.Handle
+        handle = int(form.Handle.ToInt64())
+        user32 = ctypes.windll.user32
+        get_style = user32.GetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.GetWindowLongW
+        set_style = user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.SetWindowLongW
+        get_style.restype = ctypes.c_ssize_t
+        set_style.restype = ctypes.c_ssize_t
+        set_style(handle, -20, get_style(handle, -20) | 0x08000000 | 0x00000080 | 0x00000008)
+        _HOVER["form"] = form
+    handle = int(form.Handle.ToInt64())
+    if signature != _HOVER.get("signature"):
+        bitmap, layout = render_hover(spec, scale_v, pal, accent=accent_v)
+        old = _HOVER.get("image")
+        form.BackgroundImage = bitmap
+        form.ClientSize = Size(layout["width"], layout["height"])
+        _HOVER["image"] = bitmap
+        _HOVER["signature"] = signature
+        if old is not None and old is not bitmap:
+            try:
+                old.Dispose()
+            except Exception:
+                pass
+        _dwm_style(handle, pal, dark_v)
+    width, height = form.ClientSize.Width, form.ClientSize.Height
+    gap = int(round(TOKENS["hover_offset"] * float(scale_v)))
+    if anchor:
+        area = Screen.FromPoint(Point(int(anchor[0]), int(anchor[1]))).WorkingArea
+        from .hover_detail import card_position
+        x, y = card_position(
+            (int(anchor[0]), int(anchor[1]), int(anchor[2]), int(anchor[3])),
+            (width, height),
+            (area.Left, area.Top, area.Right, area.Bottom), gap)
+    else:
+        area = Screen.PrimaryScreen.WorkingArea
+        x, y = area.Right - width - gap, area.Bottom - height - gap
+    user32 = ctypes.windll.user32
+    user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+    # HWND_TOPMOST, SWP_NOACTIVATE | SWP_SHOWWINDOW
+    user32.SetWindowPos(ctypes.c_void_p(handle), ctypes.c_void_p(-1), int(x), int(y), int(width), int(height),
+                        0x0010 | 0x0040)
+    return form
+
+
+def show_hover_card(spec: dict, anchor=None, *, scale: float | None = None,
+                    dark: bool | None = None, accent=None, delay_ms: int = 0):
+    """Schedule or show the hover card.  UI thread only; never activates."""
+    from System.Windows.Forms import Timer
+
+    delay = _HOVER.get("delay")
+    on_tick = _HOVER.get("on_tick")
+    if delay is not None and on_tick is not None:
+        try:
+            delay.Tick -= on_tick
+            delay.Stop()
+        except Exception:
+            pass
+        _HOVER["on_tick"] = None
+    if not delay_ms:
+        return _present_hover(spec, anchor, scale, dark, accent)
+    if delay is None:
+        delay = Timer()
+        _HOVER["delay"] = delay
+    delay.Interval = max(1, int(delay_ms))
+    held = {"spec": spec, "anchor": anchor, "scale": scale, "dark": dark, "accent": accent}
+
+    def on_tick_handler(*_):
+        delay.Stop()
+        _HOVER["on_tick"] = None
+        _present_hover(held["spec"], held["anchor"], held["scale"], held["dark"], held["accent"])
+
+    _HOVER["on_tick"] = on_tick_handler
+    delay.Tick += on_tick_handler
+    delay.Start()
+    return None

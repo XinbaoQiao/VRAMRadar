@@ -1865,6 +1865,22 @@ class CodexUsageSurface:
             if hovered != self._hovered:
                 self._hovered = hovered
                 form.Invalidate()
+            # Rich hover card: short delay, then one reused no-activate window.
+            # Never triggers extra provider polling; content comes from the last tick.
+            try:
+                from . import ui_dialogs
+                from .hover_detail import HOVER_DELAY_MS
+                if hovered and getattr(self, "_hover_spec", None):
+                    anchor = (form.Left, form.Top, form.Right, form.Bottom)
+                    already = (ui_dialogs._HOVER.get("form") is not None
+                               and getattr(ui_dialogs._HOVER["form"], "Visible", False))
+                    ui_dialogs.show_hover_card(
+                        self._hover_spec, anchor, scale=self._scale,
+                        delay_ms=0 if already else HOVER_DELAY_MS)
+                else:
+                    ui_dialogs.hide_hover_card()
+            except Exception:
+                pass
         for control in [form, *text_controls]:
             control.MouseEnter += update_hover
             control.MouseLeave += update_hover
@@ -2743,10 +2759,34 @@ class CodexUsageSurface:
                 "AI usage" if english else "AI 用量")
             form.AccessibleDescription = tip + "\n" + hint
             tip_controls = [form, catcher, *text_controls, *(c for pair in self._extra_columns for c in pair)]
-            if (tip, len(tip_controls)) != getattr(self, "_tip_key", None):
-                self._tip_key = (tip, len(tip_controls))
+            # Native ToolTip stays empty: the hover detail card replaces it so
+            # the two never stack. Accessibility still gets the concise text.
+            if ("", len(tip_controls)) != getattr(self, "_tip_key", None):
+                self._tip_key = ("", len(tip_controls))
                 for control in tip_controls:
-                    tooltip.SetToolTip(control, tip)
+                    tooltip.SetToolTip(control, "")
+            try:
+                from .hover_detail import build_hover_rows, hover_card_spec
+                from .providers import PROVIDERS
+                names = {spec.id: spec.label(english) for spec in PROVIDERS}
+                paths = {}
+                for spec in others:
+                    pstate = provider_states.get(spec.id)
+                    paths[spec.id] = pstate.get("install_path") if isinstance(pstate, dict) else None
+                hover_rows = build_hover_rows(
+                    state if "codex" in selected else None, provider_states, selected,
+                    language=language, names=names, icon_paths=paths)
+                self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
+                if self._hovered and self._hover_spec is not None:
+                    from . import ui_dialogs
+                    ui_dialogs.show_hover_card(
+                        self._hover_spec, (form.Left, form.Top, form.Right, form.Bottom),
+                        scale=self._scale, delay_ms=0)
+                elif not self._hovered:
+                    from . import ui_dialogs
+                    ui_dialogs.hide_hover_card()
+            except Exception:
+                self._hover_spec = None
             for i, (zh, en, _) in enumerate(actions):
                 action_items[i].Text = en if language == "en" else zh
             position()
@@ -2822,6 +2862,27 @@ class CodexUsageSurface:
         except Exception:
             logging.getLogger("vram_radar").warning("Codex menu-bar display could not start")
 
+    def _mac_hover_tip(self, rows, language, state) -> str:
+        """Natural macOS equivalent of the Windows hover card: richer tooltip text."""
+        try:
+            from .hover_detail import build_hover_rows, hover_tooltip_text
+            from .providers import PROVIDERS
+            english = language == "en"
+            overview = {}
+            try:
+                overview = self.providers() if callable(self.providers) else {}
+            except Exception:
+                overview = {}
+            selected = [x for x in (overview.get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
+            provider_states = overview.get("providers") if isinstance(overview.get("providers"), dict) else {}
+            names = {spec.id: spec.label(english) for spec in PROVIDERS}
+            hover_rows = build_hover_rows(state if "codex" in selected else None, provider_states,
+                                          selected, language=language, names=names)
+            text = hover_tooltip_text(hover_rows)
+            return text or "\n".join(["Codex", *(row["detail"] for row in rows)])
+        except Exception:
+            return "\n".join(["Codex", *(row.get("detail", "") for row in rows)])
+
     def _mac_tick(self) -> None:
         # Called from an NSTimer: an exception escaping into AppKit is
         # reported as an Objective-C exception (and can end the app).
@@ -2853,7 +2914,7 @@ class CodexUsageSurface:
             return
         title = "C  " + " · ".join(f"{row['label']} {row['value']} ({row['countdown']})" for row in rows[:2])
         self.status_item.button().setTitle_(title)
-        self.status_item.button().setToolTip_("\n".join(["Codex", *(row["detail"] for row in rows)]))
+        self.status_item.button().setToolTip_(self._mac_hover_tip(rows, language, state))
         menu = NSMenu.alloc().init()
         menu.setAutoenablesItems_(False)
         for row in rows:
@@ -2896,8 +2957,9 @@ class CodexUsageSurface:
                     self._catcher.Close()
                     self._catcher.Dispose()
                 try:
-                    from .ui_dialogs import close_toast
+                    from .ui_dialogs import close_toast, close_hover_card
                     close_toast()
+                    close_hover_card()
                 except Exception:
                     pass
                 for resource in (getattr(self, "_tooltip", None), getattr(self, "_menu", None), getattr(self, "_window_menu", None)):

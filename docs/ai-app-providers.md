@@ -58,7 +58,13 @@ Each provider is one module in `src/vram_radar/providers/` exposing
 
 ## Strip options (round 3)
 
-* **Tooltip**: one line per selected app — name, key quota/balance, reset if any.
+* **Hover detail card** (Windows): after ~400 ms over the strip, a compact
+  no-activate card appears above it (system light/dark, Segoe/YaHei UI family).
+  Per selected app: icon + full name, verified quota/balance and reset
+  (`1d 8h` plus absolute local time when known), inactive status in grey, and
+  “Updated … ago” when a fetch time exists. Leaves with the mouse; one reused
+  window, no extra polling. macOS keeps a richer menu-bar tooltip with the
+  same facts (no custom panel).
 * **At most 4 apps** (`providers.MAX_SELECTED`): the Models menu disables further
   ticks with a hint; the strip lays them out in two-row columns and shrinks
   the type when needed to stay inside the empty area left of Start (the
