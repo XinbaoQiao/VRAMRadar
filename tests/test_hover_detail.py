@@ -250,6 +250,68 @@ class IconThemeContrastTests(unittest.TestCase):
         self.assertTrue(ui.icon_contrast_ok((20, 20, 20), light_pal["surface"]))
 
 
+
+
+class HoverLifecycleTests(unittest.TestCase):
+    def test_empty_rows_spec_is_empty(self):
+        spec = hover_card_spec([], "en")
+        self.assertEqual(spec["rows"], [])
+        self.assertEqual(build_hover_rows(None, {}, [], language="en"), [])
+
+    def test_card_position_clamps_multi_monitor_and_tall_card(self):
+        # Tall card near top flips below; wide card clamps into work area.
+        x, y = card_position((10, 40, 100, 80), (400, 300), (0, 0, 500, 400), 8)
+        self.assertGreaterEqual(x, 8)
+        self.assertLessEqual(x + 400, 500 - 8)
+        self.assertEqual(y, 80 + 8)  # flipped below
+        x, y = card_position((-900, 800, -700, 840), (280, 100), (-1920, 0, 0, 1040), 8)
+        self.assertGreaterEqual(x, -1920 + 8)
+        self.assertLessEqual(x + 280, -8)
+
+
+@unittest.skipUnless(sys.platform == "win32", "WinForms GDI cycle")
+class HoverGdiCycleTests(unittest.TestCase):
+    def test_thousand_show_hide_cycles_do_not_grow_gdi(self):
+        import ctypes
+        import clr
+        clr.AddReference("System.Drawing")
+        clr.AddReference("System.Windows.Forms")
+        from vram_radar import ui_dialogs as ui
+        from vram_radar.hover_detail import build_hover_rows, hover_card_spec
+
+        GetGuiResources = ctypes.windll.user32.GetGuiResources
+        GetGuiResources.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        GetGuiResources.restype = ctypes.c_uint
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetCurrentProcess()
+
+        rows = build_hover_rows(
+            {"enabled": True, "state": "ready", "windows": [
+                {"name": "5 hour", "remaining_percent": 50, "window_minutes": 300, "resets_at": NOW + 7200}]},
+            {"claude": {"installed": True, "running": False}},
+            ["codex", "claude"], language="en", now=NOW,
+            names={"claude": "Claude"}, icon_names={"codex": "Codex", "claude": "Claude"})
+        spec = hover_card_spec(rows, "en")
+        anchor = (100, 800, 300, 840)
+
+        def counts():
+            return GetGuiResources(handle, 0), GetGuiResources(handle, 1)
+
+        # Warm up (create form once).
+        ui.show_hover_card(spec, anchor, scale=1.0, dark=True, delay_ms=0)
+        ui.hide_hover_card()
+        before = counts()
+        for i in range(1000):
+            ui.show_hover_card(spec, anchor, scale=1.0, dark=(i % 2 == 0), delay_ms=0)
+            ui.hide_hover_card()
+        after = counts()
+        ui.close_hover_card()
+        # Allow a small amount of noise; 1000 cycles must not leak hundreds of objects.
+        self.assertLessEqual(after[0] - before[0], 30, (before, after))
+        self.assertLessEqual(after[1] - before[1], 30, (before, after))
+        self.assertFalse(ui._HOVER.get("shown"))
+        self.assertIsNone(ui._HOVER.get("form"))
+
 @unittest.skipUnless(sys.platform == "win32", "WinForms offscreen render")
 class HoverRenderTests(unittest.TestCase):
     def test_offscreen_zh_en_light_dark(self):

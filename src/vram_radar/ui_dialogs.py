@@ -1002,18 +1002,10 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
 def hide_hover_card() -> None:
     """Hide and keep the single hover window for reuse."""
     import ctypes
-    delay = _HOVER.get("delay")
     form = _HOVER.get("form")
-    on_tick = _HOVER.get("on_tick")
     _HOVER["signature"] = None
     _HOVER["shown"] = False
-    try:
-        if delay is not None and on_tick is not None:
-            delay.Tick -= on_tick
-            delay.Stop()
-    except Exception:
-        pass
-    _HOVER["on_tick"] = None
+    _cancel_hover_delay()
     try:
         if form is not None:
             handle = int(form.Handle.ToInt64())
@@ -1118,31 +1110,38 @@ def _present_hover(spec, anchor, scale, dark, accent):
     return form
 
 
+def _cancel_hover_delay() -> None:
+    """Stop and drop the pending hover-delay timer (avoids Tick handler build-up)."""
+    delay = _HOVER.get("delay")
+    on_tick = _HOVER.get("on_tick")
+    _HOVER["on_tick"] = None
+    _HOVER["delay"] = None
+    if delay is None:
+        return
+    try:
+        if on_tick is not None:
+            delay.Tick -= on_tick
+        delay.Stop()
+        delay.Dispose()
+    except Exception:
+        pass
+
+
 def show_hover_card(spec: dict, anchor=None, *, scale: float | None = None,
                     dark: bool | None = None, accent=None, delay_ms: int = 0):
     """Schedule or show the hover card.  UI thread only; never activates."""
     from System.Windows.Forms import Timer
 
-    delay = _HOVER.get("delay")
-    on_tick = _HOVER.get("on_tick")
-    if delay is not None and on_tick is not None:
-        try:
-            delay.Tick -= on_tick
-            delay.Stop()
-        except Exception:
-            pass
-        _HOVER["on_tick"] = None
+    _cancel_hover_delay()
     if not delay_ms:
         return _present_hover(spec, anchor, scale, dark, accent)
-    if delay is None:
-        delay = Timer()
-        _HOVER["delay"] = delay
-    delay.Interval = max(1, int(delay_ms))
     held = {"spec": spec, "anchor": anchor, "scale": scale, "dark": dark, "accent": accent}
+    delay = Timer()
+    _HOVER["delay"] = delay
+    delay.Interval = max(1, int(delay_ms))
 
     def on_tick_handler(*_):
-        delay.Stop()
-        _HOVER["on_tick"] = None
+        _cancel_hover_delay()
         _present_hover(held["spec"], held["anchor"], held["scale"], held["dark"], held["accent"])
 
     _HOVER["on_tick"] = on_tick_handler

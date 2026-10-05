@@ -2787,16 +2787,21 @@ class CodexUsageSurface:
                     state if "codex" in selected else None, provider_states, selected,
                     language=language, names=names, icon_paths=paths, icon_names=icon_names)
                 self._hover_spec = hover_card_spec(hover_rows, language) if hover_rows else None
-                if self._hovered and self._hover_spec is not None:
-                    from . import ui_dialogs
+                from . import ui_dialogs
+                if self._hovered and self._hover_spec is not None and form.Visible:
                     ui_dialogs.show_hover_card(
                         self._hover_spec, (form.Left, form.Top, form.Right, form.Bottom),
                         scale=self._scale, delay_ms=0)
-                elif not self._hovered:
-                    from . import ui_dialogs
+                else:
+                    # Leave, empty selection, or strip not visible: never leave a stuck card.
                     ui_dialogs.hide_hover_card()
             except Exception:
                 self._hover_spec = None
+                try:
+                    from . import ui_dialogs
+                    ui_dialogs.hide_hover_card()
+                except Exception:
+                    pass
             for i, (zh, en, _) in enumerate(actions):
                 action_items[i].Text = en if language == "en" else zh
             position()
@@ -2805,6 +2810,12 @@ class CodexUsageSurface:
             self._obscured_ticks = self._obscured_ticks + 1 if obscured else 0
             if obscured and (self._obscured_ticks >= 2 or not form.Visible):
                 cancel_click()
+                self._hovered = False
+                try:
+                    from . import ui_dialogs
+                    ui_dialogs.hide_hover_card()
+                except Exception:
+                    pass
                 if form.Visible:
                     form.Hide()
                 return
