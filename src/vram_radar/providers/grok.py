@@ -35,6 +35,12 @@ from .base import (Environment, base_state, detect_install, newest_mtime, pair, 
 ID, NAME, SHORT = "grok", "Grok", "Grok"
 LOG = logging.getLogger("vram_radar")   # used by _session_usage (was undefined: NameError)
 PROCESSES = ["grok bot.exe", "grok.exe"]
+DETECT = dict(
+    uninstall=[r"^Grok\b"], processes=PROCESSES, executables=["Grok Bot.exe", "Grok.exe"],
+    packages=[r"^(xAI|X\.AI|XAI)\.", r"\bGrok"],
+    folders=["{localappdata}/Programs/Grok Bot", "{localappdata}/Programs/grok-bot",
+             "{localappdata}/Programs/Grok", "{programfiles}/Grok Bot", "{programfiles}/Grok"],
+    sibling_names=["Grok Bot", "Grok"], mac_apps=["Grok.app", "Grok Bot.app"], bundle_ids=["ai.x.grok"])
 SCREEN_MAX_AGE = 7 * 86400  # weekly window: older readings are meaningless
 
 
@@ -152,12 +158,7 @@ def _reset_labels(reset_at) -> tuple[str, str]:
 
 
 def probe(env: Environment) -> dict:
-    detection = detect_install(
-        env, uninstall=[r"^Grok\b"], processes=PROCESSES, executables=["Grok Bot.exe", "Grok.exe"],
-        packages=[r"^(xAI|X\.AI|XAI)\.", r"\bGrok"],
-        folders=["{localappdata}/Programs/Grok Bot", "{localappdata}/Programs/grok-bot",
-                 "{localappdata}/Programs/Grok", "{programfiles}/Grok Bot", "{programfiles}/Grok"],
-        sibling_names=["Grok Bot", "Grok"])
+    detection = detect_install(env, **DETECT)
     state = base_state(ID, NAME, SHORT, detection)
     data_dirs = [d for d in env.expand("{appdata}/Grok Bot") + env.expand("{appdata}/Grok")]
     status = None

@@ -14,7 +14,7 @@ import time
 from typing import Callable
 
 from . import deepseek, generic, grok, kimi, openai_cli as codex
-from .base import Environment, ProviderSpec, pair
+from .base import Environment, ProviderSpec, invalidate_discovery, pair
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec(codex.ID, codex.NAME, codex.SHORT, codex.probe, 0),
@@ -29,6 +29,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ProviderSpec("yuanbao", "腾讯元宝", "腾讯元宝", generic.yuanbao, 70),
 )
 PROVIDER_IDS = tuple(spec.id for spec in PROVIDERS)
+# detect_install keyword arguments per provider (tests and the detection audit).
+DETECTION_SPECS = {"codex": codex.DETECT, "deepseek": deepseek.DETECT, "grok": grok.DETECT,
+                   "kimi": kimi.DETECT, "claude": generic.claude.detect, "glm": generic.glm.detect,
+                   "qwen": generic.qwen.detect, "yuanbao": generic.yuanbao.detect}
 DEFAULT_PROVIDERS = ("codex",)
 PROBE_SECONDS = 60
 FORCE_FLOOR_SECONDS = 5
@@ -89,7 +93,7 @@ def probe_all(env: Environment | None = None, *, codex_executable: str = "",
               specs: tuple[ProviderSpec, ...] = PROVIDERS, network: tuple[str, ...] = ()) -> dict[str, dict]:
     """``network`` lists provider ids allowed to make their read-only status
     query this round (only providers the user chose to display)."""
-    env = env or Environment()
+    env = env or Environment(cached=True)
     deepseek.NETWORK["enabled"] = "deepseek" in network
     grok.SESSION["enabled"] = "grok" in network and session_consent("grok")
     kimi.SESSION["enabled"] = "kimi" in network and session_consent("kimi")
@@ -169,9 +173,11 @@ class ProviderMonitor:
         set_session_consent(values)
 
     def refresh(self) -> None:
+        """User-requested rescan: also drops cached install facts."""
         with self.lock:
             now = time.monotonic()
             if now - self.last_force >= FORCE_FLOOR_SECONDS:
+                invalidate_discovery()
                 self.last_force = now
                 self.next_read = 0
                 self.wake.set()

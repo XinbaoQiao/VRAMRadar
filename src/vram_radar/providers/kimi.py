@@ -26,6 +26,14 @@ from .base import (Environment, base_state, detect_install, newest_mtime, pair, 
 
 ID, NAME, SHORT = "kimi", "Kimi", "Kimi"
 
+DETECT = dict(
+    uninstall=[r"^Kimi\b", r"月之暗面"], processes=["kimi.exe"], executables=["Kimi.exe"],
+    # KimiShareTarget is only a share-sheet helper, not the desktop app.
+    packages=[r"Moonshot", r"\bKimi(?!ShareTarget)"],
+    folders=["{localappdata}/Programs/Kimi", "{localappdata}/Programs/kimi-desktop",
+             "{programfiles}/Kimi"], sibling_names=["Kimi"],
+    mac_apps=["Kimi.app"], bundle_ids=["com.moonshot.kimichat", "com.moonshot.kimi"])
+
 # Session-based quota reading (opt-in, see providers.session_consent): set by
 # probe_all each round to ('kimi' selected) and consent granted.  When off,
 # Kimi behaves exactly as before (log snapshot only).
@@ -257,11 +265,7 @@ def parse_log(lines: list[str]) -> dict:
 
 def probe(env: Environment, *, now: float | None = None) -> dict:
     now = time.time() if now is None else now
-    detection = detect_install(
-        env, uninstall=[r"^Kimi\b", r"月之暗面"], processes=["kimi.exe"], executables=["Kimi.exe"],
-        packages=[r"Moonshot", r"\bKimi"],
-        folders=["{localappdata}/Programs/Kimi", "{localappdata}/Programs/kimi-desktop",
-                 "{programfiles}/Kimi"], sibling_names=["Kimi"])
+    detection = detect_install(env, **DETECT)
     state = base_state(ID, NAME, SHORT, detection)
     data = next((d for d in env.expand("{appdata}/kimi-desktop") + env.expand("{appdata}/Kimi")
                  if (d / "logs").exists() or (d / "bridge-store").exists()), None)

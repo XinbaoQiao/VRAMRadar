@@ -22,6 +22,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
@@ -177,10 +178,43 @@ class Process:
     path: str = ""       # full image path when it could be queried
 
 
-class Environment:
-    """Snapshot of the machine facts probes need.  Tests pass a fake."""
+DISCOVERY_TTL_SECONDS = 10 * 60   # registry / shortcuts / packages / drive roots
+_DISCOVERY_LOCK = threading.Lock()
+_DISCOVERY: dict = {"at": 0.0, "data": {}}
 
-    def __init__(self) -> None:
+
+def invalidate_discovery() -> None:
+    """Drop cached install facts (the menu's Rescan, and every 10 minutes)."""
+    with _DISCOVERY_LOCK:
+        _DISCOVERY["at"] = 0.0
+        _DISCOVERY["data"] = {}
+
+
+def _cached(name: str, loader, *, clock=time.monotonic):
+    """Process-wide cache for the slow-changing discovery sources."""
+    with _DISCOVERY_LOCK:
+        now = clock()
+        if not _DISCOVERY["at"] or now - _DISCOVERY["at"] >= DISCOVERY_TTL_SECONDS:
+            _DISCOVERY["at"] = now
+            _DISCOVERY["data"] = {}
+        data = _DISCOVERY["data"]
+        if name in data:
+            return data[name]
+    value = loader()
+    with _DISCOVERY_LOCK:
+        _DISCOVERY["data"].setdefault(name, value)
+        return _DISCOVERY["data"][name]
+
+
+class Environment:
+    """Snapshot of the machine facts probes need.  Tests pass a fake.
+
+    ``cached=True`` (the background monitor) shares the slow sources --
+    uninstall registry, MSIX packages, Start Menu shortcuts, App Paths and
+    drive roots -- for ``DISCOVERY_TTL_SECONDS``; processes stay live.
+    """
+
+    def __init__(self, cached: bool = False) -> None:
         self.home = Path.home()
         self.appdata = Path(os.environ.get("APPDATA") or self.home / "AppData/Roaming")
         self.localappdata = Path(os.environ.get("LOCALAPPDATA") or self.home / "AppData/Local")
@@ -190,7 +224,17 @@ class Environment:
         self._processes: list[Process] | None = None
         self._uninstall: list[dict] | None = None
         self._packages: list[tuple[str, str]] | None = None
+        self._shortcuts: list[tuple[str, str]] | None = None
+        self._app_paths: dict[str, str] | None = None
+        self._drive_roots: list[Path] | None = None
+        self._mdfind: dict[str, list[str]] = {}
         self.extra_roots: list[Path] = []
+        self.cached = cached
+        self.platform = sys.platform
+        self.mdfind_runner = None   # tests inject a fake; None = real mdfind (macOS only)
+
+    def _source(self, name: str, loader):
+        return _cached(name, loader) if self.cached else loader()
 
     def processes(self) -> list[Process]:
         if self._processes is None:
@@ -199,13 +243,44 @@ class Environment:
 
     def uninstall_entries(self) -> list[dict]:
         if self._uninstall is None:
-            self._uninstall = list_uninstall_entries()
+            self._uninstall = self._source("uninstall", list_uninstall_entries)
         return self._uninstall
 
     def packages(self) -> list[tuple[str, str]]:
         if self._packages is None:
-            self._packages = list_msix_packages()
+            self._packages = self._source("packages", list_msix_packages)
         return self._packages
+
+    def shortcuts(self) -> list[tuple[str, str]]:
+        """(shortcut path, resolved target) from Start Menu and Desktop."""
+        if self._shortcuts is None:
+            self._shortcuts = self._source("shortcuts", lambda: list_shortcuts(self))
+        return self._shortcuts
+
+    def app_paths(self) -> dict[str, str]:
+        """Lower-case exe name -> path from the App Paths registry keys."""
+        if self._app_paths is None:
+            self._app_paths = self._source("app_paths", list_app_paths)
+        return self._app_paths
+
+    def drive_roots(self) -> list[Path]:
+        """Common custom install roots on every fixed drive (drive root, its Download folder ...)."""
+        if self._drive_roots is None:
+            self._drive_roots = self._source("drive_roots", list_drive_roots)
+        return self._drive_roots
+
+    def mac_app_roots(self) -> list[Path]:
+        return [Path("/Applications"), self.home / "Applications"]
+
+    def mdfind(self, query: str) -> list[str]:
+        """Spotlight lookup (macOS only, bounded, cached per environment)."""
+        if query not in self._mdfind:
+            runner = self.mdfind_runner or run_mdfind
+            try:
+                self._mdfind[query] = list(runner(query))[:20]
+            except Exception:
+                self._mdfind[query] = []
+        return self._mdfind[query]
 
     def expand(self, template: str) -> list[Path]:
         values = {"home": [self.home], "appdata": [self.appdata], "localappdata": [self.localappdata],
@@ -349,6 +424,223 @@ def list_msix_packages() -> list[tuple[str, str]]:
         return []
 
 
+START_MENU_LIMIT = 3000
+
+
+def parse_shortcut(data: bytes) -> str:
+    """Target path of a Windows .lnk (MS-SHLLINK); '' when it has none.
+
+    Reads LinkInfo's local base path (Unicode when present) plus the common
+    path suffix, else the environment-variable target block.  Bounded, pure.
+    """
+    import struct
+    try:
+        if len(data) < 0x4C or struct.unpack_from("<I", data, 0)[0] != 0x4C:
+            return ""
+        flags = struct.unpack_from("<I", data, 20)[0]
+        offset = 0x4C
+        if flags & 0x01:  # HasLinkTargetIDList
+            offset += 2 + struct.unpack_from("<H", data, offset)[0]
+        target = ""
+        if flags & 0x02:  # HasLinkInfo
+            info = offset
+            size, header = struct.unpack_from("<II", data, info)
+            info_flags = struct.unpack_from("<I", data, info + 8)[0]
+            local_off = struct.unpack_from("<I", data, info + 16)[0]
+            suffix_off = struct.unpack_from("<I", data, info + 24)[0]
+
+            def ansi(at: int) -> str:
+                end = data.index(b"\0", at)
+                raw = data[at:end]
+                try:
+                    return raw.decode("mbcs") if sys.platform == "win32" else raw.decode("latin-1")
+                except Exception:
+                    return raw.decode("latin-1")
+
+            def wide(at: int) -> str:
+                end = at
+                while end + 1 < len(data) and data[end:end + 2] != b"\0\0":
+                    end += 2
+                return data[at:end].decode("utf-16-le", "replace")
+
+            if info_flags & 0x01:
+                base = ""
+                if header >= 0x24:
+                    unicode_off = struct.unpack_from("<I", data, info + 28)[0]
+                    if unicode_off:
+                        base = wide(info + unicode_off)
+                if not base and local_off:
+                    base = ansi(info + local_off)
+                suffix = ""
+                if header >= 0x24:
+                    usuffix = struct.unpack_from("<I", data, info + 32)[0]
+                    if usuffix:
+                        suffix = wide(info + usuffix)
+                if not suffix and suffix_off:
+                    suffix = ansi(info + suffix_off)
+                target = base + suffix
+            offset = info + size
+        if not target:
+            # EnvironmentVariableDataBlock (0xA0000001): "%LOCALAPPDATA%\\...".
+            at = data.find(struct.pack("<I", 0xA0000001))
+            if at >= 4:
+                unicode = data[at + 4 + 260: at + 4 + 260 + 520]
+                value = unicode.decode("utf-16-le", "replace").split("\0", 1)[0]
+                target = os.path.expandvars(value) if value else ""
+        return target.strip()
+    except Exception:
+        return ""
+
+
+def list_shortcuts(env: "Environment | None" = None) -> list[tuple[str, str]]:
+    if sys.platform != "win32":
+        return []
+    home = env.home if env is not None else Path.home()
+    appdata = env.appdata if env is not None else Path(os.environ.get("APPDATA") or home / "AppData/Roaming")
+    program_data = Path(os.environ.get("ProgramData") or "C:/ProgramData")
+    public = Path(os.environ.get("PUBLIC") or Path(os.environ.get("SYSTEMDRIVE", "C:") + os.sep, "Users", "Public"))
+    roots = [appdata / "Microsoft/Windows/Start Menu/Programs",
+             program_data / "Microsoft/Windows/Start Menu/Programs",
+             home / "Desktop", public / "Desktop"]
+    result, seen = [], 0
+    for root in roots:
+        try:
+            walker = os.walk(root)
+        except OSError:
+            continue
+        for folder, dirs, files in walker:
+            if folder.count(os.sep) - str(root).count(os.sep) >= 3:
+                dirs[:] = []
+            for name in files:
+                if not name.lower().endswith(".lnk"):
+                    continue
+                seen += 1
+                if seen > START_MENU_LIMIT:
+                    return result
+                path = os.path.join(folder, name)
+                try:
+                    with open(path, "rb") as handle:
+                        target = parse_shortcut(handle.read(65536))
+                except OSError:
+                    continue
+                if target:
+                    result.append((path, target))
+    return result
+
+
+def list_app_paths() -> dict[str, str]:
+    if sys.platform != "win32":
+        return {}
+    try:
+        import winreg
+    except ImportError:
+        return {}
+    path = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
+    result: dict[str, str] = {}
+    for hive, view in ((winreg.HKEY_CURRENT_USER, 0),
+                       (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_64KEY),
+                       (winreg.HKEY_LOCAL_MACHINE, winreg.KEY_WOW64_32KEY)):
+        try:
+            root = winreg.OpenKey(hive, path, 0, winreg.KEY_READ | view)
+        except OSError:
+            continue
+        with root:
+            for index in range(4096):
+                try:
+                    name = winreg.EnumKey(root, index)
+                except OSError:
+                    break
+                try:
+                    with winreg.OpenKey(root, name) as key:
+                        value = winreg.QueryValueEx(key, "")[0]
+                except OSError:
+                    continue
+                if isinstance(value, str) and value.strip():
+                    result.setdefault(name.lower(), _icon_path(os.path.expandvars(value))[:1024])
+    return result
+
+
+DRIVE_SUBFOLDERS = ("", "Download", "Downloads", "Apps", "Applications", "Programs", "Program Files",
+                    "Program Files (x86)", "Software", "Tools", "AI")
+
+
+def list_drive_roots() -> list[Path]:
+    """Existing candidate roots on fixed drives (names only, no deep scan)."""
+    if sys.platform != "win32":
+        return []
+    roots: list[Path] = []
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        mask = kernel32.GetLogicalDrives()
+        for index in range(26):
+            if not mask & (1 << index):
+                continue
+            drive = f"{chr(65 + index)}:\\"
+            if kernel32.GetDriveTypeW(drive) != 3:   # DRIVE_FIXED only
+                continue
+            for sub in DRIVE_SUBFOLDERS:
+                folder = Path(drive) / sub if sub else Path(drive)
+                try:
+                    if folder.is_dir():
+                        roots.append(folder)
+                except OSError:
+                    continue
+    except Exception:
+        return roots
+    return roots
+
+
+def run_mdfind(query: str) -> list[str]:
+    if sys.platform != "darwin":
+        return []
+    import subprocess
+    try:
+        out = subprocess.run(["mdfind", query], capture_output=True, text=True, timeout=3)
+    except Exception:
+        return []
+    return [line.strip() for line in out.stdout.splitlines() if line.strip().endswith(".app")]
+
+
+def bundle_identifier(app: Path) -> str:
+    try:
+        import plistlib
+        with open(app / "Contents/Info.plist", "rb") as handle:
+            info = plistlib.load(handle)
+        value = info.get("CFBundleIdentifier")
+        return value if isinstance(value, str) else ""
+    except Exception:
+        return ""
+
+
+_MANIFEST_IDS: dict[str, str] = {}
+
+
+def msix_app_id(root: str) -> str:
+    """First launchable <Application Id> of a package (AppxManifest.xml)."""
+    if root in _MANIFEST_IDS:
+        return _MANIFEST_IDS[root]
+    value = ""
+    try:
+        raw = Path(root, "AppxManifest.xml").read_bytes()[:400_000].decode("utf-8", "replace")
+        for match in re.finditer(r"<Application\b[^>]*>", raw):
+            tag = match.group(0)
+            ident = re.search(r'\bId="([^"]+)"', tag)
+            if ident and ("Executable=" in tag or "StartPage=" in tag):
+                value = ident.group(1)
+                break
+    except Exception:
+        value = ""
+    _MANIFEST_IDS[root] = value
+    return value
+
+
+def msix_family(full_name: str) -> str:
+    """'Name_Version_Arch_Resource_Publisher' -> 'Name_Publisher'."""
+    parts = full_name.split("_")
+    return f"{parts[0]}_{parts[-1]}" if len(parts) >= 5 else ""
+
+
 def file_version(path: Path) -> str:
     if sys.platform != "win32":
         return ""
@@ -390,6 +682,12 @@ class Detection:
     candidates: int = 0
     running: bool | None = None
     pids: list[int] = field(default_factory=list)
+    # Click-to-open: how to start the app ("exe" | "aumid" | "bundle" | "app")
+    # and the folder whose processes count as its windows.
+    launch_kind: str = ""
+    launch_target: str = ""
+    launch_folder: str = ""
+    sources: list[str] = field(default_factory=list)   # every source that found it (audit)
 
 
 def _icon_path(value: str) -> str:
@@ -405,13 +703,49 @@ def _version_key(value: str) -> tuple:
     return tuple(int(part) for part in re.findall(r"\d+", value or "")[:4])
 
 
+def launch_facts(path: str, source: str, exe_names: Iterable[str] = (), package: str = "") -> tuple[str, str, str]:
+    """(kind, target, folder) used to open / focus the app found at ``path``."""
+    if not path:
+        return "", "", ""
+    if source == "msix":
+        app_id = msix_app_id(path)
+        family = msix_family(package)
+        if app_id and family:
+            return "aumid", f"{family}!{app_id}", path
+        return "", "", path
+    if source in {"mac_app", "mac_bundle"}:
+        bundle = bundle_identifier(Path(path))
+        return ("bundle", bundle, path) if bundle else ("app", path, path)
+    if source == "cli" or not path.lower().endswith(".exe"):
+        return "", "", ""
+    exe = Path(path)
+    folder = exe.parent
+    # Squirrel: <root>\app-1.2.3\App.exe with a stable stub <root>\App.exe.
+    if re.match(r"^app-\d", folder.name, re.IGNORECASE):
+        stub = folder.parent / exe.name
+        if exists(stub):
+            return "exe", str(stub), str(folder.parent)
+        return "exe", str(exe), str(folder.parent)
+    return "exe", str(exe), str(folder)
+
+
 def detect_install(env: Environment, *, uninstall: Iterable[str] = (), processes: Iterable[str] = (),
                    executables: Iterable[str] = (), folders: Iterable[str] = (),
-                   packages: Iterable[str] = (), sibling_names: Iterable[str] = ()) -> Detection:
-    """Merge every discovery source; prefer a running copy, then the newest one."""
+                   packages: Iterable[str] = (), sibling_names: Iterable[str] = (),
+                   mac_apps: Iterable[str] = (), bundle_ids: Iterable[str] = ()) -> Detection:
+    """Merge every discovery source; prefer a running copy, then the newest one.
+
+    Windows sources: running process, uninstall registry (HKCU/HKLM, 32/64),
+    Start Menu / Desktop shortcuts, App Paths, MSIX packages, known per-user
+    folders (incl. Squirrel app-* layouts), sibling folders of other found apps
+    and common roots on every fixed drive.  macOS: app bundles in
+    /Applications and ~/Applications plus Spotlight by bundle id / name.
+    """
     names = {name.lower() for name in processes}
     exe_names = list(executables)
+    exe_lower = {name.lower() for name in exe_names}
     candidates: list[tuple[int, tuple, float, str, str, str]] = []  # rank, version, mtime, path, version, source
+    package_of: dict[str, str] = {}
 
     def add(path: Path, version: str, source: str, rank: int) -> None:
         try:
@@ -469,21 +803,42 @@ def detect_install(env: Environment, *, uninstall: Iterable[str] = (), processes
                 # WindowsApps content is often not listable; the registered
                 # package itself is sufficient evidence of an installation.
                 candidates.append((2, _version_key(version), 0.0, root, version, "msix"))
+                package_of[os.path.normcase(root)] = full_name
+    if exe_lower:
+        for _link, target in env.shortcuts():
+            if Path(target).name.lower() in exe_lower:
+                add(Path(target), "", "start_menu", 1)
+        app_paths = env.app_paths()
+        for exe in exe_lower:
+            if app_paths.get(exe):
+                add(Path(app_paths[exe]), "", "app_paths", 1)
     for template in folders:
         for folder in env.expand(template):
             add_folder(folder, "", "known_path", 3)
     for root in env.extra_roots:
         for name in sibling_names:
             add_folder(root / name, "", "sibling_folder", 4)
-    if sys.platform == "darwin":
-        # macOS (detection only): an app bundle named after the Windows
-        # executable/folder ("Kimi.exe" -> Kimi.app) in /Applications or
-        # ~/Applications.  No process/registry/MSIX sources exist there.
-        bundles = dict.fromkeys([Path(e).stem + ".app" for e in exe_names] + [n + ".app" for n in sibling_names])
-        for root in (Path("/Applications"), env.home / "Applications"):
+    if sibling_names and exe_names:
+        for root in env.drive_roots():
+            for name in sibling_names:
+                add_folder(root / name, "", "drive_scan", 4)
+    if env.platform == "darwin":
+        # macOS: app bundles by name in /Applications and ~/Applications, then
+        # Spotlight by bundle identifier and by bundle file name.
+        bundles = list(dict.fromkeys([*mac_apps, *(Path(e).stem + ".app" for e in exe_names),
+                                      *(n + ".app" for n in sibling_names)]))
+        for root in env.mac_app_roots():
             for bundle in bundles:
                 if exists(root / bundle):
                     add(root / bundle, "", "mac_app", 3)
+        if not candidates:
+            for ident in bundle_ids:
+                for hit in env.mdfind(f"kMDItemCFBundleIdentifier == '{ident}'"):
+                    add(Path(hit), "", "mac_bundle", 3)
+        if not candidates:
+            for bundle in bundles:
+                for hit in env.mdfind(f"kMDItemFSName == '{bundle}'"):
+                    add(Path(hit), "", "mac_bundle", 4)
     if not candidates:
         return detection
     unique = {}
@@ -506,6 +861,9 @@ def detect_install(env: Environment, *, uninstall: Iterable[str] = (), processes
     detection.version = text(version, 40)
     detection.source = best[5]
     detection.candidates = len(ordered)
+    detection.sources = list(dict.fromkeys(item[5] for item in sorted(candidates, key=lambda c: c[0])))
+    detection.launch_kind, detection.launch_target, detection.launch_folder = launch_facts(
+        best[3], best[5], exe_names, package_of.get(os.path.normcase(best[3]), ""))
     return detection
 
 
@@ -553,6 +911,10 @@ def base_state(spec_id: str, name: str, short: str, detection: Detection) -> dic
         "installed": detection.installed, "install_path": detection.path,
         "version": detection.version, "install_source": detection.source,
         "install_candidates": detection.candidates,
+        "install_sources": list(detection.sources),
+        "launch": ({"kind": detection.launch_kind, "target": detection.launch_target,
+                    "folder": detection.launch_folder}
+                   if detection.installed and detection.launch_kind and detection.launch_target else None),
         "running": detection.running, "signed_in": None, "last_used": None,
         "windows": [], "facts": [], "quota_available": False, "quota_reason": "",
         "headline": pair("—", "—"), "subline": pair("", ""),

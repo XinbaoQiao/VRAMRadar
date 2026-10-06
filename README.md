@@ -125,7 +125,8 @@ Do not disable SmartScreen or Gatekeeper globally. See
 
 ### Taskbar strip
 
-- **Click**: open the GPU overview window.
+- **Click a model**: open that AI desktop app, or bring its window to the front if it is already running (only for apps detected on this computer; also works on the hover card rows). On macOS, the menu-bar menu lists **Open <app>** for each detected app.
+- **Click elsewhere on the strip**: open the GPU overview window.
 - **Double-click**: open quota details in Settings.
 - **Right-click** menu:
 

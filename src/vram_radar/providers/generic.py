@@ -11,10 +11,13 @@ from .base import ENGLISH_NAMES, Environment, base_state, detect_install, exists
 
 
 def make_probe(provider_id: str, name: str, short: str, *, uninstall, processes, executables,
-               packages=(), folders=(), sibling_names=(), data_dirs=(), sign_in_files=(), reason_zh="", reason_en=""):
+               packages=(), folders=(), sibling_names=(), data_dirs=(), sign_in_files=(), reason_zh="", reason_en="",
+               mac_apps=(), bundle_ids=()):
+    detect = dict(uninstall=uninstall, processes=processes, executables=executables, packages=packages,
+                  folders=folders, sibling_names=sibling_names, mac_apps=mac_apps, bundle_ids=bundle_ids)
+
     def probe(env: Environment) -> dict:
-        detection = detect_install(env, uninstall=uninstall, processes=processes, executables=executables,
-                                   packages=packages, folders=folders, sibling_names=sibling_names)
+        detection = detect_install(env, **detect)
         state = base_state(provider_id, name, short, detection)
         folders_found = [path for template in data_dirs for path in env.expand(template) if exists(path)]
         if folders_found:
@@ -40,6 +43,7 @@ def make_probe(provider_id: str, name: str, short: str, *, uninstall, processes,
             state["headline"] = pair("未安装", "Missing")
         state["subline"] = running_pair(state["running"]) if state["installed"] else pair("未检测到", "Not found")
         return state
+    probe.detect = detect
     return probe
 
 
@@ -51,6 +55,7 @@ claude = make_probe(
              "{programfiles}/Claude", "{programfiles}/Anthropic/Claude"],
     sibling_names=["Claude"], data_dirs=["{appdata}/Claude", "{home}/.claude"],
     sign_in_files=["{home}/.claude/.credentials.json"],
+    mac_apps=["Claude.app"], bundle_ids=["com.anthropic.claudefordesktop"],
     reason_zh="Claude 桌面版的用量限制只在线显示，本地不保存；仅显示安装/运行状态",
     reason_en="Claude desktop shows usage limits online only; showing install/run state")
 
@@ -63,18 +68,21 @@ glm = make_probe(
     folders=["{localappdata}/Programs/智谱清言", "{localappdata}/Programs/zhipuqingyan",
              "{localappdata}/Programs/ChatGLM", "{programfiles}/智谱清言", "{programfiles}/ChatGLM"],
     sibling_names=["智谱清言", "ChatGLM", "zhipuqingyan"],
-    data_dirs=["{appdata}/智谱清言", "{appdata}/zhipuqingyan", "{appdata}/chatglm", "{appdata}/ChatGLM"])
+    data_dirs=["{appdata}/智谱清言", "{appdata}/zhipuqingyan", "{appdata}/chatglm", "{appdata}/ChatGLM"],
+    mac_apps=["智谱清言.app", "ChatGLM.app"], bundle_ids=["com.zhipuai.chatglm"])
 
 qwen = make_probe(
     "qwen", "Qwen 通义", "通义千问",
     uninstall=[r"^Qwen\b", r"通义", r"千问"], processes=["qwen.exe", "tongyi.exe"],
     executables=["Qwen.exe", "qwen.exe", "Tongyi.exe"], packages=[r"Qwen", r"Tongyi"],
     folders=["{localappdata}/Programs/Qwen", "{localappdata}/Programs/qwen", "{programfiles}/Qwen"],
-    sibling_names=["Qwen"], data_dirs=["{appdata}/Qwen"])
+    sibling_names=["Qwen"], data_dirs=["{appdata}/Qwen"],
+    mac_apps=["Qwen.app", "通义.app", "千问.app"], bundle_ids=["com.alibaba.tongyi", "com.aliyun.tongyi"])
 
 yuanbao = make_probe(
     "yuanbao", "腾讯元宝", "腾讯元宝",
     uninstall=[r"元宝", r"Yuanbao"], processes=["yuanbao.exe"], executables=["yuanbao.exe", "Yuanbao.exe"],
     packages=[r"Yuanbao"], folders=["{localappdata}/Programs/Yuanbao", "{programfiles}/Yuanbao",
                                     "{programfiles}/Tencent/Yuanbao"],
-    sibling_names=["Yuanbao"], data_dirs=["{localappdata}/com.tencent.yuanbao"])
+    sibling_names=["Yuanbao"], data_dirs=["{localappdata}/com.tencent.yuanbao"],
+    mac_apps=["元宝.app", "Yuanbao.app", "腾讯元宝.app"], bundle_ids=["com.tencent.yuanbao"])

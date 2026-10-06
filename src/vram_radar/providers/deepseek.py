@@ -21,6 +21,13 @@ from .base import (Environment, base_state, detect_install, format_tokens, newes
                    read_json, running_pair, safe_stat)
 
 ID, NAME, SHORT = "deepseek", "DeepSeek", "DeepSeek"
+DETECT = dict(
+    uninstall=[r"^DeepSeek\b"], processes=["deepseek harness.exe", "deepseek.exe"],
+    executables=["DeepSeek Harness.exe", "DeepSeek.exe"], packages=[r"DeepSeek"],
+    folders=["{localappdata}/Programs/DeepSeek Harness", "{localappdata}/Programs/DeepSeek",
+             "{localappdata}/Programs/dsh-desktop", "{programfiles}/DeepSeek Harness", "{programfiles}/DeepSeek"],
+    sibling_names=["DeepSeek Harness", "DeepSeek"], mac_apps=["DeepSeek Harness.app", "DeepSeek.app"],
+    bundle_ids=["com.deepseek.chat", "com.deepseek.harness"])
 MAX_SESSIONS = 400
 STALE_BALANCE_SECONDS = 2 * 3600
 TOKEN_KEYS = ("uncachedInputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens")
@@ -148,12 +155,7 @@ def balance_labels(wallets, shown):
 
 
 def probe(env: Environment) -> dict:
-    detection = detect_install(
-        env, uninstall=[r"^DeepSeek\b"], processes=["deepseek harness.exe", "deepseek.exe"],
-        executables=["DeepSeek Harness.exe", "DeepSeek.exe"], packages=[r"DeepSeek"],
-        folders=["{localappdata}/Programs/DeepSeek Harness", "{localappdata}/Programs/DeepSeek",
-                 "{localappdata}/Programs/dsh-desktop", "{programfiles}/DeepSeek Harness", "{programfiles}/DeepSeek"],
-        sibling_names=["DeepSeek Harness", "DeepSeek"])
+    detection = detect_install(env, **DETECT)
     state = base_state(ID, NAME, SHORT, detection)
     home = Path(env.environ["DSH_HOME"]) if env.environ.get("DSH_HOME") else env.home / ".dsh"
     credentials = home / ".credentials.yaml"

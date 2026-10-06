@@ -18,7 +18,8 @@ SECRET = "sk" "-THIS-MUST-NEVER-LEAK-0123456789abcdef"
 
 
 class FakeEnv(Environment):
-    def __init__(self, root: Path, *, processes=(), uninstall=(), packages=()):
+    def __init__(self, root: Path, *, processes=(), uninstall=(), packages=(), shortcuts=(),
+                 app_paths=None, drive_roots=()):
         super().__init__()
         self.home = root / "home"
         self.appdata = root / "home/AppData/Roaming"
@@ -28,6 +29,11 @@ class FakeEnv(Environment):
         self._processes = list(processes)
         self._uninstall = list(uninstall)
         self._packages = list(packages)
+        # Hermetic: never read this machine's Start Menu, App Paths, drives or Spotlight.
+        self._shortcuts = list(shortcuts)
+        self._app_paths = dict(app_paths or {})
+        self._drive_roots = list(drive_roots)
+        self.mdfind_runner = lambda query: []
         for folder in (self.home, self.appdata, self.localappdata, *self.programfiles):
             folder.mkdir(parents=True, exist_ok=True)
 

@@ -9,12 +9,16 @@ from .base import Detection, Environment, base_state, detect_install, exists, pa
 ID, NAME, SHORT = "codex", "Codex", "Codex"
 
 
+DETECT = dict(
+    uninstall=[r"^Codex(?!\w)", r"^OpenAI Codex"], executables=["Codex.exe", "codex.exe"],
+    packages=[r"^OpenAI\.Codex_"], folders=["{localappdata}/Programs/Codex"],
+    mac_apps=["Codex.app"])
+
+
 def probe(env: Environment, *, executable: str = "") -> dict:
     # Prefer the desktop app (MSIX/registry) for install facts; the running
     # codex.exe processes may belong to other tools' private runtimes.
-    detection = detect_install(
-        env, uninstall=[r"^Codex(?!\w)", r"^OpenAI Codex"], executables=["Codex.exe", "codex.exe"],
-        packages=[r"^OpenAI\.Codex_"], folders=["{localappdata}/Programs/Codex"])
+    detection = detect_install(env, **DETECT)
     processes = env.processes()
     detection.running = any(p.name == "codex.exe" for p in processes) if processes else None
     try:
