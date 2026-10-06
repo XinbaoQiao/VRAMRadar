@@ -1,8 +1,10 @@
-"""Click-to-open: launch an AI desktop app, or bring its window to the front.
+"""Hover-card click-to-open: launch an AI desktop app, or bring its window forward.
 
-Targets come from the background detection (``state["launch"]``): never
-resolved on the UI thread.  Launching runs on a short worker thread; failures
-are logged quietly (type only) and never raised into the UI.
+Only rows of the hover detail card open apps; the taskbar strip itself always
+opens VRAM Radar.  Targets come from the background detection
+(``state["launch"]``): never resolved on the UI thread.  Launching runs on a
+short worker thread; failures are logged quietly (type only) and never raised
+into the UI.
 """
 from __future__ import annotations
 
@@ -18,6 +20,8 @@ from typing import Callable
 LOG = logging.getLogger("vram_radar")
 LAUNCH_DEBOUNCE_SECONDS = 1.5      # repeated clicks on one app within this window are ignored
 HOVER_LEAVE_GRACE_MS = 250         # strip -> hover card: time allowed to cross the gap
+FEEDBACK_FLASH_MS = 200            # confirmation flash after a row opened its app
+FEEDBACK_HIDE_MS = 1500            # card hides at the latest this long after a row click
 KINDS = ("exe", "aumid", "bundle", "app")
 
 
@@ -53,32 +57,77 @@ def launch_targets(provider_states, selected) -> dict[str, LaunchTarget]:
     return result
 
 
-def click_action(provider_id: str | None, targets: dict) -> str:
-    """Strip single-click: 'open_app' on a detected model, 'nothing' on an
-    undetected model, 'home' outside any model (previous behaviour)."""
-    if provider_id is None:
-        return "home"
-    return "open_app" if provider_id in targets else "nothing"
+class RowFeedback:
+    """Visual state of hover-card rows (pure; the card renders ``highlight()``).
+
+    hot: clickable row under the pointer.  pressed: left button went down on a
+    clickable row.  result: brief confirmation after the click ("flash" when the
+    app was opened or focused, "failed" for a neutral grey state).  Rows of
+    undetected apps never get a state and keep the arrow cursor.
+    """
+
+    def __init__(self) -> None:
+        self.hot: str | None = None
+        self.pressed: str | None = None
+        self.result: tuple[str, str] | None = None
+
+    def highlight(self) -> tuple[str, str] | None:
+        """(provider id, level) with level 'flash' | 'failed' | 'pressed' | 'hover'."""
+        if self.result is not None:
+            return self.result[0], self.result[1]
+        if self.pressed is not None:
+            return self.pressed, "pressed"
+        if self.hot is not None:
+            return self.hot, "hover"
+        return None
+
+    def _change(self, update) -> bool:
+        before = self.highlight()
+        update()
+        return self.highlight() != before
+
+    def move(self, provider_id: str | None, clickable: bool) -> bool:
+        def update():
+            self.hot = provider_id if provider_id and clickable else None
+            if self.pressed is not None and self.pressed != self.hot:
+                self.pressed = None          # dragged off the pressed row: no click
+        return self._change(update)
+
+    def leave(self) -> bool:
+        def update():
+            self.hot = self.pressed = None
+        return self._change(update)
+
+    def down(self, provider_id: str | None, clickable: bool) -> bool:
+        def update():
+            self.pressed = provider_id if provider_id and clickable and self.result is None else None
+            if self.pressed:
+                self.hot = self.pressed
+        return self._change(update)
+
+    def up(self, provider_id: str | None) -> str | None:
+        """Row to open: only when released on the row that was pressed."""
+        fire = self.pressed if self.pressed and self.pressed == provider_id else None
+        self.pressed = None
+        return fire
+
+    def finish(self, provider_id: str, outcome: str) -> str | None:
+        """Record the open result; returns the level shown ('flash' | 'failed' | None)."""
+        level = {"focused": "flash", "launched": "flash", "failed": "failed"}.get(outcome)
+        self.result = (provider_id, level) if level else None
+        return level
+
+    def reset(self) -> None:
+        self.hot = self.pressed = None
+        self.result = None
 
 
-def hit_model(cells, point) -> str | None:
-    """Provider id whose (left, top, right, bottom) rect contains ``point``."""
-    x, y = point
-    for provider_id, (left, top, right, bottom) in cells or ():
-        if left <= x < right and top <= y < bottom:
-            return provider_id
-    return None
-
-
-def open_app_menu_entries(selected, provider_states, language: str = "zh-CN", names=None) -> list[tuple[str, str]]:
-    """macOS menu-bar items: ("Open Kimi" | "打开 Kimi", provider id) per detected app."""
-    names = names or {}
-    english = language == "en"
-    entries = []
-    for pid in launch_targets(provider_states, selected):
-        name = names.get(pid) or pid
-        entries.append((f"Open {name}" if english else f"打开 {name}", pid))
-    return entries
+def row_cursor(provider_id: str | None, clickable) -> str:
+    """'hand' over a clickable (detected) row, else 'arrow'."""
+    try:
+        return "hand" if provider_id and callable(clickable) and clickable(provider_id) else "arrow"
+    except Exception:
+        return "arrow"
 
 
 # -- Windows window lookup / focus --------------------------------------------
@@ -193,8 +242,13 @@ class AppLauncher:
         self._last: dict[str, float] = {}
         self._lock = threading.Lock()
 
-    def open(self, target: LaunchTarget | None) -> str:
-        """'focused' | 'launched' | 'debounced' | 'failed' | 'none'."""
+    def open(self, target: LaunchTarget | None, on_done: Callable[[str], None] | None = None) -> str:
+        """'focused' | 'launched' | 'debounced' | 'failed' | 'none'.
+
+        ``on_done(outcome)`` reports the final result: 'focused' at once, or
+        'launched' / 'failed' after the shell call returns (worker thread when
+        ``background``).  Never called for 'debounced' / 'none'.
+        """
         if target is None:
             return "none"
         now = self.clock()
@@ -211,22 +265,31 @@ class AppLauncher:
                 hwnd = 0
             if hwnd:
                 if self.focus(hwnd):
+                    _report(on_done, "focused")
                     return "focused"
                 LOG.info("app focus refused for %s; launching instead", target.provider_id)
-        return self._launch(target)
+        return self._launch(target, on_done)
 
-    def _launch(self, target: LaunchTarget) -> str:
-        def run():
+    def _launch(self, target: LaunchTarget, on_done=None) -> str:
+        def run() -> str:
             try:
                 self.start(target)
+                outcome = "launched"
             except Exception as exc:
                 LOG.info("app launch failed for %s (%s)", target.provider_id, type(exc).__name__)
+                outcome = "failed"
+            _report(on_done, outcome)
+            return outcome
         if self.background:
             threading.Thread(target=run, daemon=True, name=f"open-{target.provider_id}").start()
             return "launched"
-        try:
-            self.start(target)
-            return "launched"
-        except Exception as exc:
-            LOG.info("app launch failed for %s (%s)", target.provider_id, type(exc).__name__)
-            return "failed"
+        return run()
+
+
+def _report(callback, outcome: str) -> None:
+    if callback is None:
+        return
+    try:
+        callback(outcome)
+    except Exception as exc:
+        LOG.info("app open result handler failed (%s)", type(exc).__name__)

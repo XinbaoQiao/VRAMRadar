@@ -33,9 +33,8 @@ The context menu uses spacious single-line actions with small icons. Its size an
 type update when the taskbar DPI changes. Opening the menu cancels a pending
 single click. Docked widgets hide while the taskbar is hidden/restarting; widgets
 yield to a fullscreen app on the same monitor and restore automatically, checked
-once per second. A normal maximized window is not treated as fullscreen. Single-click on a
-model opens its detected desktop app (or focuses its existing window); clicking an
-undetected model does nothing, and a single click anywhere else opens the GPU home page; double-click opens Codex usage details. A single click
+once per second. A normal maximized window is not treated as fullscreen. Single-click
+opens the GPU home page; double-click opens Codex usage details. A single click
 waits for the system double-click interval so double-clicking does not open both.
 The right internal padding is two logical pixels. **Hide usage strip** turns the display off; re-enable
 it in Settings → Extensions. Placement resets to the taskbar on the next launch.
@@ -52,7 +51,9 @@ The optional disks follow the corresponding quota and reset-wait colors. Both ad
 system theme. Both disks share an identical pixel diameter and neutral circular
 track, with integer-aligned row centers. The widget outline appears only on hover. One actual quota
 window is shown at a time (the first returned window); the period picker has been
-removed. Hover shows the period and all quota details. Double-click for
+removed. Hover shows the period and all quota details; in the hover card, clicking
+the row of a detected desktop app opens it or brings its window to the front (the
+row is highlighted under the pointer and while pressed). Double-click for
 quota details/settings, or unlock and drag to reposition. The widget
 stays visible with Radar hidden, stays within the available screen area, and
 does not take keyboard focus or add a taskbar button. Right-click also provides

@@ -705,10 +705,10 @@ def framed(bitmap, scale: float, pal: dict):
 
 
 def save_preview(spec: dict, target: str, *, scale: float = 1.5, dark: bool = False, accent=None,
-                 icon_path: str | None = None) -> str:
+                 icon_path: str | None = None, highlight=None) -> str:
     pal = palette(dark, accent)
     if spec.get("kind") == "hover":
-        bitmap, _ = render_hover(spec, scale, pal, accent=accent)
+        bitmap, _ = render_hover(spec, scale, pal, accent=accent, highlight=highlight)
     else:
         icon_px = int(round((TOKENS["toast_icon"] if spec.get("kind") == "toast" else TOKENS["icon"]) * scale))
         icon = provider_icon(icon_path, icon_px, spec.get("icon_name", ""), accent)
@@ -912,7 +912,58 @@ def close_toast() -> None:
 # -- hover detail card --------------------------------------------------------
 
 _HOVER = {"form": None, "image": None, "delay": None, "signature": None, "on_tick": None, "shown": False,
-          "layout": None, "on_row_click": None, "on_leave": None, "clickable": None}
+          "layout": None, "on_row_click": None, "on_leave": None, "clickable": None,
+          "render": None, "feedback": None, "result_timer": None}
+
+# Row highlight strength over the card surface: (dark card -> white, light card -> black).
+ROW_HIGHLIGHT = {"hover": (0.12, 0.08), "pressed": (0.22, 0.15)}
+
+
+def _feedback():
+    feedback = _HOVER.get("feedback")
+    if feedback is None:
+        from .app_launch import RowFeedback
+        feedback = _HOVER["feedback"] = RowFeedback()
+    return feedback
+
+
+def row_highlight_rgb(surface, level: str, primary=None) -> tuple:
+    """Opaque colour of a hover-card row highlight (the card itself is opaque).
+
+    hover ~12 % white on a dark card / ~8 % black on a light one; pressed is
+    deeper; 'flash' (app opened) is a light accent tint; 'failed' is neutral grey.
+    """
+    surface = tuple(int(v) for v in tuple(surface)[:3])
+    light = surface_is_light(surface)
+    if level == "flash":
+        return _mix(surface, tuple(primary or DEFAULT_ACCENT)[:3], 0.18 if light else 0.30)
+    if level == "failed":
+        return _mix(surface, (128, 128, 128), 0.30)
+    dark_t, light_t = ROW_HIGHLIGHT.get(level, ROW_HIGHLIGHT["hover"])
+    return _mix(surface, (0, 0, 0), light_t) if light else _mix(surface, (255, 255, 255), dark_t)
+
+
+def row_highlight_rect(layout, provider_id, scale: float = 1.0):
+    """(x, y, width, height) of the rounded highlight behind one card row, or None.
+
+    Spans the full card width minus a small inset, the row content plus a few
+    pixels, and never leaves the row's own click band (no overlap with neighbours).
+    """
+    if not layout or not provider_id:
+        return None
+    s = lambda v: int(round(v * scale))
+    width = int(layout.get("width") or 0)
+    for (pid, top, bottom), (_hid, band_top, band_bottom) in zip(layout.get("row_spans") or (),
+                                                                  layout.get("row_hits") or ()):
+        if pid != provider_id:
+            continue
+        inset = s(4)
+        y0 = max(band_top + 1, top - s(5))
+        y1 = min(band_bottom - 1, bottom + s(5))
+        if width <= 2 * inset or y1 <= y0:
+            return None
+        return inset, y0, width - 2 * inset, y1 - y0
+    return None
 
 
 def hover_row_at(row_hits, y) -> str | None:
@@ -940,13 +991,15 @@ def hover_card_contains(point) -> bool:
         return False
 
 
-def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width: int | None = None):
+def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width: int | None = None,
+                 highlight=None):
     """(Bitmap, layout) for a multi-app hover detail card.
 
     Width fits the widest row (title + sparkline, or any text line) plus the
     same padding on the right as on the left, clamped to ``hover_min_width`` ..
     ``hover_max_width`` and to ``max_width`` (work-area pixels) when given.
-    Lines only wrap when the clamp is hit.
+    Lines only wrap when the clamp is hit.  ``highlight`` = (provider id, level)
+    draws a rounded row highlight behind that row's content (layout unchanged).
     """
     import math
     from System.Drawing import (Bitmap, Font, FontStyle, Graphics, GraphicsUnit, Pen, RectangleF, SizeF,
@@ -1051,12 +1104,6 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width:
         icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], icon_top))
         y = max(y, icon_top + icon_px, row_top + title_h)
         row_spans.append((row.get("provider_id") or "", row_top, y))
-    # Rightmost painted content (measured before fonts are disposed).
-    content_right = text_x
-    for _key, _text, bx, _by, bw, _bh, _c in blocks:
-        content_right = max(content_right, bx + min(bw, natural(_text, fonts[_key])))
-    for _pts, sx, _sy, sw, _sh in sparks:
-        content_right = max(content_right, sx + sw)
     height = max(y + pad, pad * 2 + icon_px)
     # Clickable bands: each row owns half of the gaps around it (whole card covered).
     row_hits = []
@@ -1064,6 +1111,15 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width:
         band_top = 0 if index == 0 else (row_spans[index - 1][2] + top) // 2
         band_bottom = height if index == len(row_spans) - 1 else (bottom + row_spans[index + 1][1]) // 2
         row_hits.append((pid, band_top, band_bottom))
+    # Rightmost painted content (measured before fonts are disposed).
+    content_right = text_x
+    for _key, _text, bx, _by, bw, _bh, _c in blocks:
+        content_right = max(content_right, bx + min(bw, natural(_text, fonts[_key])))
+    for _pts, sx, _sy, sw, _sh in sparks:
+        content_right = max(content_right, sx + sw)
+    layout = {"width": width, "height": height, "buttons": [], "content_h": height,
+              "pad": pad, "content_right": int(content_right),
+              "content_w": int(content_w), "text_x": text_x, "row_hits": row_hits, "row_spans": row_spans}
     bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
     g = Graphics.FromImage(bitmap)
     disposables = list(fonts.values()) + [fmt, probe, probe_bitmap]
@@ -1072,6 +1128,24 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width:
     g.SmoothingMode = SmoothingMode.AntiAlias
     try:
         g.Clear(_color(pal["surface"]))
+        if highlight:
+            rect = row_highlight_rect(layout, highlight[0], scale)
+            if rect is not None:
+                from System.Drawing.Drawing2D import GraphicsPath
+                x0, y0, w0, h0 = rect
+                diameter = max(2, min(s(12), h0, w0))
+                band = GraphicsPath()
+                try:
+                    for ax, ay, angle in ((x0, y0, 180), (x0 + w0 - diameter, y0, 270),
+                                          (x0 + w0 - diameter, y0 + h0 - diameter, 0),
+                                          (x0, y0 + h0 - diameter, 90)):
+                        band.AddArc(ax, ay, diameter, diameter, angle, 90)
+                    band.CloseFigure()
+                    tint = SolidBrush(_color(row_highlight_rgb(pal["surface"], highlight[1], pal.get("primary"))))
+                    disposables.append(tint)
+                    g.FillPath(tint, band)
+                finally:
+                    band.Dispose()
         # Match brand glyph to THIS card's fill (not the taskbar theme).
         theme_light = surface_is_light(pal["surface"])
         for path, name, top in icons:
@@ -1118,9 +1192,7 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width:
             except Exception:
                 pass
         g.Dispose()
-    return bitmap, {"width": width, "height": height, "buttons": [], "content_h": height,
-                    "pad": pad, "content_right": int(content_right),
-                    "content_w": int(content_w), "text_x": text_x, "row_hits": row_hits}
+    return bitmap, layout
 
 
 def hide_hover_card() -> None:
@@ -1130,6 +1202,8 @@ def hide_hover_card() -> None:
     _HOVER["signature"] = None
     _HOVER["shown"] = False
     _cancel_hover_delay()
+    _cancel_result_timer()
+    _feedback().reset()
     try:
         if form is not None:
             handle = int(form.Handle.ToInt64())
@@ -1150,7 +1224,7 @@ def close_hover_card() -> None:
     hide_hover_card()
     form, image, delay = _HOVER.get("form"), _HOVER.get("image"), _HOVER.get("delay")
     _HOVER.update(form=None, image=None, delay=None, signature=None, on_tick=None, shown=False,
-                  layout=None, on_row_click=None, on_leave=None, clickable=None)
+                  layout=None, on_row_click=None, on_leave=None, clickable=None, render=None)
     try:
         if delay is not None:
             delay.Dispose()
@@ -1213,18 +1287,9 @@ def _present_hover(spec, anchor, scale, dark, accent):
         _HOVER["form"] = form
     handle = int(form.Handle.ToInt64())
     if signature != _HOVER.get("signature"):
-        bitmap, layout = render_hover(spec, scale_v, pal, accent=accent_v, max_width=max_width)
-        old = _HOVER.get("image")
-        form.BackgroundImage = bitmap
-        form.ClientSize = Size(layout["width"], layout["height"])
-        _HOVER["image"] = bitmap
-        _HOVER["layout"] = layout
+        _HOVER["render"] = (spec, scale_v, pal, accent_v, max_width)
+        _swap_hover_image(form)
         _HOVER["signature"] = signature
-        if old is not None and old is not bitmap:
-            try:
-                old.Dispose()
-            except Exception:
-                pass
         _dwm_style(handle, pal, dark_v)
     width, height = form.ClientSize.Width, form.ClientSize.Height
     gap = int(round(TOKENS["hover_offset"] * float(scale_v)))
@@ -1248,23 +1313,143 @@ def _present_hover(spec, anchor, scale, dark, accent):
     return form
 
 
-def _attach_hover_mouse(form) -> None:
-    """Row click opens that app (callback), hand cursor on clickable rows.
-    WS_EX_NOACTIVATE: clicks arrive without activating the card."""
-    from System.Windows.Forms import Cursors, MouseButtons
+def _swap_hover_image(form) -> bool:
+    """Render the card (with the current row highlight) into ``form``."""
+    from System.Drawing import Size
+    render = _HOVER.get("render")
+    if not render or form is None:
+        return False
+    spec, scale_v, pal, accent_v, max_width = render
+    bitmap, layout = render_hover(spec, scale_v, pal, accent=accent_v, max_width=max_width,
+                                  highlight=_feedback().highlight())
+    old = _HOVER.get("image")
+    form.BackgroundImage = bitmap
+    if form.ClientSize.Width != layout["width"] or form.ClientSize.Height != layout["height"]:
+        form.ClientSize = Size(layout["width"], layout["height"])
+    _HOVER["image"] = bitmap
+    _HOVER["layout"] = layout
+    if old is not None and old is not bitmap:
+        try:
+            old.Dispose()
+        except Exception:
+            pass
+    form.Invalidate()
+    return True
 
-    def row_at(event):
+
+def _rerender_hover() -> None:
+    try:
+        if _HOVER.get("shown"):
+            _swap_hover_image(_HOVER.get("form"))
+    except Exception:
+        logging.getLogger("vram_radar").info("hover highlight render failed")
+
+
+def _cancel_result_timer() -> None:
+    timer = _HOVER.get("result_timer")
+    _HOVER["result_timer"] = None
+    _HOVER["result_token"] = None
+    if timer is not None:
+        try:
+            timer.Stop()
+            timer.Dispose()
+        except Exception:
+            pass
+
+
+def _one_shot(delay_ms: int, callback):
+    """WinForms one-shot timer on the UI thread; returns the timer."""
+    from System.Windows.Forms import Timer
+    timer = Timer()
+    timer.Interval = max(1, int(delay_ms))
+
+    def tick(*_):
+        timer.Stop()
+        callback()
+    timer.Tick += tick
+    timer.Start()
+    return timer
+
+
+def hover_row_result(provider_id: str, outcome: str, *, then=None, flash_ms: int | None = None,
+                     schedule=None) -> str | None:
+    """UI thread: after a row click, show the confirmation flash (app opened or
+    focused) or a brief neutral grey (failed), then call ``then`` (usually hides
+    the card).  No flash for 'debounced' / 'none'.  ``schedule(ms, fn)`` is the
+    one-shot timer (injectable for tests)."""
+    from .app_launch import FEEDBACK_FLASH_MS
+    _cancel_result_timer()
+    level = _feedback().finish(provider_id, outcome)
+    if level:
+        _rerender_hover()
+    token = object()
+    _HOVER["result_token"] = token
+
+    def done():
+        if _HOVER.get("result_token") is not token:
+            return                      # superseded by a newer result
+        _cancel_result_timer()
+        _feedback().result = None
+        if callable(then):
+            try:
+                then()
+            except Exception:
+                pass
+    delay = int(flash_ms if flash_ms is not None else FEEDBACK_FLASH_MS) if level else 1
+    _HOVER["result_timer"] = (schedule or _one_shot)(delay, done)
+    return level
+
+
+def _attach_hover_mouse(form) -> None:
+    """Rows of detected apps: highlight under the pointer, deeper while pressed,
+    hand cursor; a click (down and up on the same row) calls ``on_row_click``.
+    The card is WS_EX_NOACTIVATE: clicks arrive without activating it, and the
+    card is hidden only after the click was resolved (never before the hit test)."""
+    from System.Windows.Forms import Cursor, Cursors, MouseButtons
+    from .app_launch import row_cursor
+
+    def row_at_y(y):
         layout = _HOVER.get("layout") or {}
-        return hover_row_at(layout.get("row_hits"), int(event.Y))
+        return hover_row_at(layout.get("row_hits"), int(y))
+
+    def clickable(pid):
+        check = _HOVER.get("clickable")
+        return bool(pid) and row_cursor(pid, check) == "hand"
+
+    def apply_cursor(pid):
+        want = Cursors.Hand if clickable(pid) else Cursors.Default
+        if form.Cursor != want:
+            form.Cursor = want      # WinForms answers WM_SETCURSOR (HTCLIENT) with this
+
+    def pointer_row():
+        point = form.PointToClient(Cursor.Position)
+        return row_at_y(point.Y)
 
     def on_move(_sender, event):
         try:
-            pid = row_at(event)
-            clickable = _HOVER.get("clickable")
-            hand = bool(pid) and callable(clickable) and bool(clickable(pid))
-            want = Cursors.Hand if hand else Cursors.Default
-            if form.Cursor != want:
-                form.Cursor = want
+            pid = row_at_y(event.Y)
+            apply_cursor(pid)
+            if _feedback().move(pid, clickable(pid)):
+                _rerender_hover()
+        except Exception:
+            pass
+
+    def on_enter(*_):
+        try:
+            pid = pointer_row()
+            apply_cursor(pid)
+            if _feedback().move(pid, clickable(pid)):
+                _rerender_hover()
+        except Exception:
+            pass
+
+    def on_down(_sender, event):
+        try:
+            if event.Button != MouseButtons.Left:
+                return
+            pid = row_at_y(event.Y)
+            if _feedback().down(pid, clickable(pid)):
+                _rerender_hover()
         except Exception:
             pass
 
@@ -1272,15 +1457,21 @@ def _attach_hover_mouse(form) -> None:
         try:
             if event.Button != MouseButtons.Left:
                 return
-            pid = row_at(event)
+            feedback = _feedback()
+            before = feedback.highlight()
+            fire = feedback.up(row_at_y(event.Y))
             callback = _HOVER.get("on_row_click")
-            if pid and callable(callback):
-                callback(pid)
+            if fire and callable(callback) and clickable(fire):
+                callback(fire)      # opens the app; the result handler flashes, then hides
+            elif feedback.highlight() != before:
+                _rerender_hover()
         except Exception:
             pass
 
     def on_leave(*_):
         try:
+            if _feedback().leave():
+                _rerender_hover()
             callback = _HOVER.get("on_leave")
             if callable(callback):
                 callback()
@@ -1288,6 +1479,8 @@ def _attach_hover_mouse(form) -> None:
             pass
 
     form.MouseMove += on_move
+    form.MouseEnter += on_enter
+    form.MouseDown += on_down
     form.MouseUp += on_up
     form.MouseLeave += on_leave
 

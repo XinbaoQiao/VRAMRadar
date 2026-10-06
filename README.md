@@ -78,7 +78,7 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 
   ![Consent dialog](docs/assets/readme/consent-en.png)
 
-- Hover the strip for a compact detail card (icons, full names, quota or balance, reset time, and last update); it does not take focus or start extra polling.
+- Hover the strip for a compact detail card (icons, full names, quota or balance, reset time, and last update); it does not take focus or start extra polling. Click the row of an app detected on this computer to open it, or to bring its window to the front if it is already running; the row is highlighted under the pointer.
 - On macOS, the menu-bar item shows the Codex quota and reset countdowns, with a
   menu for details, usage settings, refresh, turning the display off and quitting.
 
@@ -125,8 +125,7 @@ Do not disable SmartScreen or Gatekeeper globally. See
 
 ### Taskbar strip
 
-- **Click a model**: open that AI desktop app, or bring its window to the front if it is already running (only for apps detected on this computer; also works on the hover card rows). On macOS, the menu-bar menu lists **Open <app>** for each detected app.
-- **Click elsewhere on the strip**: open the GPU overview window.
+- **Click**: open the GPU overview window.
 - **Double-click**: open quota details in Settings.
 - **Right-click** menu:
 

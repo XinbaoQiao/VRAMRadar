@@ -1571,15 +1571,21 @@ class CodexUsageSurface:
         self._dispatch = None
         self._last_signature = None
 
-    def _open_app(self, target) -> str:
-        """Open or focus a detected AI desktop app (debounced, failures logged quietly)."""
+    def _open_app(self, target, on_done=None) -> str:
+        """Open or focus a detected AI desktop app from a hover-card row
+        (debounced, failures logged quietly; ``on_done(outcome)`` may run on a worker thread)."""
         try:
             if getattr(self, "_launcher", None) is None:
                 from .app_launch import AppLauncher
                 self._launcher = AppLauncher()
-            return self._launcher.open(target)
+            return self._launcher.open(target, on_done)
         except Exception as exc:
             logging.getLogger("vram_radar").info("app open failed (%s)", type(exc).__name__)
+            if on_done is not None:
+                try:
+                    on_done("failed")
+                except Exception:
+                    pass
             return "failed"
 
     def _action(self, callback) -> None:
@@ -1930,31 +1936,10 @@ class CodexUsageSurface:
             form.Controls.Add(label)
             collection.append(label)
         text_controls = [*self._labels, *self._countdowns]
-        from System.Windows.Forms import Cursors
-        from .app_launch import HOVER_LEAVE_GRACE_MS, click_action, hit_model
-        self._model_cells = []          # (provider id, [controls]) from the last tick
+        from .app_launch import HOVER_LEAVE_GRACE_MS
+        # Hover-card rows open detected apps; the strip itself always opens VRAM Radar.
         self._launch_targets = {}       # provider id -> LaunchTarget (detected apps only)
         self._pointer_on_hover = False
-        self._click_pid = None
-
-        def model_at_cursor():
-            cells = []
-            for pid, controls in self._model_cells:
-                rect = None
-                for control in controls:
-                    try:
-                        if not control.Visible or control.Width <= 0:
-                            continue
-                        r = control.RectangleToScreen(control.ClientRectangle)
-                    except Exception:
-                        continue
-                    box = (r.Left, r.Top, r.Right, r.Bottom)
-                    rect = box if rect is None else (min(rect[0], box[0]), min(rect[1], box[1]),
-                                                     max(rect[2], box[2]), max(rect[3], box[3]))
-                if rect is not None:
-                    cells.append((pid, rect))
-            return hit_model(cells, (Cursor.Position.X, Cursor.Position.Y))
-        self._model_at_cursor = model_at_cursor
 
         def pointer_over_card():
             try:
@@ -2067,14 +2052,6 @@ class CodexUsageSurface:
                 sender.Capture = True
 
         def mouse_move(sender, event):
-            if self._drag is None:
-                try:
-                    pid = model_at_cursor()
-                    want = Cursors.Hand if pid is not None and pid in self._launch_targets else Cursors.Default
-                    if sender.Cursor != want:
-                        sender.Cursor = want
-                except Exception:
-                    pass
             if (not getattr(self, "_hover_armed", True)
                     and form.Visible and form.Bounds.Contains(Cursor.Position)
                     and self._try_rearm_hover()):
@@ -2102,9 +2079,8 @@ class CodexUsageSurface:
                     self._action(self.open_settings)
                 else:
                     if click_timer.Enabled:
-                        fire_single(self._click_pid)
+                        self._action(self.open_home)
                     self._last_click = point
-                    self._click_pid = model_at_cursor()
                     click_timer.Stop()
                     click_timer.Start()
 
@@ -2112,35 +2088,36 @@ class CodexUsageSurface:
         self._click_timer = click_timer
         self._last_click = None
         click_timer.Interval = SystemInformation.DoubleClickTime
-        def fire_single(pid):
-            # Model with a detected app: open/focus it.  Undetected model: nothing.
-            # Anywhere else on the strip: GPU home (previous behaviour).
-            decision = click_action(pid, self._launch_targets)
-            if decision == "home":
-                self._action(self.open_home)
-            elif decision == "open_app":
-                self._suspend_hover()
-                self._open_app(self._launch_targets[pid])
-
         def single_click(*_):
             click_timer.Stop()
             self._last_click = None
-            pid, self._click_pid = self._click_pid, None
-            fire_single(pid)
+            self._action(self.open_home)
         click_timer.Tick += single_click
         def cancel_click(*_):
             click_timer.Stop()
             self._last_click = None
-            self._click_pid = None
         self._cancel_click = cancel_click
 
         def card_row_click(pid):
+            # Hover-card row of a detected app: open/focus it, confirm briefly on
+            # the row, then hide the card.  Undetected rows are not clickable.
             target = self._launch_targets.get(pid)
             if target is None:
-                return          # undetected app: the click does nothing
+                return
             cancel_click()
-            self._suspend_hover()
-            self._open_app(target)
+            from System import Action
+            from . import ui_dialogs as dialogs
+
+            def on_done(outcome):
+                def show():
+                    if not self.closed:
+                        dialogs.hover_row_result(pid, outcome, then=self._suspend_hover)
+                try:
+                    form.BeginInvoke(Action(show))
+                except Exception:
+                    pass
+            self._open_app(target, on_done)     # 'debounced': first click is still opening
+        self._card_row_click = card_row_click
         try:
             from . import ui_dialogs as _dialogs
             _dialogs.set_hover_handlers(on_row_click=card_row_click, on_leave=lambda: update_hover(),
@@ -2929,12 +2906,6 @@ class CodexUsageSurface:
                 cell_ids.append(spec.id)
             while len(self._extra_columns) < len(cells):
                 make_column()
-            if multi:
-                self._model_cells = [(pid, list(cols)) for pid, cols in zip(cell_ids, self._extra_columns)]
-            elif rows:
-                self._model_cells = [("codex", list(text_controls))]
-            else:
-                self._model_cells = []
             from .app_launch import launch_targets
             self._launch_targets = launch_targets(provider_states, selected)
             muted = Color.FromArgb(*(round(f*0.68 + b*0.32) for f, b in zip(
@@ -3029,9 +3000,7 @@ class CodexUsageSurface:
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()
-            hint = ("Click a model: open its app · Click elsewhere: GPU home · Double-click: quota details"
-                    if language == "en" else
-                    "单击模型打开对应应用 · 单击其他位置打开 GPU 主页 · 双击查看额度详情")
+            hint = "Click: GPU home · Double-click: quota details" if language == "en" else "单击打开 GPU 主页 · 双击查看额度详情"
             tip = concise_tooltip(rows, provider_rows, language)
             form.AccessibleName = ("Codex · " + rows[index]["label"]) if rows and not multi else (
                 "AI usage" if english else "AI 用量")
@@ -3157,12 +3126,6 @@ class CodexUsageSurface:
                 def quit_(self, _):
                     surface._action(surface.quit_application)
 
-                def openApp_(self, sender):
-                    try:
-                        surface._mac_open_app(str(sender.representedObject()))
-                    except Exception:
-                        pass
-
             self._delegate = RadarCodexMenuTarget.alloc().init()
             self._mac_classes = (NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength)
             self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
@@ -3192,25 +3155,6 @@ class CodexUsageSurface:
         except Exception:
             return "\n".join(["Codex", *(row.get("detail", "") for row in rows)])
 
-    def _mac_open_entries(self, language) -> list:
-        try:
-            from .app_launch import open_app_menu_entries
-            from .providers import PROVIDERS
-            overview = self.providers() if callable(self.providers) else {}
-            selected = [x for x in (overview.get("selected") or ["codex"]) if isinstance(x, str)] or ["codex"]
-            states = overview.get("providers") if isinstance(overview.get("providers"), dict) else {}
-            self._mac_targets = states
-            names = {spec.id: spec.label(language == "en") for spec in PROVIDERS}
-            return open_app_menu_entries(selected, states, language, names)
-        except Exception:
-            return []
-
-    def _mac_open_app(self, provider_id: str) -> None:
-        from .app_launch import target_from_state
-        target = target_from_state(provider_id, (getattr(self, "_mac_targets", None) or {}).get(provider_id))
-        if target is not None:
-            self._open_app(target)
-
     def _mac_tick(self) -> None:
         # Called from an NSTimer: an exception escaping into AppKit is
         # reported as an Objective-C exception (and can end the app).
@@ -3237,8 +3181,7 @@ class CodexUsageSurface:
             return
         if self.status_item is None:
             self.status_item = NSStatusBar.systemStatusBar().statusItemWithLength_(length)
-        open_entries = self._mac_open_entries(language)
-        signature = (language, str(rows), tuple(open_entries))
+        signature = (language, str(rows))
         if self._last_signature == signature:
             return
         title = "C  " + " · ".join(f"{row['label']} {row['value']} ({row['countdown']})" for row in rows[:2])
@@ -3251,14 +3194,6 @@ class CodexUsageSurface:
             item.setEnabled_(False)
             menu.addItem_(item)
         menu.addItem_(NSMenuItem.separatorItem())
-        if open_entries:
-            # Click-to-open: "Open Kimi" etc. for each detected desktop app.
-            for title, provider_id in open_entries:
-                item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, "openApp:", "")
-                item.setRepresentedObject_(provider_id)
-                item.setTarget_(self._delegate)
-                menu.addItem_(item)
-            menu.addItem_(NSMenuItem.separatorItem())
         for zh, en, selector in [("额度设置", "Usage settings", "settings:"),
                                  ("刷新额度", "Refresh usage", "refresh:"),
                                  ("关闭额度显示", "Disable usage display", "disable:"),
