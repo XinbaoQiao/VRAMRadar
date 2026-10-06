@@ -241,6 +241,14 @@ class DocsConsistencyTests(unittest.TestCase):
         self.assertIn("**Icons**", text)
         self.assertIn("marked stale", text)
 
+    def test_docs_do_not_describe_removed_quota_settings_controls(self):
+        # Settings → Extensions is a single switch; the path picker / detail card are gone.
+        for name in ("docs/subscription-usage.md", "README.md", "README.zh-CN.md", "PRIVACY.md"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            for removed in ("Details and settings", "choose an executable", "Restore automatic detection",
+                            "详情与设置", "恢复自动检测"):
+                self.assertNotIn(removed, text, name)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,43 @@ class TargetTests(unittest.TestCase):
         self.assertIsNone(hover_row_at(None, 1))
 
 
+class WindowLookupSafetyTests(unittest.TestCase):
+    def test_never_focuses_vram_radar_itself(self):
+        paths = {7: r"D:\Download\VRAM Radar\VRAMRadar.exe", 8: r"D:\Download\Kimi\Kimi.exe"}
+        target = LaunchTarget("kimi", "exe", r"D:\Download\Kimi\Kimi.exe", r"D:\Download\Kimi")
+        self.assertEqual(find_app_window(target, windows=[(70, 7)], image_path=paths.get, own_pid=7), 0)
+        self.assertEqual(find_app_window(target, windows=[(70, 7), (80, 8)], image_path=paths.get, own_pid=7), 80)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows path semantics")
+    def test_broad_folders_do_not_match_unrelated_programs(self):
+        import os
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        paths = {1: os.path.join(program_files, "Other", "other.exe"), 2: r"D:\Some\thing.exe"}
+        loose = LaunchTarget("kimi", "exe", os.path.join(program_files, "Kimi.exe"), program_files)
+        self.assertEqual(find_app_window(loose, windows=[(10, 1)], image_path=paths.get, own_pid=0), 0)
+        root = LaunchTarget("kimi", "exe", r"D:\Kimi.exe", "D:\\")
+        self.assertEqual(find_app_window(root, windows=[(20, 2)], image_path=paths.get, own_pid=0), 0)
+        self.assertFalse(app_launch.own_folder(program_files))
+        self.assertFalse(app_launch.own_folder("D:\\"))
+        self.assertTrue(app_launch.own_folder(os.path.join(program_files, "Kimi")))
+
+    def test_vanished_app_reports_failed_and_logs_only_the_error_type(self):
+        target = LaunchTarget("kimi", "exe", "C:\\Gone \u7a0b\u5e8f\\Kimi.exe", "C:\\Gone \u7a0b\u5e8f")
+        outcomes = []
+
+        def start(_target):
+            raise FileNotFoundError(2, "secret detail", "C:\\Gone \u7a0b\u5e8f\\Kimi.exe")
+        launcher = AppLauncher(start=start, find=lambda _t: 0, focus=lambda _h: False,
+                               platform="win32", background=False)
+        with self.assertLogs("vram_radar", level="INFO") as logs:
+            self.assertEqual(launcher.open(target, outcomes.append), "failed")
+        self.assertEqual(outcomes, ["failed"])
+        text = "\n".join(logs.output)
+        self.assertIn("FileNotFoundError", text)
+        self.assertNotIn("secret detail", text)
+        self.assertNotIn("Gone", text)
+
+
 class StripClickTests(unittest.TestCase):
     """The taskbar strip always opens VRAM Radar; only hover-card rows open apps."""
 
@@ -246,6 +283,7 @@ class CardMouseHandlerTests(unittest.TestCase):
 
 
 class WindowLookupTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows path semantics (window lookup is Windows-only)")
     def test_find_by_folder_or_exe_name(self):
         paths = {1: r"C:\Apps\Kimi\resources\helper.exe", 2: r"C:\Other\Kimi.exe", 3: r"C:\Apps\KimiX\a.exe"}
         target = LaunchTarget("kimi", "exe", r"C:\Apps\Kimi\Kimi.exe", r"C:\Apps\Kimi")

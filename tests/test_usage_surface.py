@@ -1,6 +1,6 @@
 import unittest
 
-from vram_radar.usage_surface import CodexUsageSurface, quota_lines, strip_bounds, widget_reading, taskbar_anchor
+from vram_radar.usage_surface import ClickBurst, CodexUsageSurface, quota_lines, strip_bounds, widget_reading, taskbar_anchor
 
 
 class QuotaSurfaceTests(unittest.TestCase):
@@ -250,3 +250,22 @@ class SessionConsentSurfaceTests(unittest.TestCase):
         surface.confirm_consent = lambda app, provider: 1 / 0
         self.assertFalse(surface.request_session_consent("grok"))
         self.saved.assert_not_called()
+
+
+class ClickBurstTests(unittest.TestCase):
+    """A fast triple-click must not turn into double-click (Settings) + click (home closes Settings)."""
+
+    def test_clicks_after_a_double_click_are_swallowed_until_the_burst_ends(self):
+        burst = ClickBurst()
+        self.assertFalse(burst.swallow(10.0, 0.5))
+        burst.double(10.0, 0.5)
+        self.assertTrue(burst.swallow(10.3, 0.5))      # third click
+        self.assertTrue(burst.swallow(10.7, 0.5))      # still the same burst (window extended)
+        self.assertFalse(burst.swallow(11.3, 0.5))     # a new, separate click
+
+    def test_strip_mouse_up_uses_the_burst_gate(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "src" / "vram_radar" / "usage_surface.py").read_text(encoding="utf-8")
+        up = source[source.index("def mouse_up(sender, event):"):source.index("click_timer = Timer()")]
+        self.assertIn("self._click_burst.swallow(", up)
+        self.assertLess(up.index("self._click_burst.double("), up.index("self._action(self.open_settings)"))

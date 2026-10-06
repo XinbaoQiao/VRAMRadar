@@ -179,9 +179,11 @@ for line in sys.stdin:
         with tempfile.TemporaryDirectory() as directory:
             shim = Path(directory) / "codex.cmd"
             shim.write_text("", encoding="utf-8")
-            with patch("vram_radar.usage_monitor.sys.platform", "win32"):
+            with patch("vram_radar.usage_monitor.sys.platform", "win32"), patch("shutil.which", return_value=None), \
+                 patch.dict(os.environ, {"LOCALAPPDATA": directory, "APPDATA": directory}), \
+                 patch.object(Path, "home", return_value=Path(directory)):
                 with self.assertRaisesRegex(UsageError, "invalid_executable"):
-                    find_codex(str(shim))
+                    find_codex(str(shim))      # a shim is never run, even as a fallback
 
     def test_mac_gui_install_is_found_without_path(self):
         target = Path("/Applications/Codex.app/Contents/Resources/codex")
@@ -406,3 +408,26 @@ class UsageSettingsTests(unittest.TestCase):
                 self.assertFalse(api.save_codex_display("usage_background", "light")["ok"])
                 self.assertEqual(api.profile.usage_background, "dark")
             api._codex_usage.close()
+
+
+class StaleOverrideTests(unittest.TestCase):
+    """Settings no longer offer a path picker: a saved path that went away must not block monitoring."""
+
+    def test_missing_saved_path_falls_back_to_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "OpenAI" / "Codex" / "bin" / "1.2" / "codex.exe"
+            target.parent.mkdir(parents=True)
+            target.touch()
+            gone = str(Path(directory) / "old" / "codex.exe")
+            with patch("vram_radar.usage_monitor.sys.platform", "win32"), patch("shutil.which", return_value=None), \
+                 patch.dict(os.environ, {"LOCALAPPDATA": directory, "APPDATA": directory}), \
+                 patch.object(Path, "home", return_value=Path(directory)):
+                self.assertEqual(find_codex(gone), target.resolve())
+
+    def test_stale_path_without_any_install_still_reports_invalid_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("vram_radar.usage_monitor.sys.platform", "win32"), patch("shutil.which", return_value=None), \
+                 patch.dict(os.environ, {"LOCALAPPDATA": directory, "APPDATA": directory}), \
+                 patch.object(Path, "home", return_value=Path(directory)):
+                with self.assertRaisesRegex(UsageError, "invalid_executable"):
+                    find_codex(str(Path(directory) / "missing.exe"))

@@ -189,7 +189,7 @@ bash Build-VramRadar-macOS.sh --skip-sync
 
 - [更新日志：v1.0.0 发布说明](docs/release-notes-v1.0.0.md)
 - [SSH 配置发现](docs/server-config-discovery.md)
-- [Codex 额度](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
+- [额度监控](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
 - [Windows 安装与更新](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
 - [产品与架构说明](docs/productization-design.md) · [设计规范](docs/design-system.md)
 

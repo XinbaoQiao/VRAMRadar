@@ -202,6 +202,27 @@
       ui.codexEnabled.click();
       await waitUntil(() => !codexSettingsBusy, 'Failed usage save did not finish');
       assertions.quota_failed_toggle_restores_saved_state = currentProfile.codex_usage_enabled && ui.codexEnabled.checked;
+      // The count matches the strip: selected apps that are detected (not every installed app).
+      renderQuotaMonitor({providers: {codex: {installed: true}, kimi: {installed: true}, grok: {installed: true}},
+        selected: ['codex', 'kimi'], primary: null});
+      assertions.quota_status_counts_selected_only =
+        document.getElementById('quota-usage-status').textContent.startsWith('已检测到 2 个 AI 应用');
+      // The 15 s status refresh runs only while Settings is open; closing it stops the timer
+      // and later profile updates do not poll in the background.
+      await waitUntil(() => !quotaMonitorBusy, 'Quota status poll did not settle');
+      const timerWhileOpen = quotaMonitorTimer !== null;
+      ui.dialog.close();
+      await wait(30);
+      const timerAfterClose = quotaMonitorTimer;
+      let polledWhileClosed = 0;
+      const countingApi = api;
+      api = {...countingApi, get_usage_providers: async (...args) => {
+        polledWhileClosed += 1;
+        return countingApi.get_usage_providers(...args);
+      }};
+      await pollQuotaMonitor();
+      assertions.quota_poll_only_while_settings_open = timerWhileOpen && timerAfterClose === null
+        && polledWhileClosed === 0 && quotaMonitorTimer === null;
     } finally {
       clearTimeout(quotaMonitorTimer);
       api = originalUsageApi;

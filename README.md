@@ -211,7 +211,7 @@ Release validation should use an empty temporary Profile (`--home`, `--profile`,
 
 - [Changelog: v1.0.0 release notes](docs/release-notes-v1.0.0.md)
 - [SSH configuration discovery](docs/server-config-discovery.md)
-- [Codex usage](docs/subscription-usage.md) · [AI app providers](docs/ai-app-providers.md)
+- [Quota monitoring](docs/subscription-usage.md) · [AI app providers](docs/ai-app-providers.md)
 - [Windows installation and updates](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
 - [Product and architecture notes](docs/productization-design.md) · [Design system](docs/design-system.md)
 

@@ -100,7 +100,7 @@ const ui = {
 let currentProfile = null;
 // Extensions → quota monitoring: one master switch (profile.codex_usage_enabled) for the
 // taskbar strip and every provider; per-app choices live in the strip's right-click menu.
-let quotaMonitorState = {providers: {}, primary: null};
+let quotaMonitorState = {providers: {}, selected: null, primary: null};
 let quotaMonitorTimer = null;
 let quotaMonitorBusy = false;
 let codexSettingsBusy = false;
@@ -2334,7 +2334,11 @@ function acceptProfile(candidate) {
 
 function quotaMonitorStatus(state = quotaMonitorState, profile = currentProfile) {
   if (!profile?.codex_usage_enabled) return localizedText('额度监控已关闭');
-  const providers = state?.providers && typeof state.providers === 'object' ? Object.values(state.providers) : [];
+  const all = state?.providers && typeof state.providers === 'object' ? state.providers : {};
+  // Count what the taskbar strip shows: the selected apps that are detected here
+  // (an installed but unselected app is not on the strip).
+  const selected = Array.isArray(state?.selected) ? state.selected : null;
+  const providers = selected ? selected.map(id => all[id]) : Object.values(all);
   const detected = providers.filter(item => item && item.installed).length;
   const stamps = providers.map(item => Number(item?.fetched_at)).filter(value => Number.isFinite(value) && value > 0);
   if (Number.isFinite(state?.primary?.fetched_at) && state.primary.fetched_at > 0) stamps.push(state.primary.fetched_at);
@@ -2379,9 +2383,20 @@ function renderQuotaMonitor(state = quotaMonitorState) {
   if (status.textContent !== text) status.textContent = text;
 }
 
-async function pollQuotaMonitor() {
+// The status line refreshes only while Settings is open on screen and the
+// switch is on; closing Settings or switching off stops the 15 s timer.
+function quotaMonitorVisible() {
+  return Boolean(ui.dialog?.open) && !document.hidden;
+}
+
+function stopQuotaMonitor() {
   clearTimeout(quotaMonitorTimer);
-  if (quotaMonitorBusy || !api?.get_usage_providers) {
+  quotaMonitorTimer = null;
+}
+
+async function pollQuotaMonitor() {
+  stopQuotaMonitor();
+  if (quotaMonitorBusy || !api?.get_usage_providers || !quotaMonitorVisible()) {
     renderQuotaMonitor();
     return;
   }
@@ -2392,12 +2407,15 @@ async function pollQuotaMonitor() {
       api.get_usage_providers(false),
       currentProfile?.codex_usage_enabled && api.get_codex_usage ? api.get_codex_usage(false) : null,
     ]);
-    renderQuotaMonitor({providers: providers?.providers || {}, primary: codex || null});
+    renderQuotaMonitor({providers: providers?.providers || {},
+      selected: Array.isArray(providers?.selected) ? providers.selected : null, primary: codex || null});
   } catch (_) {
-    renderQuotaMonitor({providers: {}, primary: null});
+    renderQuotaMonitor({providers: {}, selected: null, primary: null});
   } finally {
     quotaMonitorBusy = false;
-    if (currentProfile?.codex_usage_enabled) quotaMonitorTimer = setTimeout(() => void pollQuotaMonitor(), 15000);
+    if (currentProfile?.codex_usage_enabled && quotaMonitorVisible()) {
+      quotaMonitorTimer = setTimeout(() => void pollQuotaMonitor(), 15000);
+    }
   }
 }
 
@@ -4746,6 +4764,7 @@ function openSettings(options = {}) {
   populateServerEditors(currentProfile?.servers || []);
   setSettingsMode(onboarding ? 'onboarding' : 'settings');
   ui.dialog.showModal();
+  void pollQuotaMonitor();
 }
 
 async function discoverServerConfig() {
@@ -5648,6 +5667,7 @@ ui.dialog.addEventListener('close', () => {
   // the same dialog.  Never let that stale event discard the new session's
   // drafts or invalidate its discovery request.
   if (ui.dialog.open) return;
+  stopQuotaMonitor();
   window.VRAMRadarI18n?.setLanguage(currentProfile?.ui_language || 'zh-CN');
   invalidateServerDiscovery();
   ui.editorList.replaceChildren();
@@ -5726,6 +5746,8 @@ window.addEventListener('resize', () => {
   scheduleStuckChromeUpdate();
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopQuotaMonitor();
+  else if (ui.dialog.open) void pollQuotaMonitor();
   if (!document.hidden) {
     scheduleDirectoryFreshnessValidation();
     if (refreshDeferredWhileHidden) {

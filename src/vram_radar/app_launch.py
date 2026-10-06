@@ -139,19 +139,56 @@ def _under(path: str, folder: str) -> bool:
     return a == b or a.startswith(b.rstrip("\\/") + os.sep)
 
 
-def find_app_window(target: LaunchTarget, *, windows=None, image_path=None) -> int:
-    """Top-level visible, titled, non-tool window owned by the app; 0 if none."""
+def _shared_roots() -> set[str]:
+    """Folders that hold many unrelated programs; never 'the app's own folder'."""
+    roots = set()
+    for name in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "SystemRoot", "USERPROFILE",
+                 "LOCALAPPDATA", "APPDATA", "PUBLIC"):
+        value = os.environ.get(name)
+        if value:
+            roots.add(os.path.normcase(os.path.abspath(value)))
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        roots.add(os.path.normcase(os.path.abspath(os.path.join(local, "Programs"))))
+    home = os.environ.get("USERPROFILE")
+    if home:
+        for sub in ("Desktop", "Downloads", "Documents"):
+            roots.add(os.path.normcase(os.path.abspath(os.path.join(home, sub))))
+    return roots
+
+
+def own_folder(folder: str) -> bool:
+    """True when ``folder`` can identify one app (not a drive root or a shared root)."""
+    if not folder:
+        return False
+    full = os.path.normcase(os.path.abspath(folder))
+    if os.path.dirname(full.rstrip("\\/")) in ("", full.rstrip("\\/")) or full.rstrip("\\/").endswith(":"):
+        return False
+    return full.rstrip("\\/") not in {root.rstrip("\\/") for root in _shared_roots()}
+
+
+def find_app_window(target: LaunchTarget, *, windows=None, image_path=None, own_pid: int | None = None) -> int:
+    """Top-level visible, titled, non-tool window owned by the app; 0 if none.
+
+    Matches the app's executable name, or any process under the app's own
+    folder -- but never VRAM Radar's own windows and never via a broad shared
+    folder (a drive root, Program Files, Downloads ...), which would focus an
+    unrelated program."""
     if windows is None:
         windows = list_top_windows()
     if image_path is None:
         from .providers.base import process_path as image_path
+    own_pid = os.getpid() if own_pid is None else own_pid
     exe_name = os.path.basename(target.target).lower() if target.kind == "exe" else ""
+    folder = target.folder if own_folder(target.folder) else ""
     cache: dict[int, str] = {}
     for hwnd, pid in windows:
+        if pid == own_pid:
+            continue
         if pid not in cache:
             cache[pid] = image_path(pid) or ""
         path = cache[pid]
-        if _under(path, target.folder) or (exe_name and os.path.basename(path).lower() == exe_name):
+        if _under(path, folder) or (exe_name and os.path.basename(path).lower() == exe_name):
             return hwnd
     return 0
 

@@ -1,4 +1,4 @@
-# Codex usage monitoring
+# Quota monitoring (Codex and other AI apps)
 
 In **Settings → Extensions**, turn on **Quota monitoring**. It is the single
 master switch for quota reading and the taskbar strip (menu-bar item on macOS)
@@ -17,12 +17,12 @@ covers the Windows desktop versioned bin directory, PATH, npm native payloads
 also checks the system/user Applications folders, common CLI locations and
 the matching native VS Code extension. Discovery runs again for each read, so
 desktop upgrades do not leave a saved path pointing at the old version.
-If needed, expand **Details and settings → Advanced: choose an executable**
-and save an absolute CLI executable path (not a
-Windows `.cmd` shim or the macOS `.app` directory). Radar does not install Codex
-or initiate sign-in. After installation or sign-in, it retries automatically
-every 15 seconds until ready, then returns to the normal five-minute refresh.
-**Restore automatic detection** clears a previous manual path in one click.
+There is no path setting: a CLI path saved by an earlier version is still
+used while it exists, and Radar falls back to automatic detection once that
+copy is moved or removed (a Windows `.cmd` shim is never run). Radar does not
+install Codex or initiate sign-in. After installation or sign-in, it retries
+automatically every 15 seconds until ready, then returns to the normal
+five-minute refresh.
 
 Windows uses CodexUsage's two-line widget, recolored with Radar's palette and a
 tighter number column. It uses a compact DPI-scaled size capped by the taskbar

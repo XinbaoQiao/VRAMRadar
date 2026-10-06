@@ -1495,6 +1495,25 @@ def consent_precheck(state: dict | None, app: str, english: bool = False) -> str
     return None
 
 
+class ClickBurst:
+    """After a strip double-click, further clicks of the same rapid burst are
+    ignored.  A triple-click used to run the double-click (Settings) and then a
+    fresh single click (GPU home), which closes every dialog -- so Settings
+    flashed open and shut.  Each swallowed click extends the window."""
+
+    def __init__(self) -> None:
+        self.until = 0.0
+
+    def double(self, now: float, window_s: float) -> None:
+        self.until = now + max(0.0, window_s)
+
+    def swallow(self, now: float, window_s: float) -> bool:
+        if now < self.until:
+            self.until = now + max(0.0, window_s)
+            return True
+        return False
+
+
 def windows_dpi_scale(fallback: float = 1.0) -> float:
     try:
         dpi = _dll("user32").GetDpiForSystem()
@@ -2070,12 +2089,16 @@ class CodexUsageSurface:
             clicked = self._drag is not None and not self._drag_moved and event.Button == MouseButtons.Left
             self._drag = None
             sender.Capture = False
+            window_s = SystemInformation.DoubleClickTime / 1000.0
+            if clicked and self._click_burst.swallow(time.monotonic(), window_s):
+                clicked = False     # rest of a double-click burst: Settings stays open
             if clicked:
                 point = (Cursor.Position.X, Cursor.Position.Y)
                 if click_timer.Enabled and self._last_click is not None and max(
                         abs(point[i]-self._last_click[i]) for i in (0, 1)) <= SystemInformation.DoubleClickSize.Width:
                     click_timer.Stop()
                     self._last_click = None
+                    self._click_burst.double(time.monotonic(), window_s)
                     self._action(self.open_settings)
                 else:
                     if click_timer.Enabled:
@@ -2086,6 +2109,7 @@ class CodexUsageSurface:
 
         click_timer = Timer()
         self._click_timer = click_timer
+        self._click_burst = ClickBurst()
         self._last_click = None
         click_timer.Interval = SystemInformation.DoubleClickTime
         def single_click(*_):
@@ -2605,8 +2629,9 @@ class CodexUsageSurface:
                 if self._trend_store is None or getattr(self, "_trend_profile", None) != profile_id:
                     self._trend_store = TrendStore(trend_path(storage_paths().cache, str(profile_id)))
                     self._trend_profile = profile_id
-                self._trend_store.record(extract_samples(state if "codex" in selected else None,
-                                                         provider_states, selected))
+                if master_enabled:      # nothing is read while off; do not re-record stale values
+                    self._trend_store.record(extract_samples(state if "codex" in selected else None,
+                                                             provider_states, selected))
                 sort_urgency = bool(opts.get("usage_sort_urgency"))
                 show_trend = bool(opts.get("usage_show_trend", True))
                 if self._sort_urgency_item is not None:
@@ -2804,15 +2829,25 @@ class CodexUsageSurface:
                 self._single_fonts = {}
                 for old_font in (*old_fonts, *old_cell_fonts, *old_fit):
                     old_font.Dispose()
-            rows = quota_lines(state, language) if "codex" in selected else []
+            rows = quota_lines(state, language) if "codex" in selected and master_enabled else []
             self.active = bool(rows or others)
             if not self.active:
                 # A single empty snapshot (reload, provider rescan) must not
                 # blink the strip; hide only when it stays empty.
                 self._inactive_ticks += 1
-                if self._inactive_ticks >= 3 or not form.Visible:
+                # Switched off: hide at once.  Never leave the hover card (or its
+                # leave-grace timer) behind a hidden strip.
+                if self._inactive_ticks >= 3 or not form.Visible or not master_enabled:
                     click_timer.Stop()
                     self._last_click = None
+                    leave_grace.Stop()
+                    self._hovered = False
+                    self._pointer_on_hover = False
+                    try:
+                        from . import ui_dialogs
+                        ui_dialogs.hide_hover_card()
+                    except Exception:
+                        pass
                     if form.Visible:
                         form.Hide()
                 return
