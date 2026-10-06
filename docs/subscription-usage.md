@@ -1,8 +1,11 @@
 # Codex usage monitoring
 
-In **Settings → Extensions**, turn on **Codex usage monitoring**. The switch
-saves immediately, automatically detects local Codex and restores monitoring on
-the next Radar launch. No path, API key or separate Apply step is needed. It does
+In **Settings → Extensions**, turn on **Quota monitoring**. It is the single
+master switch for quota reading and the taskbar strip (menu-bar item on macOS)
+across all supported AI apps; which apps are shown, and per-app automatic
+reading, are chosen in the strip's right-click menu and are kept when the
+switch is turned off and on again. The switch saves immediately, automatically
+detects local Codex and restores monitoring on the next Radar launch. No path, API key or separate Apply step is needed. It does
 not discover or connect to SSH servers. The feature is off by default. It can
 also be used before adding a server.
 
@@ -34,7 +37,7 @@ type update when the taskbar DPI changes. Opening the menu cancels a pending
 single click. Docked widgets hide while the taskbar is hidden/restarting; widgets
 yield to a fullscreen app on the same monitor and restore automatically, checked
 once per second. A normal maximized window is not treated as fullscreen. Single-click
-opens the GPU home page; double-click opens Codex usage details. A single click
+opens the GPU home page; double-click opens the quota monitoring switch in Settings. A single click
 waits for the system double-click interval so double-clicking does not open both.
 The right internal padding is two logical pixels. **Hide usage strip** turns the display off; re-enable
 it in Settings → Extensions. Placement resets to the taskbar on the next launch.
@@ -54,16 +57,17 @@ window is shown at a time (the first returned window); the period picker has bee
 removed. Hover shows the period and all quota details; in the hover card, clicking
 the row of a detected desktop app opens it or brings its window to the front (the
 row is highlighted under the pointer and while pressed). Double-click for
-quota details/settings, or unlock and drag to reposition. The widget
+the quota monitoring setting, or unlock and drag to reposition. The widget
 stays visible with Radar hidden, stays within the available screen area, and
 does not take keyboard focus or add a taskbar button. Right-click also provides
 refresh, disable and quit actions. macOS uses a compact native menu-bar item with percentages
 and countdowns, plus a menu for details and actions. Closing Radar's main window
 with **hide to tray** selected keeps the active menu-bar display available.
 
-Settings keeps a compact switch row; **Details and settings** holds the optional
-path, refresh action and quota details. There is no quota card on the GPU home
-page. Hover over a reset countdown in settings to see the local reset date/time.
+Settings keeps one switch row with a short status line (number of detected AI
+apps and the latest read time). Quota details live in the strip and its hover
+card; there is no quota card in Settings or on the GPU home page. A previously
+saved Codex executable path keeps working.
 Quotas are shared across the signed-in
 account, not specific to Radar or a conversation. A five-hour or weekly window
 is displayed only when reported. Missing data is shown as unavailable; expired

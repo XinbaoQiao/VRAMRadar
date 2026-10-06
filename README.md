@@ -121,12 +121,12 @@ Do not disable SmartScreen or Gatekeeper globally. See
    resource view. To monitor this computer, add a server and choose
    **Local GPU (NVIDIA / AMD / Intel)** as the connection type.
 3. In **Settings**, choose task-completion and favorite-GPU alerts.
-4. To show AI quota, open **Settings → Extensions** and turn on **Codex usage**.
+4. To show AI quota, open **Settings → Extensions** and turn on **Quota monitoring**. It is the single on/off switch for all AI apps; choose which apps appear from the strip's right-click menu.
 
 ### Taskbar strip
 
 - **Click**: open the GPU overview window.
-- **Double-click**: open quota details in Settings.
+- **Double-click**: open the quota monitoring switch in Settings.
 - **Right-click** menu:
 
 <img src="docs/assets/readme/context-menu-en.png" width="240" alt="Strip context menu">
@@ -169,7 +169,7 @@ See [PRIVACY.md](PRIVACY.md) and [AI app providers](docs/ai-app-providers.md).
 | Symptom | What to check |
 |---|---|
 | A server is not monitoring ready | The card distinguishes network, authentication, configuration and resource-reading errors. Verify `ssh <alias>` works in a terminal, then choose **Validate again**. |
-| The strip does not appear | Turn on **Settings → Extensions → Codex usage**. If it was moved, use **Lock to taskbar**. |
+| The strip does not appear | Turn on **Settings → Extensions → Quota monitoring**. If it was moved, use **Lock to taskbar**. |
 | An app shows no quota | Make sure the app is installed and signed in, use **Models → Detect again**, and for Grok or Kimi allow **Read quota automatically**. |
 | SmartScreen or Gatekeeper blocks launch | See [Installation](#installation). |
 | Reporting a problem | Use **Copy diagnostics** (locally redacted) and open an [Issue](../../issues) with the OS and app version. Do not post passwords, private keys or real server addresses. |

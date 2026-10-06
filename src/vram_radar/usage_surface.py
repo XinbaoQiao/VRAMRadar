@@ -3000,7 +3000,8 @@ class CodexUsageSurface:
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()
-            hint = "Click: GPU home · Double-click: quota details" if language == "en" else "单击打开 GPU 主页 · 双击查看额度详情"
+            hint = ("Click: GPU home · Double-click: quota monitoring settings" if language == "en"
+                    else "单击打开 GPU 主页 · 双击打开额度监控设置")
             tip = concise_tooltip(rows, provider_rows, language)
             form.AccessibleName = ("Codex · " + rows[index]["label"]) if rows and not multi else (
                 "AI usage" if english else "AI 用量")

@@ -143,44 +143,44 @@
       importAliasChoiceDrafts.length === 0 && !document.getElementById('import-alias-choices');
     ui.dialog.close();
     const beforeUsageProfile = currentProfile;
-    const beforeUsageState = codexUsageState;
+    const beforeUsageState = quotaMonitorState;
     currentProfile = {...currentProfile, codex_usage_enabled: true};
     openSettings({forceNormal: true});
     ui.extensionsSettings.open = true;
-    assertions.codex_settings_compact_by_default = !document.getElementById('quota-usage-options').open
-      && !ui.extensionsSettings.querySelector('.local-only-badge')
-      && !document.getElementById('quota-usage-dashboard');
-    document.getElementById('quota-usage-options').open = true;
-    const usageFixture = {state: 'ready', plan: 'Pro', fetched_at: Date.now() / 1000, windows: [
-      {name: 'Codex', window_minutes: 300, remaining_percent: 63, resets_at: Date.now() / 1000 + 3600},
-      {name: 'Codex', window_minutes: 10080, remaining_percent: null, resets_at: null},
-    ]};
-    renderCodexUsage(usageFixture);
-    assertions.codex_extension_is_peer_and_preserves_unknown =
+    const extensionBody = ui.extensionsSettings.querySelector('.quota-extension-body');
+    assertions.quota_extension_is_single_switch =
       ui.extensionsSettings.parentElement === ui.profileSettings.parentElement
-      && document.querySelectorAll('#quota-usage-details [role="meter"]').length === 1
-      && document.querySelector('#quota-usage-details [role="meter"]').getAttribute('aria-valuenow') === '63'
-      && document.getElementById('quota-usage-details').textContent.includes('—');
-    assertions.codex_cards_fit_settings = [...document.querySelectorAll('#quota-usage-details .quota-quota-card')]
-      .every(node => node.scrollWidth <= node.clientWidth + 1);
+      && extensionBody.querySelectorAll('input[type="checkbox"]').length === 1
+      && !extensionBody.querySelector('details, button, [role="meter"], .quota-quota-card')
+      && !document.getElementById('quota-usage-options') && !document.getElementById('refresh-quota-usage')
+      && !ui.extensionsSettings.querySelector('.local-only-badge');
+    const monitorFixture = {primary: {fetched_at: Date.now() / 1000}, providers: {
+      codex: {installed: true}, kimi: {installed: true, fetched_at: Date.now() / 1000 - 60},
+      grok: {installed: true}, glm: {installed: false}}};
+    renderQuotaMonitor(monitorFixture);
+    const statusNode = document.getElementById('quota-usage-status');
+    assertions.quota_status_counts_detected_apps = statusNode.textContent.startsWith('已检测到 3 个 AI 应用')
+      && statusNode.textContent.includes('上次读取') && !statusNode.textContent.includes('Codex');
     window.VRAMRadarI18n.setLanguage('en');
-    renderCodexUsage(usageFixture);
+    renderQuotaMonitor(monitorFixture);
     await wait(50);
-    assertions.codex_english_labels = !hasChinese(document.getElementById('quota-usage-details').textContent)
-      && document.getElementById('quota-usage-details').textContent.includes('Weekly quota');
-    renderCodexUsage({...usageFixture, windows: [{...usageFixture.windows[0], resets_at: 1}]});
-    assertions.codex_expired_quota_not_presented_as_current =
-      !document.querySelector('#quota-usage-details [role="meter"]')
-      && document.getElementById('quota-usage-details').textContent.includes('Awaiting quota update');
+    assertions.quota_switch_english = !hasChinese(extensionBody.textContent)
+      && extensionBody.textContent.includes('Quota monitoring')
+      && statusNode.textContent.startsWith('3 AI apps detected');
+    renderQuotaMonitor({providers: {kimi: {installed: true}}, primary: null});
+    assertions.quota_status_singular = statusNode.textContent === '1 AI app detected';
     currentProfile = {...currentProfile, codex_usage_enabled: false};
-    renderCodexUsage({state: 'disabled', windows: []});
-    assertions.codex_disabled_clears_details = !document.getElementById('quota-usage-details').textContent;
+    renderQuotaMonitor(monitorFixture);
+    assertions.quota_status_off = statusNode.textContent === 'Quota monitoring is off';
+    window.VRAMRadarI18n.setLanguage('zh-CN');
     const originalUsageApi = api;
     const savedCalls = [];
     let failUsageSave = false;
     try {
-      currentProfile = {...currentProfile, codex_usage_enabled: false, codex_executable: ''};
+      currentProfile = {...currentProfile, codex_usage_enabled: false, codex_executable: 'previous-custom-path'};
       api = {
+        get_usage_providers: async () => ({enabled: currentProfile.codex_usage_enabled, selected: ['codex', 'kimi'],
+          providers: {codex: {installed: true}, kimi: {installed: true}}}),
         get_codex_usage: async () => ({enabled: currentProfile.codex_usage_enabled, state: currentProfile.codex_usage_enabled ? 'ready' : 'disabled', windows: []}),
         save_codex_usage_settings: async (enabled, executable, revision) => {
           savedCalls.push({enabled, executable});
@@ -191,30 +191,23 @@
         },
       };
       ui.codexEnabled.checked = false;
-      ui.codexExecutable.value = 'unsaved-path';
       ui.codexEnabled.click();
       const lockedDuringSave = ui.codexEnabled.disabled;
-      await waitUntil(() => !codexSettingsBusy && !codexUsageBusy, 'Automatic usage save did not finish');
-      assertions.codex_toggle_saves_immediately_using_auto_detection = lockedDuringSave
-        && savedCalls.length === 1 && savedCalls[0].enabled && savedCalls[0].executable === ''
-        && currentProfile.codex_usage_enabled && !ui.codexEnabled.disabled;
+      await waitUntil(() => !codexSettingsBusy && !quotaMonitorBusy, 'Automatic usage save did not finish');
+      assertions.quota_switch_saves_immediately_and_keeps_path = lockedDuringSave
+        && savedCalls.length === 1 && savedCalls[0].enabled && savedCalls[0].executable === 'previous-custom-path'
+        && currentProfile.codex_usage_enabled && !ui.codexEnabled.disabled
+        && document.getElementById('quota-usage-status').textContent.startsWith('已检测到 2 个 AI 应用');
       failUsageSave = true;
       ui.codexEnabled.click();
       await waitUntil(() => !codexSettingsBusy, 'Failed usage save did not finish');
-      assertions.codex_failed_toggle_restores_saved_state = currentProfile.codex_usage_enabled && ui.codexEnabled.checked;
-      failUsageSave = false;
-      currentProfile = {...currentProfile, codex_executable: 'previous-custom-path'};
-      ui.codexExecutable.value = 'previous-custom-path';
-      document.getElementById('auto-quota-settings').click();
-      await waitUntil(() => !codexSettingsBusy && !codexUsageBusy, 'Automatic detection reset did not finish');
-      assertions.codex_restore_auto_detection_clears_manual_path = currentProfile.codex_executable === ''
-        && ui.codexExecutable.value === '' && savedCalls[savedCalls.length-1].executable === '';
+      assertions.quota_failed_toggle_restores_saved_state = currentProfile.codex_usage_enabled && ui.codexEnabled.checked;
     } finally {
-      clearTimeout(codexUsageTimer);
+      clearTimeout(quotaMonitorTimer);
       api = originalUsageApi;
     }
     currentProfile = beforeUsageProfile;
-    renderCodexUsage(beforeUsageState);
+    renderQuotaMonitor(beforeUsageState);
     window.VRAMRadarI18n.setLanguage('zh-CN');
     ui.dialog.close();
     const sizeApi = api, sizeProfile = currentProfile;

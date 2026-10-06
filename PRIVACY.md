@@ -19,7 +19,7 @@ The application connects only to:
 - GitHub's public release service to check for VRAM Radar updates; and
 - a GitHub Release asset after the user accepts an available download or update.
 
-When the optional **Settings → Extensions → Codex usage** feature is enabled,
+When the optional **Settings → Extensions → Quota monitoring** feature is enabled,
 Radar also asks the locally installed Codex app-server to query its account usage
 service. Codex handles its own sign-in and network requests. Radar does not open
 Codex credential files, send prompts, or copy tokens, account email, or raw RPC

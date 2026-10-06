@@ -5100,7 +5100,6 @@ def main(argv: list[str] | None = None) -> int:
                         shutdown.restore(lambda: window.evaluate_js(
                             "api.get_profile().then(profile => { acceptProfile(profile);"
                             "openSettings({forceNormal:true}); ui.extensionsSettings.open=true;"
-                            "document.getElementById('quota-usage-options').open=true;"
                             "ui.extensionsSettings.scrollIntoView({block:'nearest'}); });"
                         ))
 
