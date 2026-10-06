@@ -356,8 +356,6 @@ class HoverRenderTests(unittest.TestCase):
                     bitmap.Dispose()
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class HoverMenuGateTests(unittest.TestCase):
@@ -446,3 +444,90 @@ class HoverSuspendSurfaceTests(unittest.TestCase):
         self.assertFalse(self.surface._hover_dialog_open)
         self.assertFalse(self.surface._hover_armed)
         self.assertFalse(self.surface._hover_interaction_allowed(True))
+
+
+class HoverFitWidthTests(unittest.TestCase):
+    """Content-fit hover card width (offscreen render, no input)."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import clr
+            clr.AddReference("System.Drawing")
+            clr.AddReference("System.Windows.Forms")
+        except Exception as exc:
+            raise unittest.SkipTest(f"WinForms unavailable: {exc}") from exc
+
+    def render(self, rows, language="zh-CN", dark=False, scale=1.5, max_width=None):
+        from vram_radar import ui_dialogs
+        from vram_radar.hover_detail import hover_card_spec
+        spec = hover_card_spec(rows, language)
+        bitmap, layout = ui_dialogs.render_hover(
+            spec, scale, ui_dialogs.palette(dark, (0, 120, 212)), max_width=max_width)
+        try:
+            self.assertEqual(bitmap.Width, layout["width"])
+        finally:
+            bitmap.Dispose()
+        return layout
+
+    @staticmethod
+    def rows(language="zh-CN", spark=True, long=False):
+        zh = language != "en"
+        spark_pts = [(i * 3600.0, 20.0 + i * 3) for i in range(8)] if spark else []
+        grok_line = ("已用 75% · 剩余 25%" if zh else "75% used · 25% left")
+        if long:
+            grok_line = grok_line + (" · 很长的说明文字" * 12 if zh else " · a very long explanatory value" * 12)
+        return [
+            {"name": "Grok", "icon_name": "Grok", "spark": spark_pts, "inactive": False,
+             "lines": [{"text": grok_line, "tone": "body"},
+                       {"text": ("1 分钟前更新 · 7 日均已用 44%" if zh else "Updated 1 min ago · 7 d avg used 44%")
+                        if spark else ("1 分钟前更新" if zh else "Updated 1 min ago"), "tone": "note"}]},
+            {"name": "DeepSeek", "icon_name": "DeepSeek", "spark": spark_pts, "inactive": False,
+             "lines": [{"text": "余额 ¥12.50" if zh else "Balance ¥12.50", "tone": "body"}]},
+        ]
+
+    def assert_symmetric(self, layout):
+        right_gap = layout["width"] - layout["content_right"]
+        self.assertLessEqual(abs(right_gap - layout["pad"]), 3, layout)
+
+    def test_zh_en_trend_on_off_symmetric_padding(self):
+        for language in ("zh-CN", "en"):
+            for spark in (True, False):
+                for dark in (False, True):
+                    with self.subTest(language=language, spark=spark, dark=dark):
+                        layout = self.render(self.rows(language, spark), language, dark)
+                        self.assert_symmetric(layout)
+                        self.assertLess(layout["width"], int(round(440 * 1.5)))
+
+    def test_narrower_than_old_fixed_width(self):
+        # Short zh content no longer pads out to the old 300 DIP card.
+        layout = self.render(self.rows("zh-CN", spark=False), "zh-CN")
+        self.assertLess(layout["width"], int(round(300 * 1.5)))
+
+    def test_min_width_for_tiny_content(self):
+        rows = [{"name": "A", "icon_name": "A", "lines": [{"text": "1%", "tone": "body"}]}]
+        layout = self.render(rows, "en")
+        self.assertEqual(layout["width"], int(round(140 * 1.5)))
+
+    def test_long_values_clamp_to_max_and_wrap(self):
+        short = self.render(self.rows("en", True, long=False), "en")
+        layout = self.render(self.rows("en", True, long=True), "en")
+        self.assertEqual(layout["width"], int(round(440 * 1.5)))
+        self.assertGreater(layout["height"], short["height"])  # wrapped, not clipped
+        self.assertLessEqual(layout["content_right"], layout["width"] - layout["pad"] + 1)
+
+    def test_work_area_clamp(self):
+        layout = self.render(self.rows("zh-CN", True, long=True), "zh-CN", max_width=400)
+        self.assertEqual(layout["width"], 400)
+        self.assertLessEqual(layout["content_right"], 400 - layout["pad"] + 1)
+
+    def test_language_and_trend_change_width(self):
+        zh_on = self.render(self.rows("zh-CN", True), "zh-CN")
+        en_on = self.render(self.rows("en", True), "en")
+        zh_off = self.render(self.rows("zh-CN", False), "zh-CN")
+        self.assertNotEqual(zh_on["width"], en_on["width"])
+        self.assertGreaterEqual(zh_on["width"], zh_off["width"])
+
+
+if __name__ == "__main__":
+    unittest.main()

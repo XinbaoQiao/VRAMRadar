@@ -314,6 +314,8 @@ def main(out: str) -> list[str]:
         made.extend(render_hovers(out_dir, store, paths))
         store3 = seed_store_trend3(Path(tmp) / "trend3.json")
         made.append(render_trend3_zh_light(out_dir, store3, paths))
+        # trend4: content-fit width (right padding == left padding).
+        made.extend(render_hovers(out_dir, store3, paths, prefix="trend4_hover"))
     # Optional menu capture (skip when --hover-only)
     if "--hover-only" not in sys.argv:
         made.append(render_real_menu(out_dir / "trend2_menu_zh.png"))

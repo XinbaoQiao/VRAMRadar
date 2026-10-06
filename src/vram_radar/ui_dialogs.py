@@ -36,6 +36,8 @@ TOKENS = {
     "hover_name_px": 13, "hover_body_px": 12, "hover_note_px": 11,
     "hover_row_gap": 10, "hover_line_gap": 2, "hover_offset": 8,
     "hover_spark_w": 48, "hover_spark_h": 14, "hover_spark_gap": 6,
+    # Content-fit card width (DIP): clamp between min and max (and the work area).
+    "hover_min_width": 140, "hover_max_width": 440,
 }
 FONT = "Microsoft YaHei UI"   # Segoe-like Latin + CJK in one face (Windows 11 UI font for zh-CN)
 
@@ -912,8 +914,14 @@ def close_toast() -> None:
 _HOVER = {"form": None, "image": None, "delay": None, "signature": None, "on_tick": None, "shown": False}
 
 
-def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
-    """(Bitmap, layout) for a multi-app hover detail card."""
+def render_hover(spec: dict, scale: float, pal: dict, *, accent=None, max_width: int | None = None):
+    """(Bitmap, layout) for a multi-app hover detail card.
+
+    Width fits the widest row (title + sparkline, or any text line) plus the
+    same padding on the right as on the left, clamped to ``hover_min_width`` ..
+    ``hover_max_width`` and to ``max_width`` (work-area pixels) when given.
+    Lines only wrap when the clamp is hit.
+    """
     import math
     from System.Drawing import (Bitmap, Font, FontStyle, Graphics, GraphicsUnit, Pen, RectangleF, SizeF,
                                 SolidBrush, StringFormat)
@@ -923,12 +931,10 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
 
     s = lambda v: int(round(v * scale))
     t = TOKENS
-    width = s(t["hover_width"])
     pad = s(t["hover_pad"])
     icon_px = s(t["hover_icon"])
     gap = s(t["hover_gap"])
     text_x = pad + icon_px + gap
-    text_w = max(40, width - text_x - pad)
     fonts = {
         "name": Font(FONT, float(s(t["hover_name_px"])), FontStyle.Bold, GraphicsUnit.Pixel),
         "body": Font(FONT, float(s(t["hover_body_px"])), FontStyle.Regular, GraphicsUnit.Pixel),
@@ -942,6 +948,10 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     def measure(text, font, w):
         return int(math.ceil(probe.MeasureString(text or " ", font, SizeF(w, 10000), fmt).Height))
 
+    def natural(text, font):
+        # Single-line width with the same typographic format used to draw.
+        return int(math.ceil(probe.MeasureString(text or " ", font, SizeF(100000, 10000), fmt).Width)) + 1
+
     muted = pal["secondary"]
     status = _mix(pal["secondary"], pal["surface"], 0.15)
     rows = [row for row in (spec.get("rows") or []) if row.get("name")]
@@ -952,6 +962,28 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
     spark_w = s(t.get("hover_spark_w", 48))
     spark_h = s(t.get("hover_spark_h", 14))
     spark_gap = s(t.get("hover_spark_gap", 8))
+
+    # Pass 1: widest content (title + spark, every text line).
+    content_w = 0
+    for row in rows:
+        pts = row.get("spark") or []
+        row_spark = isinstance(pts, (list, tuple)) and len(pts) >= 2
+        title = natural(row["name"], fonts["name"]) + ((spark_gap + spark_w) if row_spark else 0)
+        content_w = max(content_w, title)
+        for line in row.get("lines") or []:
+            text = (line.get("text") or "").strip()
+            if not text:
+                continue
+            tone = line.get("tone") or "body"
+            key = "note" if tone in {"note", "secondary", "status"} else "body"
+            content_w = max(content_w, natural(text, fonts[key]))
+    min_w = s(t.get("hover_min_width", 140))
+    max_w = s(t.get("hover_max_width", 440))
+    if max_width is not None and max_width > 0:
+        max_w = min(max_w, int(max_width))
+    max_w = max(max_w, text_x + 40 + pad)
+    width = max(min_w, min(max_w, text_x + content_w + pad))
+    text_w = max(40, width - text_x - pad)
     for index, row in enumerate(rows):
         if index:
             y += s(t["hover_row_gap"])
@@ -991,6 +1023,12 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             y += h
         icons.append((row.get("icon_path"), row.get("icon_name") or row["name"], icon_top))
         y = max(y, icon_top + icon_px, row_top + title_h)
+    # Rightmost painted content (measured before fonts are disposed).
+    content_right = text_x
+    for _key, _text, bx, _by, bw, _bh, _c in blocks:
+        content_right = max(content_right, bx + min(bw, natural(_text, fonts[_key])))
+    for _pts, sx, _sy, sw, _sh in sparks:
+        content_right = max(content_right, sx + sw)
     height = max(y + pad, pad * 2 + icon_px)
     bitmap = Bitmap(width, height, PixelFormat.Format24bppRgb)
     g = Graphics.FromImage(bitmap)
@@ -1046,7 +1084,9 @@ def render_hover(spec: dict, scale: float, pal: dict, *, accent=None):
             except Exception:
                 pass
         g.Dispose()
-    return bitmap, {"width": width, "height": height, "buttons": [], "content_h": height}
+    return bitmap, {"width": width, "height": height, "buttons": [], "content_h": height,
+                    "pad": pad, "content_right": int(content_right),
+                    "content_w": int(content_w), "text_x": text_x}
 
 
 def hide_hover_card() -> None:
@@ -1100,7 +1140,16 @@ def _present_hover(spec, anchor, scale, dark, accent):
     dark_v = system_dark() if dark is None else dark
     accent_v = accent or system_accent()
     pal = palette(dark_v, accent_v)
-    signature = (spec.get("language"),
+    try:
+        if anchor:
+            work = Screen.FromPoint(Point(int(anchor[0]), int(anchor[1]))).WorkingArea
+        else:
+            work = Screen.PrimaryScreen.WorkingArea
+        edge = int(round(TOKENS["hover_offset"] * float(scale_v)))
+        max_width = max(1, int(work.Width) - 2 * edge)
+    except Exception:
+        max_width = None
+    signature = (spec.get("language"), max_width,
                  tuple((row.get("name"),
                         tuple((line.get("text"), line.get("tone")) for line in row.get("lines") or []),
                         row.get("icon_path"),
@@ -1128,7 +1177,7 @@ def _present_hover(spec, anchor, scale, dark, accent):
         _HOVER["form"] = form
     handle = int(form.Handle.ToInt64())
     if signature != _HOVER.get("signature"):
-        bitmap, layout = render_hover(spec, scale_v, pal, accent=accent_v)
+        bitmap, layout = render_hover(spec, scale_v, pal, accent=accent_v, max_width=max_width)
         old = _HOVER.get("image")
         form.BackgroundImage = bitmap
         form.ClientSize = Size(layout["width"], layout["height"])
