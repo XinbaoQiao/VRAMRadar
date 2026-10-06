@@ -21,11 +21,11 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>下载 v1.0.0</strong></a>
+  <a href="../../releases/latest"><strong>下载 v1.0.1</strong></a>
   · <a href="#安装">安装</a>
   · <a href="#使用">使用</a>
   · <a href="#常见问题">常见问题</a>
-  · <a href="docs/release-notes-v1.0.0.md">更新日志</a>
+  · <a href="docs/release-notes-v1.0.1.md">更新日志</a>
 </p>
 
 ![VRAM Radar GPU 总览（示例数据）](docs/assets/readme/overview-zh.png)
@@ -91,8 +91,8 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
-| macOS | `VRAMRadar-1.0.0-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-1.0.1.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
+| macOS | `VRAMRadar-1.0.1-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
 
 请勿全局关闭 SmartScreen 或 Gatekeeper。详见
 [Windows 安装与更新](docs/windows-install-and-update.md)、
@@ -187,7 +187,7 @@ bash Build-VramRadar-macOS.sh --skip-sync
 
 ## 文档
 
-- [更新日志：v1.0.0 发布说明](docs/release-notes-v1.0.0.md)
+- [更新日志：v1.0.1 发布说明](docs/release-notes-v1.0.1.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
 - [SSH 配置发现](docs/server-config-discovery.md)
 - [额度监控](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
 - [Windows 安装与更新](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
