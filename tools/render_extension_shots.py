@@ -108,11 +108,15 @@ def measure(browser: str | None = None) -> dict[str, dict] | None:
         for lang, tag in (("zh-CN", "zh"), ("en", "en")):
             for state in ("on", "off"):
                 url = index.resolve().as_uri() + f"?lang={lang}&monitor={state}"
-                done = subprocess.run(_command(browser, Path(tmp) / f"m-{tag}{state}", "--dump-dom", url),
-                                      capture_output=True, timeout=180,
-                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                try:
+                    done = subprocess.run(_command(browser, Path(tmp) / f"m-{tag}{state}", "--dump-dom", url),
+                                          capture_output=True, timeout=90,
+                                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    output = done.stdout
+                except subprocess.TimeoutExpired as exc:     # a stalled browser yields no metrics
+                    output = exc.stdout or b""
                 found = re.search(r'<pre id="ext-metrics" hidden="">(.*?)</pre>',
-                                  done.stdout.decode("utf-8", "replace"), re.S)
+                                  output.decode("utf-8", "replace"), re.S)
                 results[f"{tag}_{state}"] = json.loads(found.group(1).replace("&quot;", '"').replace("&amp;", "&")) if found else {}
     return results
 

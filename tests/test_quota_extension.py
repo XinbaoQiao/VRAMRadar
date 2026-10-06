@@ -166,7 +166,12 @@ class CompactSpacingRenderTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        import os
         import sys
+        # Same rule as test_english_web_ui: headless Chrome on macOS runners stalls
+        # under --virtual-time-budget; the shared web UI is measured on Windows/Linux.
+        if os.environ.get("VRAM_RADAR_SKIP_BROWSER_TESTS") or sys.platform == "darwin":
+            raise unittest.SkipTest("headless browser rendering is not run on macOS")
         sys.path.insert(0, str(ROOT / "tools"))
         from render_extension_shots import measure
         cls.metrics = measure()
