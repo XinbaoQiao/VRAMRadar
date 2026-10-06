@@ -14,6 +14,7 @@ Prints JSON; exit 1 on CJK hits, 2 when no browser is available.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from html.parser import HTMLParser
 import json
 import os
@@ -23,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +142,25 @@ def render(browser: str, index: Path, profile: Path, query: str) -> str:
     return result.stdout.decode("utf-8", "replace")
 
 
+@contextmanager
+def temporary_browser_directory():
+    directory = tempfile.TemporaryDirectory(prefix="vram-radar-web-ui-")
+    try:
+        yield directory.name
+    finally:
+        # Chromium can exit before Windows releases its profile database/log
+        # handles. Retry only this owned directory; never suppress cleanup errors.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                directory.cleanup()
+                break
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.1)
+
+
 def run(language: str = "en", browser: str | None = None) -> dict:
     """Render every scenario; ``ok`` is None when no browser is available."""
     browser = find_browser(browser)
@@ -147,7 +168,7 @@ def run(language: str = "en", browser: str | None = None) -> dict:
         return {"ok": None, "language": language, "skipped": "no Chromium-family browser found"}
     report: dict = {"language": language, "scenarios": {}}
     failed = False
-    with tempfile.TemporaryDirectory(prefix="vram-radar-web-ui-") as temp:
+    with temporary_browser_directory() as temp:
         folder = Path(temp)
         index = prepare(folder)
         for scenario in SCENARIOS:

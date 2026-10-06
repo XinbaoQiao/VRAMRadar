@@ -105,6 +105,7 @@ class ConnectorFailure(RuntimeError):
         remote_exit_code: int | None = None,
         reason: str | None = None,
         environment_attempts: tuple[str, ...] = (),
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -114,6 +115,7 @@ class ConnectorFailure(RuntimeError):
         self.remote_exit_code = remote_exit_code
         self.reason = reason
         self.environment_attempts = environment_attempts
+        self.retry_after_seconds = retry_after_seconds
 
 
 class _BoundedProcessResult:
@@ -402,12 +404,17 @@ def classify_process_error(
         or re.search(r"^authentication failed\.?\s*$", lower, flags=re.MULTILINE)
     )
     if returncode == 255 and auth_denied:
+        public_key_rejected = not password_auth and bool(re.search(
+            r"^(?:[^\n]*@[^\n]*:\s*)?permission denied \(publickey(?:,password|,keyboard-interactive)*\)\.?\s*$",
+            lower, flags=re.MULTILINE,
+        ))
         method = "保存的服务器密码" if password_auth else "SSH Key、ssh-agent 或用户名"
         return ConnectorFailure(
             "auth_failed",
             f"SSH 身份验证失败，请检查{method}",
             retryable=False,
             state="auth_required",
+            reason="public_key_rejected" if public_key_rejected else None,
         )
     if "command not found" in lower or "not recognized as an internal" in lower:
         if returncode == 255:

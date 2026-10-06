@@ -71,6 +71,7 @@ from .server_catalog import (
 from .openssh_resolution import format_openssh_connection_summary
 from .secrets import SecretStore
 from .service import DashboardService, favorite_resource_matches
+from .ssh_recovery import HostSshRecovery
 from .ssh_keys import (
     INSTALL_AUTHORIZED_KEY_SCRIPT,
     VERIFY_SSH_KEY_SCRIPT,
@@ -4855,6 +4856,7 @@ def build_runtime(
         logger=logger,
         secret_store=secret_store,
         startup_notices=startup_notices,
+        ssh_recovery=HostSshRecovery(paths.config / "ssh-recovery.json", profile.id),
     )
     return paths, store, profile, service
 

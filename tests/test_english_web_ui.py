@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -33,6 +34,26 @@ class EnglishWebUiTests(unittest.TestCase):
 
 
 class RepeatRuleTests(unittest.TestCase):
+    def test_browser_cleanup_waits_for_owned_file_handles(self):
+        directory = Mock(name="temporary-directory")
+        directory.name = "owned-profile"
+        directory.cleanup.side_effect = [PermissionError("busy"), None]
+        with patch.object(check_english_web_ui.tempfile, "TemporaryDirectory", return_value=directory), \
+                patch.object(check_english_web_ui.time, "sleep") as sleep:
+            with check_english_web_ui.temporary_browser_directory() as path:
+                self.assertEqual(path, "owned-profile")
+        self.assertEqual(directory.cleanup.call_count, 2)
+        sleep.assert_called_once_with(0.1)
+
+    def test_browser_cleanup_still_reports_persistent_locks(self):
+        directory = Mock()
+        directory.cleanup.side_effect = PermissionError("busy")
+        with patch.object(check_english_web_ui.tempfile, "TemporaryDirectory", return_value=directory), \
+                patch.object(check_english_web_ui.time, "monotonic", side_effect=[0, 6]):
+            with self.assertRaises(PermissionError):
+                with check_english_web_ui.temporary_browser_directory():
+                    pass
+
     def test_chinese_repeat_rule(self):
         rule = check_english_web_ui.REPEAT_ZH
         for text in ("A100 Cluster，数据已过期，数据已过期", "4090 Workstation，网络不可达，网络不可达，2 个任务"):

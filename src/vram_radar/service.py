@@ -671,6 +671,7 @@ class DashboardService:
         logger: logging.Logger | None = None,
         startup_notices: list[dict[str, str]] | None = None,
         profile_persist: Callable[[Profile], bool] | None = None,
+        ssh_recovery: Callable[[ServerProfile], bool | None] | None = None,
     ) -> None:
         self.profile = profile
         self.cache = cache
@@ -681,6 +682,7 @@ class DashboardService:
         self.clock = clock
         self.logger = logger or logging.getLogger("vram_radar")
         self.profile_persist = profile_persist
+        self.ssh_recovery = ssh_recovery
         self.profile_mutation_lock = threading.RLock()
         self._notices = [
             {
@@ -1114,6 +1116,8 @@ class DashboardService:
             runtime.failure_count += 1
             runtime.process_timing.clear()
             delay = RETRY_SECONDS[min(runtime.failure_count - 1, len(RETRY_SECONDS) - 1)] if failure.retryable else None
+            if delay is not None and failure.retry_after_seconds is not None:
+                delay = max(delay, min(3600, max(0, failure.retry_after_seconds)))
             runtime.next_attempt_monotonic = self.clock() + delay if delay is not None else float("inf")
             runtime.retry_at = future_utc(delay) if delay is not None else None
             runtime.state = "stale" if runtime.payload is not None and failure.state == "offline" else failure.state
@@ -1258,13 +1262,34 @@ class DashboardService:
         # A Profile can outlive a Keychain/Credential Manager item after a
         # cross-machine migration; a stale auth_ref must never block a valid
         # config IdentityFile, ssh-agent, ProxyJump, or newly deployed key.
-        try:
+        def identity_call() -> dict[str, Any]:
             if server.prefer_identity_auth and server.identity_file:
                 if _accepts_keyword(operation, "identities_only"):
                     return operation(server, identities_only=True)
                 return operation(server)
             return operation(server)
+
+        try:
+            return identity_call()
         except ConnectorFailure as identity_failure:
+            if (identity_failure.code == "auth_failed"
+                    and identity_failure.reason == "public_key_rejected"
+                    and self.ssh_recovery is not None):
+                recovered = self.ssh_recovery(server)
+                if recovered:
+                    # Only the failed read-only collection is repeated, once.
+                    # Never recurse or fall through to password after recovery.
+                    self.logger.info("server=%s SSH access recovery verified; retrying collection", server.id)
+                    try:
+                        return identity_call()
+                    except ConnectorFailure as retry_failure:
+                        if (retry_failure.code == "auth_failed"
+                                and retry_failure.reason == "public_key_rejected"):
+                            retry_failure.retryable = True
+                            retry_failure.retry_after_seconds = 300
+                        raise
+                if recovered is False:
+                    raise identity_failure
             # Password is a fallback only for an authentication rejection.
             # DNS, host-key, proxy and collector failures must retain their
             # original classification and must not cause a second connection.
