@@ -117,5 +117,80 @@ class MasterSwitchSemanticsTests(unittest.TestCase):
                 api._usage_providers.close()
 
 
+def css_rule(css: str, selector: str) -> dict[str, str]:
+    found = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+    if not found:
+        raise AssertionError(f"missing CSS rule {selector}")
+    return {key.strip(): value.strip() for key, value in
+            (part.split(":", 1) for part in found.group(1).split(";") if ":" in part)}
+
+
+def px(value: str) -> float:
+    return float(value.removesuffix("px"))
+
+
+class CompactSpacingCssTests(unittest.TestCase):
+    """Static guarantees that hold on every WebView (Windows WebView2 and macOS WebKit)."""
+
+    def setUp(self):
+        self.css = (WEB / "app.css").read_text(encoding="utf-8")
+
+    def test_checkbox_is_a_fixed_box_on_the_title_line(self):
+        box = css_rule(self.css, ".quota-extension-row .check-label input")
+        label = css_rule(self.css, ".quota-extension-row .check-label")
+        title = css_rule(self.css, ".quota-extension-row strong")
+        self.assertEqual(label["align-items"], "flex-start")
+        self.assertEqual(box["min-height"], "0")                    # the generic 38px input height must not apply
+        self.assertEqual(box["padding"], "0")
+        top = px(box["margin"].split()[0])
+        self.assertAlmostEqual(top + px(box["height"]) / 2, px(title["line-height"]) / 2, delta=0.5)
+
+    def test_status_hangs_under_the_label_text_with_a_small_gap(self):
+        box = css_rule(self.css, ".quota-extension-row .check-label input")
+        label = css_rule(self.css, ".quota-extension-row .check-label")
+        top, _right, _bottom, left = (css_rule(self.css, "#quota-usage-status")["margin"].split() + ["0"] * 4)[:4]
+        self.assertEqual(px(left), px(box["width"]) + px(label["gap"]))
+        self.assertLessEqual(px(top), 6)
+
+    def test_block_padding_is_balanced_and_matches_card_insets(self):
+        padding = css_rule(self.css, ".quota-extension-body")["padding"].split()
+        self.assertEqual(padding, ["14px", "16px"])                 # same 16px side inset as the card headings
+
+    def test_font_sizes_are_unchanged(self):
+        self.assertEqual(css_rule(self.css, ".quota-extension-row small")["font-size"], "var(--font-small)")
+        self.assertEqual(css_rule(self.css, "#quota-usage-status")["font-size"], "var(--font-small)")
+
+
+class CompactSpacingRenderTests(unittest.TestCase):
+    """Measured geometry in a headless Chromium-family browser (skipped when none is installed)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(ROOT / "tools"))
+        from render_extension_shots import measure
+        cls.metrics = measure()
+        if cls.metrics is None:
+            raise unittest.SkipTest("no headless Chromium-family browser")
+
+    def test_every_language_and_state_has_the_same_compact_rhythm(self):
+        self.assertEqual(sorted(self.metrics), ["en_off", "en_on", "zh_off", "zh_on"])
+        shape = None
+        for name, values in self.metrics.items():
+            with self.subTest(name):
+                self.assertNotIn("error", values)
+                self.assertLessEqual(abs(values["status_left_minus_text_left"]), 1)
+                self.assertGreaterEqual(values["row_to_status_gap"], 0)
+                self.assertLessEqual(values["row_to_status_gap"], 8)
+                self.assertLessEqual(abs(values["checkbox_center_minus_title_center"]), 2)
+                self.assertLessEqual(values["title_to_desc_pitch"], 19)
+                self.assertLessEqual(abs(values["top_padding"] - values["bottom_padding"]), 4)
+                self.assertLessEqual(values["bottom_padding"], 22)
+                self.assertEqual({values["title_font"], values["desc_font"], values["status_font"]}, {"13px"})
+                current = {key: value for key, value in values.items() if key != "status_text"}
+                shape = shape or current
+                self.assertEqual(current, shape)
+
+
 if __name__ == "__main__":
     unittest.main()
