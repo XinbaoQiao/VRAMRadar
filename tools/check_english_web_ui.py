@@ -143,8 +143,8 @@ def render(browser: str, index: Path, profile: Path, query: str) -> str:
 
 
 @contextmanager
-def temporary_browser_directory():
-    directory = tempfile.TemporaryDirectory(prefix="vram-radar-web-ui-")
+def temporary_browser_directory(*, prefix="vram-radar-web-ui-", directory=None):
+    directory = tempfile.TemporaryDirectory(prefix=prefix, dir=directory)
     try:
         yield directory.name
     finally:

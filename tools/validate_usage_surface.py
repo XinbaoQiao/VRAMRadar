@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 import sys
 import tempfile
+from check_english_web_ui import temporary_browser_directory
 import threading
 import time
 
@@ -433,7 +434,7 @@ def main() -> int:
             (args.output / "native-surface.json").write_text(json.dumps(result, indent=2)+"\n", encoding="utf-8")
             window.destroy()
 
-    with tempfile.TemporaryDirectory(prefix="codex-surface-", dir=args.output) as temporary:
+    with temporary_browser_directory(prefix="codex-surface-", directory=args.output) as temporary:
         timeout.start()
         webview.start(run, private_mode=True, storage_path=temporary)
     print(json.dumps(result, ensure_ascii=False))
