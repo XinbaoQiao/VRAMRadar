@@ -1751,6 +1751,13 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
         if separator and match:
             # Do not expose the remote boot identifier in the UI or cache.
             identity = hashlib.sha256(f"{match[1]}:{pid}:{match[2]}".encode()).hexdigest()
+    elapsed_override = None
+    if text.startswith("VRAM_ELAPSED "):
+        header, separator, text = text.partition("\n")
+        value = header.removeprefix("VRAM_ELAPSED ")
+        if not separator or not value.isdigit():
+            return None
+        elapsed_override = int(value)
     source = "ps"
     if text.startswith("VRAM_PROC\n"):
         source = "proc"
@@ -1769,7 +1776,8 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
     return {
         "uid": parts[1],
         "user": parts[2],
-        "elapsed_seconds": int(parts[3]) if parts[3].isdigit() else None,
+        "elapsed_seconds": elapsed_override if elapsed_override is not None else (int(parts[3]) if parts[3].isdigit() else None),
+        "timing_source": "lstart" if elapsed_override is not None else source,
         "metadata_source": source,
         "process_identity": identity,
         "cpu_percent": cpu_percent,
@@ -1872,6 +1880,7 @@ def _build_direct_processes(
                 "metadata_visibility": "full" if metadata else "none",
                 "metadata_reason": metadata_reason,
                 "metadata_source": metadata.get("metadata_source") if metadata else None,
+                "timing_source": metadata.get("timing_source") if metadata else None,
                 "allocations": allocations,
                 "memory_used_gib": round(sum(memory_values), 2) if memory_values else None,
             }
@@ -1928,6 +1937,21 @@ proc_metadata() (
     proc_after=$(printf '%s\n' "$stat_fields" | awk '{print $20}')
     [ "$proc_start" = "$proc_after" ] || return 1
     printf '%s %s %s %s %s' "$proc_pid" "$proc_uid" "$proc_user" "$proc_elapsed" "$proc_cmd"
+)
+"""
+
+
+
+# A separate wall-clock query handles containers whose uptime clock is mismatched.
+PROCESS_LSTART_FALLBACK = r"""
+process_lstart_elapsed() (
+    start_text=$(LC_ALL=C TZ=UTC0 ps -p "$1" -o lstart= 2>/dev/null) || return 1
+    [ -n "$start_text" ] || return 1
+    start_epoch=$(LC_ALL=C TZ=UTC0 date -d "$start_text" +%s 2>/dev/null) || return 1
+    now_epoch=$(date +%s 2>/dev/null) || return 1
+    case "$start_epoch:$now_epoch" in *[!0-9:]*|:*|*:) return 1 ;; esac
+    [ "$start_epoch" -gt 0 ] && [ "$now_epoch" -ge "$start_epoch" ] || return 1
+    printf '%s' "$((now_epoch - start_epoch))"
 )
 """
 
@@ -2055,6 +2079,7 @@ process_start_ticks() {{
     printf '%s' "$1"
 }}
 {PROC_METADATA_FALLBACK}
+{PROCESS_LSTART_FALLBACK}
 for pid in $pids; do
     start_before=$(process_start_ticks "$pid") || start_before=''
     meta=''
@@ -2066,7 +2091,17 @@ for pid in $pids; do
         meta=''
     fi
     if [ -n "$meta" ]; then
+        elapsed_field=$(printf '%s' "$meta" | tail -n 1 | awk '{{print $4}}')
+        case "$elapsed_field" in 0|-)
+            if recovered_elapsed=$(process_lstart_elapsed "$pid"); then
+                meta=$(printf 'VRAM_ELAPSED %s\\n%s' "$recovered_elapsed" "$meta")
+            fi
+        ;; esac
         start_after=$(process_start_ticks "$pid") || start_after=''
+        if [ -n "$start_before" ] && [ "$start_before" != "$start_after" ]; then
+            printf 'META|%s|UNAVAILABLE|\\n' "$pid"
+            continue
+        fi
         if [ -n "$boot_id" ] && [ -n "$start_before" ] && [ "$start_before" = "$start_after" ]; then
             meta=$(printf 'VRAM_ID %s %s\\n%s' "$boot_id" "$start_before" "$meta")
         fi

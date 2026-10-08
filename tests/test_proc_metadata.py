@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 
-from vram_radar.connectors import PROC_METADATA_FALLBACK, _parse_process_metadata, _build_direct_processes
+from vram_radar.connectors import PROC_METADATA_FALLBACK, PROCESS_LSTART_FALLBACK, _parse_process_metadata, _build_direct_processes
 
 
 @unittest.skipUnless(shutil.which("bash"), "bash unavailable")
@@ -81,3 +81,21 @@ class ProcMetadataFallbackTests(unittest.TestCase):
         metadata = _parse_process_metadata("42", "VRAM_PROC\n42 1001 owner 10 123 --task job")
         self.assertEqual(metadata["command"], "123 --task job")
         self.assertIsNone(metadata["cpu_percent"])
+
+    def test_lstart_overrides_zero_without_losing_command(self):
+        for prefix, tail in [("", "0.5 python train.py"), ("VRAM_PROC\n", "python train.py")]:
+            metadata = _parse_process_metadata("42", "VRAM_ELAPSED 3600\n" + prefix + "42 1001 owner 0 " + tail)
+            self.assertEqual(metadata["elapsed_seconds"], 3600)
+            self.assertEqual(metadata["timing_source"], "lstart")
+            self.assertEqual(metadata["command"], "python train.py")
+
+    def test_lstart_shell_rejects_future_invalid_and_missing_dates(self):
+        for start, expected in [("1000", "2600"), ("5000", None), ("invalid", None), ("", None)]:
+            script = PROCESS_LSTART_FALLBACK + "\nps() { printf 'Thu Oct 8 00:00:00 2026'; }\n"
+            script += 'date() { if [ "$1" = "-d" ]; then printf "%s" "' + start + '"; else printf 3600; fi; }\nprocess_lstart_elapsed 42\n'
+            result = subprocess.run([shutil.which("bash"), "-c", script], capture_output=True, timeout=10)
+            if expected is None:
+                self.assertNotEqual(result.returncode, 0)
+            else:
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.decode(), expected)
