@@ -1116,6 +1116,8 @@ class DashboardService:
             runtime.failure_count += 1
             runtime.process_timing.clear()
             delay = RETRY_SECONDS[min(runtime.failure_count - 1, len(RETRY_SECONDS) - 1)] if failure.retryable else None
+            if delay is not None:
+                delay = max(delay, self.profile.refresh_seconds)
             if delay is not None and failure.retry_after_seconds is not None:
                 delay = max(delay, min(3600, max(0, failure.retry_after_seconds)))
             runtime.next_attempt_monotonic = self.clock() + delay if delay is not None else float("inf")
