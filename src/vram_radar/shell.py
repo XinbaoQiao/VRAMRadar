@@ -4645,6 +4645,7 @@ class AppApi:
 
     def _import_server_config_locked(self, path: str | list[str] = "") -> dict[str, Any]:
         try:
+            removed_candidates: list[ServerProfile] = []
             if isinstance(path, list):
                 if not path or not all(isinstance(value, str) and value.strip() for value in path):
                     raise ConfigError("没有可导入的服务器设置文件")
@@ -4652,6 +4653,7 @@ class AppApi:
                 synchronized, warnings = profile_from_server_configs(
                     self.profile,
                     [source for source in sources if source is not None],
+                    removed_candidates=removed_candidates,
                 )
                 desktop = self._desktop_profile(synchronized)
                 return {
@@ -4662,13 +4664,16 @@ class AppApi:
                     "persisted": False,
                     "validated": False,
                     "servers": desktop["servers"],
+                    "removed_servers": self._desktop_profile(replace(synchronized, servers=tuple(removed_candidates)))["servers"],
                     "pending_alias_choices": desktop.get("pending_alias_choices") or [],
                     "warnings": warnings,
                 }
             source = resolve_server_config(path or None)
             if source is None:
                 raise ConfigError("未发现默认 servers.toml，可手动输入文件地址")
-            synchronized, warnings = profile_from_server_config(self.profile, source)
+            synchronized, warnings = profile_from_server_configs(
+                self.profile, [source], removed_candidates=removed_candidates,
+            )
             desktop = self._desktop_profile(synchronized)
             return {
                 "ok": True,
@@ -4678,6 +4683,7 @@ class AppApi:
                 "persisted": False,
                 "validated": False,
                 "servers": desktop["servers"],
+                "removed_servers": self._desktop_profile(replace(synchronized, servers=tuple(removed_candidates)))["servers"],
                 "pending_alias_choices": desktop.get("pending_alias_choices") or [],
                 "warnings": warnings,
             }

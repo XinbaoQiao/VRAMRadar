@@ -266,6 +266,33 @@
       assertions.bottom_scroll_height_stays_stable = Math.max(...samples)-Math.min(...samples) <= 2;
       assertions.bottom_server_header_stays_stable = Math.max(...headPositions)-Math.min(...headPositions) <= 2;
     }
+    openSettings({forceNormal: true});
+    pendingIgnoredSshAliases = new Set(['retired-a', 'retired-b']);
+    const restoreFixture = [
+      {id: 'restore-a', display_name: '<b>Removed A</b>', ssh_alias: 'retired-a', backend: 'direct_ssh'},
+      {id: 'restore-b', display_name: 'Removed B', ssh_alias: 'retired-b', backend: 'direct_ssh'},
+    ];
+    renderRemovedServerChoices(restoreFixture);
+    const restorePanel = document.getElementById('removed-server-choices');
+    assertions.removed_servers_default_collapsed = restorePanel.tagName === 'DETAILS' && !restorePanel.open && restorePanel.querySelector('.removed-server-count').textContent === '2';
+    restorePanel.querySelector('summary').click();
+    assertions.removed_servers_can_expand = restorePanel.open;
+    assertions.removed_servers_default_unselected = restorePanel.querySelectorAll('input:checked').length === 0 && restorePanel.querySelector('button').disabled;
+    assertions.removed_server_labels_are_escaped = !restorePanel.querySelector('b');
+    restorePanel.querySelector('input').click();
+    restorePanel.querySelector('summary').click();
+    assertions.removed_servers_can_collapse = !restorePanel.open;
+    restorePanel.querySelector('summary').click();
+    assertions.removed_servers_selection_survives_collapse = restorePanel.querySelector('input').checked;
+    restorePanel.querySelector('button').click();
+    assertions.only_selected_removed_server_restored = settingsServerDrafts.some(s => s.ssh_alias === 'retired-a') && !settingsServerDrafts.some(s => s.ssh_alias === 'retired-b');
+    assertions.unselected_server_remains_ignored = pendingIgnoredSshAliases.has('retired-b') && !pendingIgnoredSshAliases.has('retired-a');
+    const restoredProfile = collectProfile();
+    assertions.restored_draft_save_retains_other_removal = restoredProfile.ignored_ssh_aliases.includes('retired-b') && !restoredProfile.ignored_ssh_aliases.includes('retired-a');
+    ui.dialog.close();
+    openSettings({forceNormal: true});
+    assertions.cancel_discards_removed_server_restore = !settingsServerDrafts.some(s => s.ssh_alias === 'retired-a') && !document.getElementById('removed-server-choices');
+    ui.dialog.close();
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
         anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top, bottom:window.__bottomDebug}, scrollCalls};

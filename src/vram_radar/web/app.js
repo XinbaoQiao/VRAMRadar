@@ -4771,6 +4771,7 @@ function setSettingsMode(mode) {
 
 function openSettings(options = {}) {
   renderImportAliasChoices([]);
+  renderRemovedServerChoices([]);
   const onboarding = options?.onboarding === true || (!currentProfile?.servers?.length && options?.forceNormal !== true);
   ui.settingsError.hidden = true;
   ui.profileName.value = currentProfile?.display_name || '我的 GPU';
@@ -4836,7 +4837,57 @@ function applyImportedServerConfig(result) {
   const removalSummary = pendingRemovalCount ? `；已保留 ${pendingRemovalCount} 台本次移除项` : '';
   ui.importStatus.textContent = `已解析 ${visibleCandidates.length} 台服务器候选${sourceSummary}；尚未保存，尚未连接验证${removalSummary}${syncSummary}${warning}`;
   renderImportAliasChoices(result.pending_alias_choices || []);
-  if (settingsMode === 'onboarding' && visibleCandidates.length) setOnboardingStep(3);
+  renderRemovedServerChoices([...(result.removed_servers || []),
+    ...result.servers.filter(server => ignoredAliasKeys.has(sshAliasKey(server.ssh_alias)))]);
+  if (settingsMode === 'onboarding' && visibleCandidates.length && !document.getElementById('removed-server-choices')) setOnboardingStep(3);
+}
+
+function renderRemovedServerChoices(candidates) {
+  document.getElementById('removed-server-choices')?.remove();
+  const seen = new Set();
+  const servers = candidates.filter(server => {
+    const key = sshAliasKey(server.ssh_alias);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!servers.length) return;
+  const panel = document.createElement('details');
+  panel.id = 'removed-server-choices';
+  panel.className = 'removed-server-disclosure';
+  panel.innerHTML = `<summary><span>发现曾主动移除的服务器</span><span class="removed-server-count">${servers.length}</span></summary><div class="removed-server-content">
+    <p class="editor-help">以下服务器曾被你移除。勾选要重新添加的服务器，再点击“添加所选服务器”；保存配置后生效。未勾选的服务器仍保持移除。</p>
+    <div class="removed-server-list">${servers.map((server, index) => `<label class="removed-server-option"><input type="checkbox" value="${index}"><span>${escapeHtml(server.display_name || server.id)} · ${escapeHtml(server.ssh_alias)}<small>${escapeHtml(server.ssh_config_file || '')}</small></span></label>`).join('')}</div>
+    <button type="button" class="button" disabled>添加所选服务器</button></div>`;
+  const button = panel.querySelector('button');
+  panel.addEventListener('change', () => {
+    button.disabled = !panel.querySelector('input:checked');
+  });
+  button.addEventListener('click', () => {
+    syncVisibleServerDrafts();
+    const selected = new Set([...panel.querySelectorAll('input:checked')].map(input => Number(input.value)));
+    const active = new Set(settingsServerDrafts.map(server => sshAliasKey(server.ssh_alias)));
+    const ids = new Set(settingsServerDrafts.map(server => String(server.id).toLowerCase()));
+    selected.forEach(index => {
+      const server = servers[index];
+      const key = sshAliasKey(server.ssh_alias);
+      pendingIgnoredSshAliases = new Set([...pendingIgnoredSshAliases].filter(alias => sshAliasKey(alias) !== key));
+      if (active.has(key)) return;
+      let id = server.id;
+      for (let suffix = 2; ids.has(String(id).toLowerCase()); suffix++) id = `${server.id}-${suffix}`;
+      ids.add(String(id).toLowerCase());
+      active.add(key);
+      settingsServerDrafts.push(serverDraftFromValue({...server, id}, {importedCandidate: true}));
+    });
+    settingsServerQuery = '';
+    ui.editorSearch.value = '';
+    settingsServerPageOffset = 0;
+    renderServerEditorPage();
+    renderRemovedServerChoices(servers.filter((server, index) => !selected.has(index)));
+    showToast('已添加到待保存配置；保存后生效');
+    if (settingsMode === 'onboarding') setOnboardingStep(3);
+  });
+  ui.importStatus.after(panel);
 }
 
 async function importServerConfig() {

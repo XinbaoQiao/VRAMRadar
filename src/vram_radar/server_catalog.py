@@ -1141,6 +1141,8 @@ def profile_from_server_config(profile: Profile, path: str | Path) -> tuple[Prof
 def profile_from_server_configs(
     profile: Profile,
     paths: list[str | Path] | tuple[str | Path, ...],
+    *,
+    removed_candidates: list[ServerProfile] | None = None,
 ) -> tuple[Profile, list[str]]:
     sources = [_resolved(path) for path in paths]
     if not sources:
@@ -1236,6 +1238,8 @@ def profile_from_server_configs(
                     )
                 continue
             if alias_key in ignored_alias_keys:
+                if removed_candidates is not None and alias_key not in ignored_imported_aliases:
+                    removed_candidates.append(server)
                 ignored_imported_aliases.setdefault(alias_key, server.ssh_alias)
                 continue
             destination = resolve_openssh_destination(

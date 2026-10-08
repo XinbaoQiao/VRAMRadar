@@ -3949,6 +3949,24 @@ class ShellApiTests(unittest.TestCase):
         request_shutdown.assert_called_once_with()
         window.destroy.assert_not_called()
 
+    def test_import_offers_removed_servers_without_restoring_or_persisting(self):
+        profile = Profile.from_dict({
+            "schema_version": 1, "id": "local", "display_name": "Local",
+            "servers": [], "ignored_ssh_aliases": ["RETIRED", "other"],
+        })
+        api = AppApi(profile, store=None, paths=None, service=None)
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "config"
+            source.write_text("Host retired\n  HostName retired.example\nHost other\n  HostName other.example\nHost new\n  HostName new.example\n", encoding="utf-8")
+            for path in (str(source), [str(source), str(source)]):
+                with self.subTest(path=path):
+                    result = api.import_server_config(path)
+                    self.assertTrue(result["ok"], result)
+                    self.assertEqual([s["ssh_alias"] for s in result["servers"]], ["new"])
+                    self.assertEqual([s["ssh_alias"] for s in result["removed_servers"]], ["retired", "other"])
+                    self.assertFalse(result["persisted"])
+                    self.assertIs(api.profile, profile)
+
     def test_manual_catalog_import_preserves_local_order_and_command_setting(self):
         profile = Profile.from_dict(
             {
