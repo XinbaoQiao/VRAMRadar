@@ -74,7 +74,7 @@
     await wait(100);
     assertions.user_scroll_cancels_pending_adjustment = !staleCallbackRan;
     assertions.missing_elapsed_is_not_zero = [null, undefined, '', ' ', -1, NaN]
-      .every(value => formatElapsedSeconds(value) === '权限受限');
+      .every(value => formatElapsedSeconds(value) === '不可用');
     assertions.valid_elapsed_is_preserved = formatElapsedSeconds(65) !== formatElapsedSeconds(0);
     const abnormalTiming = renderProcessElapsed({timing_status: 'unavailable', observed_running_seconds: 90});
     assertions.abnormal_timing_is_distinct_from_observed_lower_bound =
