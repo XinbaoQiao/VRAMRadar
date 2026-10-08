@@ -229,6 +229,9 @@ def run_bundle_smoke(home: Path, *extra_args: str, timeout: float) -> None:
             pass
         log_path = home / "logs" / "app.log"
         log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:] if log_path.is_file() else "no app log"
+        trace_path = home / "logs" / "gui-update-smoke-trace.log"
+        trace_tail = trace_path.read_text(encoding="utf-8", errors="replace")[-12000:] if trace_path.is_file() else "no Python trace"
+        print(f"Packaged smoke Python trace: {trace_tail}", flush=True)
         partial = exc.stderr or ""
         if isinstance(partial, bytes):
             partial = partial.decode("utf-8", errors="replace")

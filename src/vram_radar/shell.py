@@ -5017,8 +5017,9 @@ def main(argv: list[str] | None = None) -> int:
         # Only the disposable packaged smoke enables this diagnostic timer.
         # Capture native bridge/shutdown stalls before the outer validator kills it.
         import faulthandler
-        faulthandler.enable()
-        faulthandler.dump_traceback_later(40.0)
+        smoke_trace = (paths.logs / "gui-update-smoke-trace.log").open("w", encoding="utf-8")
+        faulthandler.enable(file=smoke_trace)
+        faulthandler.dump_traceback_later(40.0, file=smoke_trace)
 
         def observe_update_smoke(value: dict[str, Any]) -> None:
             update_smoke_result.clear()
