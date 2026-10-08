@@ -5248,8 +5248,8 @@ def main(argv: list[str] | None = None) -> int:
                     api._codex_usage.close()
                     api._usage_providers.close()
                     api._bind_update_check_observer(None)
-                    if args.gui_update_smoke:
-                        faulthandler.cancel_dump_traceback_later()
+                    # Keep the smoke-only timer armed through interpreter shutdown:
+                    # native bridge threads can outlive webview.start().
                     if not shutdown.wait(timeout=15):
                         logging.getLogger("vram_radar").error(
                             "desktop shutdown did not finish within 15 seconds"
