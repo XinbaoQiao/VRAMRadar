@@ -20,6 +20,7 @@ from typing import Any
 
 from .askpass import PasswordBroker
 from .models import ServerProfile
+from .namespace_probe import REMOTE_NAMESPACE_PROBE
 from .openssh_resolution import OpenSSHEndpointResolution, resolve_openssh_endpoint
 
 
@@ -1054,11 +1055,15 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         "CPU_USAGE",
         "MEM_TOTAL_KIB",
         "MEM_AVAILABLE_KIB",
+        "PID_VIEW",
+        "GPU_ACCESS_HEX",
+        "GPU_ACCESS_LIMITED",
+        "GPU_ACCESS_SUPPORTED",
     }
     for raw in lines[1:-1]:
         if raw.startswith("META|"):
             parts = raw.split("|", 3)
-            if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in {"OK", "ERR", "NOT_VISIBLE", "UNREADABLE", "UNAVAILABLE"}:
+            if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in {"OK", "ERR", "NOT_VISIBLE", "UNREADABLE", "UNAVAILABLE", "NAMESPACE_UNMAPPED"}:
                 raise ConnectorFailure("parse_failed", "服务器返回了无效的进程信息", retryable=True)
             if parts[1] in metadata:
                 raise ConnectorFailure("parse_failed", "服务器返回了重复的进程信息", retryable=True)
@@ -1071,7 +1076,7 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         fields[key] = value
     # HOME_HEX was added without changing the direct-GPU protocol version so
     # older cached fixtures remain readable. Fresh probes always include it.
-    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB"}
+    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB", "PID_VIEW", "GPU_ACCESS_HEX", "GPU_ACCESS_LIMITED", "GPU_ACCESS_SUPPORTED"}
     if not required.issubset(fields):
         raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 数据项", retryable=True)
     if fields["CURRENT_UID"] and not fields["CURRENT_UID"].isdigit():
@@ -1082,6 +1087,10 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         raise ConnectorFailure("parse_failed", "服务器返回了不兼容的进程读取上限", retryable=True)
     if len(metadata) > DIRECT_METADATA_LIMIT:
         raise ConnectorFailure("parse_failed", "服务器返回了过多的进程信息", retryable=True)
+    if (fields.get("PID_VIEW", "unknown") not in {"host", "isolated", "unknown"}
+            or fields.get("GPU_ACCESS_LIMITED", "0") not in {"0", "1"}
+            or fields.get("GPU_ACCESS_SUPPORTED", "0") not in {"0", "1"}):
+        raise ConnectorFailure("parse_failed", "服务器返回了无效的进程可见性状态", retryable=True)
     return fields, metadata
 
 
@@ -1751,6 +1760,15 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
         if separator and match:
             # Do not expose the remote boot identifier in the UI or cache.
             identity = hashlib.sha256(f"{match[1]}:{pid}:{match[2]}".encode()).hexdigest()
+    visible_pid = None
+    mapping_source = None
+    if text.startswith("VRAM_HOSTPROC "):
+        header, separator, text = text.partition("\n")
+        match = re.fullmatch(r"VRAM_HOSTPROC (-|[1-9][0-9]{0,9})", header)
+        if not separator or not match:
+            return None
+        visible_pid = None if match[1] == "-" else match[1]
+        mapping_source = "host_proc"
     elapsed_override = None
     if text.startswith("VRAM_ELAPSED "):
         header, separator, text = text.partition("\n")
@@ -1778,7 +1796,9 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
         "user": parts[2],
         "elapsed_seconds": elapsed_override if elapsed_override is not None else (int(parts[3]) if parts[3].isdigit() else None),
         "timing_source": "lstart" if elapsed_override is not None else source,
-        "metadata_source": source,
+        "metadata_source": "host_proc" if mapping_source else source,
+        "visible_pid": visible_pid,
+        "pid_mapping_source": mapping_source,
         "process_identity": identity,
         "cpu_percent": cpu_percent,
         "command": command,
@@ -1827,6 +1847,7 @@ def _build_direct_processes(
             "VRAM_METADATA NOT_VISIBLE": "pid_not_visible",
             "VRAM_METADATA UNREADABLE": "proc_unreadable",
             "VRAM_METADATA UNAVAILABLE": "query_unavailable",
+            "VRAM_METADATA NAMESPACE_UNMAPPED": "pid_namespace_unmapped",
         }.get(raw_metadata, "not_sampled" if pid not in metadata_text else "unknown")
         uid = metadata["uid"] if metadata else ""
         if uid and current_uid:
@@ -1865,6 +1886,8 @@ def _build_direct_processes(
         active.append(
             {
                 "pid": pid,
+                "visible_pid": metadata.get("visible_pid") if metadata else None,
+                "pid_mapping_source": metadata.get("pid_mapping_source") if metadata else None,
                 "uid": uid or None,
                 "user": metadata["user"] if metadata else None,
                 "owner_scope": owner_scope,
@@ -1907,8 +1930,42 @@ def _build_direct_processes(
     }
 
 
+def _build_local_gpu_access(
+    encoded: str, current_uid: str, *, sampled_at: datetime,
+) -> list[dict[str, Any]]:
+    """Visible device users have no inferred nvidia-smi allocation or watch ID."""
+
+    try:
+        text = _decode_hex(encoded, "进程信息", limit=1_100_000)
+    except ConnectorFailure:
+        return []
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line in text.splitlines()[:32]:
+        pid, separator, raw = line.partition("|")
+        if not separator or not pid.isdigit() or pid in seen:
+            continue
+        try:
+            metadata = _parse_process_metadata(pid, _decode_hex(raw, "进程信息", limit=32768))
+        except ConnectorFailure:
+            continue
+        if not metadata or not current_uid or metadata["uid"] != current_uid:
+            continue
+        seen.add(pid)
+        command, truncated = redact_command_preview(metadata["command"])
+        elapsed = metadata["elapsed_seconds"]
+        started = (sampled_at - timedelta(seconds=elapsed)).isoformat(timespec="seconds").replace("+00:00", "Z") if elapsed is not None else None
+        rows.append({
+            "pid": pid, "uid": metadata["uid"], "user": metadata["user"], "owner_scope": "mine",
+            "name": infer_process_name("GPU 设备访问进程", metadata["command"]),
+            "command_preview": command or None, "command_truncated": truncated,
+            "command_visibility": "self", "elapsed_seconds": elapsed, "started_at": started,
+        })
+    return sorted(rows, key=lambda row: int(row["pid"]))
+
+
 # Read only the requested visible PID when ps lacks fields (e.g. minimal images).
-# The start tick must remain stable; never search other namespaces or guess a PID.
+# The start tick must remain stable; this helper never guesses a different PID.
 PROC_METADATA_FALLBACK = r"""
 proc_metadata() (
     proc_pid=$1
@@ -2080,6 +2137,42 @@ process_start_ticks() {{
 }}
 {PROC_METADATA_FALLBACK}
 {PROCESS_LSTART_FALLBACK}
+pid_view=unknown
+init_pid_ns=$(readlink /proc/1/ns/pid 2>/dev/null || true)
+case "$init_pid_ns" in
+    'pid:[4026531836]') pid_view=host ;;
+    pid:\\[*\\]) pid_view=isolated ;;
+esac
+if [ "$pid_view" = unknown ]; then
+    self_pid_ns=$(readlink /proc/self/ns/pid 2>/dev/null || true)
+    self_pid_depth=$(awk '$1 == "NSpid:" {{print NF-1; exit}}' /proc/self/status 2>/dev/null || true)
+    if [ -n "$self_pid_ns" ] && [ "$self_pid_ns" != 'pid:[4026531836]' ] && [ "$self_pid_depth" = 1 ]; then
+        pid_view=isolated
+    fi
+fi
+printf 'PID_VIEW=%s\\n' "$pid_view"
+if [ "$pid_view" = isolated ]; then
+    namespace_data=''
+    if [ -n "$pids" ] && command -v python3 >/dev/null 2>&1; then
+        namespace_data=$(python3 - "$pids" "$current_uid" 2>/dev/null <<'VRAM_NAMESPACE_PY'
+{REMOTE_NAMESPACE_PROBE}
+VRAM_NAMESPACE_PY
+        ) || namespace_data=''
+    fi
+    for ns_pid in $pids; do
+        ns_meta=$(printf '%s\\n' "$namespace_data" | awk -F'|' -v pid="$ns_pid" '$1 == "META" && $2 == pid {{print; exit}}')
+        if [ -n "$ns_meta" ]; then
+            printf '%s\\n' "$ns_meta"
+        else
+            printf 'META|%s|NAMESPACE_UNMAPPED|\\n' "$ns_pid"
+        fi
+    done
+    if [ -n "$namespace_data" ]; then
+        printf '%s\\n' "$namespace_data" | awk '/^GPU_ACCESS_(HEX|LIMITED|SUPPORTED)=/ {{print}}'
+    else
+        printf 'GPU_ACCESS_SUPPORTED=0\\n'
+    fi
+else
 for pid in $pids; do
     start_before=$(process_start_ticks "$pid") || start_before=''
     meta=''
@@ -2116,6 +2209,7 @@ for pid in $pids; do
         printf 'META|%s|%s|\\n' "$pid" "$reason"
     fi
 done
+fi
 process_b=''
 if process_b=$(nvidia-smi --query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null); then
     printf 'PROCESS_B_SUPPORTED=1\\n'
@@ -2147,6 +2241,12 @@ printf '{DIRECT_PROTOCOL_END}\\n'
                 sampled_at=sampled_at,
                 show_other_user_commands=server.show_other_user_commands,
             )
+            processes["pid_view"] = fields.get("PID_VIEW", "unknown")
+            processes["local_gpu_access"] = _build_local_gpu_access(
+                fields.get("GPU_ACCESS_HEX", ""), fields["CURRENT_UID"], sampled_at=sampled_at,
+            )
+            processes["local_gpu_access_limited"] = fields.get("GPU_ACCESS_LIMITED", "0") == "1"
+            processes["local_gpu_access_supported"] = fields.get("GPU_ACCESS_SUPPORTED", "0") == "1"
         except ValueError:
             processes = {
                 "supported": False,

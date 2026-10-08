@@ -19,7 +19,7 @@ class ProcessTimingTests(unittest.TestCase):
         script = remote.call_args.args[1]
         checked = subprocess.run([shutil.which("bash"), "-n"], input=script, text=True, capture_output=True)
         self.assertEqual(checked.returncode, 0, checked.stderr)
-        helper = script.split("process_start_ticks()", 1)[1].split("for pid in $pids; do", 1)[0]
+        helper = script.split("process_start_ticks()", 1)[1].split("pid_view=unknown", 1)[0]
         before = script.split("for pid in $pids; do", 1)[1].split("\n", 2)[1]
         checked = subprocess.run([shutil.which("bash")], text=True, capture_output=True,
             input="set -eu\nprocess_start_ticks()" + helper + "pid=999999999\n" + before + "\nprintf 'survived'\n")

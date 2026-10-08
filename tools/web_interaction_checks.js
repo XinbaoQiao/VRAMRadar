@@ -311,6 +311,31 @@
     const missingDetails = renderProcessName(invisibleProcess, 'synthetic-root');
     assertions.invisible_pid_is_not_reported_as_permission_denied = missingDetails.includes('当前进程视图中找不到') && !missingDetails.includes('权限受限');
     assertions.missing_process_time_is_not_permission_evidence = formatElapsedSeconds(null) === '不可用';
+    const namespaceProcess = {...invisibleProcess, pid: '2349206', metadata_reason: 'pid_namespace_unmapped', memory_used_gib: 4.83, allocations: [{gpu_index: 0, memory_used_gib: 4.83}]};
+    const namespaceServer = {
+      server_id: 'synthetic-namespace', connection: {state: 'online'},
+      processes: {supported: true, current_user: 'owner', pid_view: 'isolated', active: [namespaceProcess], local_gpu_access_supported: true,
+        local_gpu_access: [{pid: '15109', user: 'owner', owner_scope: 'mine', name: 'train.py', command_preview: 'python train.py', elapsed_seconds: 998}]},
+    };
+    const namespaceFixture = document.createElement('section');
+    namespaceFixture.innerHTML = renderDirectProcessModule(namespaceServer);
+    document.body.appendChild(namespaceFixture);
+    namespaceFixture.querySelectorAll('details').forEach(detail => { detail.open = true; });
+    const gpuRow = namespaceFixture.querySelector('.process-unknown tbody tr');
+    const localTable = namespaceFixture.querySelector('.local-gpu-access-table');
+    assertions.isolated_gpu_owner_remains_unknown_without_mapping = gpuRow.innerText.includes('2349206') && !gpuRow.querySelector('.self-user-tag');
+    assertions.namespace_explanation_distinguishes_ssh_permissions = gpuRow.innerText.includes('独立的 PID 视图') && gpuRow.innerText.includes('不代表 SSH 账号权限不足');
+    assertions.local_device_users_show_their_verified_owner = localTable.innerText.includes('15109') && localTable.querySelector('.task-user.self .self-user-tag')?.innerText === '我';
+    assertions.local_device_users_have_no_inferred_vram_or_completion_watch = !localTable.innerText.includes('GiB') && !localTable.innerText.includes('显存') && !localTable.innerText.includes('提醒');
+    assertions.gpu_memory_survives_namespace_isolation = gpuRow.innerText.includes('4.83 GiB');
+    const mappedPid = renderProcessPid({pid: '2349206', visible_pid: '15109'});
+    assertions.proven_mapping_keeps_both_distinct_pids = mappedPid.includes('2349206') && mappedPid.includes('15109') && mappedPid.includes('当前环境 PID');
+    namespaceServer.connection.state = 'stale';
+    assertions.stale_device_users_are_labelled_as_previous_data = renderLocalGpuAccess(namespaceServer, true).includes('上次环境') && renderLocalGpuAccess(namespaceServer, true).includes('不能据此判断');
+    window.VRAMRadarI18n.setLanguage('en');
+    assertions.namespace_ui_is_translated = !/[\u3400-\u9fff]/u.test(namespaceFixture.textContent) && namespaceFixture.textContent.includes('PID in this environment');
+    window.VRAMRadarI18n.setLanguage('zh-CN');
+    namespaceFixture.remove();
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
         anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top, bottom:window.__bottomDebug}, scrollCalls};

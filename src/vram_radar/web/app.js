@@ -772,6 +772,7 @@ function processCommandOpenAttr(serverId, process) {
 }
 
 function processMetadataExplanation(process) {
+  if (process.metadata_reason === 'pid_namespace_unmapped') return '当前连接使用独立的 PID 视图，尚未取得此 GPU PID 的映射；这不代表 SSH 账号权限不足。';
   if (process.metadata_reason === 'pid_not_visible') return '当前进程视图中找不到此 PID；可能位于其他容器或已退出，不能据此判定权限不足。';
   if (process.metadata_reason === 'proc_unreadable') return '当前环境无法读取此进程的 /proc 信息。';
   if (process.metadata_reason === 'query_unavailable') return '进程详情查询未返回结果，原因尚未确定。';
@@ -796,9 +797,29 @@ function renderProcessAllocations(process) {
   return `<div class="process-gpu-list">${allocations.map(allocation => `<span class="process-gpu-allocation"><strong>${allocation.gpu_index == null ? 'GPU 未识别' : `GPU ${escapeHtml(allocation.gpu_index)}`}</strong><small>${allocation.memory_used_gib == null ? '显存未知' : `${number(allocation.memory_used_gib)} GiB`}</small></span>`).join('')}</div>`;
 }
 
+function renderProcessPid(process) {
+  const gpuPid = copyableValue(process.pid, 'PID');
+  if (!process.visible_pid || String(process.visible_pid) === String(process.pid)) return gpuPid;
+  return `<div class="process-name-stack">${gpuPid}<small class="process-command-missing">${escapeHtml(localizedText('当前环境 PID'))} ${copyableValue(process.visible_pid, '当前环境 PID')}</small></div>`;
+}
+
+function renderLocalGpuAccess(server, stale) {
+  const state = server.processes || {};
+  const rows = state.local_gpu_access || [];
+  const title = stale ? '上次环境 GPU 设备访问进程' : '当前环境 GPU 设备访问进程';
+  const explanation = stale
+    ? '这是上次读取的环境进程，不能据此判断它们现在仍在运行。'
+    : '这些进程属于当前 SSH 账号，可读取用户、命令和时间。GPU 设备访问不证明正在执行 GPU 计算；显存归属仍需宿主机 PID 映射。';
+  const note = state.local_gpu_access_limited ? '<p class="process-command-missing">本次环境进程扫描已达读取上限，列表可能不完整。</p>' : '';
+  const content = rows.length
+    ? `<div class="table-wrap task-table process-table local-gpu-access-table" role="region" aria-label="当前环境 GPU 设备访问进程，可横向滚动"><table><caption class="sr-only">${escapeHtml(localizedText(title))}</caption><thead><tr><th scope="col">用户</th><th scope="col">当前环境 PID</th><th scope="col">进程 / 任务</th><th scope="col">运行时长</th><th scope="col">启动时间</th></tr></thead><tbody>${rows.map(process => `<tr><td data-label="用户">${renderTaskUser(process, state.current_user)}</td><td class="mono copyable-cell" data-label="当前环境 PID">${copyableValue(process.pid, '当前环境 PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, server.server_id)}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText('不可用'))}</td></tr>`).join('')}</tbody></table></div>`
+    : `<div class="module-empty">${state.local_gpu_access_supported ? '当前环境未读到可确认的 GPU 设备访问进程。' : '当前环境尚未提供可读的 GPU 设备访问进程信息。'}</div>`;
+  return `<details class="task-group task-owner-group process-owner-group" data-task-group="process-local-access" data-task-module="gpu-processes" data-server-id="${escapeHtml(server.server_id)}"${taskGroupOpen(server.server_id, 'gpu-processes', 'process-local-access', true)}><summary><span class="task-owner-heading">${icon('user', 'owner-icon')}<span><h5>${escapeHtml(localizedText(title))}</h5><small>与上方 GPU 记录分开显示</small></span></span><span class="task-group-meta">${number(rows.length)} 个 ${icon('chevron', 'task-group-chevron')}</span></summary><div class="task-owner-content"><p class="process-command-missing">${escapeHtml(localizedText(explanation))}</p>${content}${note}</div></details>`;
+}
+
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText('不可用'))}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${renderProcessPid(process)}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText('不可用'))}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
@@ -844,10 +865,11 @@ function renderDirectProcessModule(server) {
   });
   if (groups.unknown.length) {
     ownerGroups += renderProcessOwnerGroup(server, {
-      key: 'process-unknown', title: '归属不可见', subtitle: '未获取到进程归属', iconName: 'users',
+      key: 'process-unknown', title: '归属不可见', subtitle: processState.pid_view === 'isolated' ? '容器 PID 映射未提供' : '未获取到进程归属', iconName: 'users',
       processes: groups.unknown, currentUser, defaultOpen: false, emptyMessage: '',
     });
   }
+  if (processState.pid_view === 'isolated' && groups.unknown.length) ownerGroups += renderLocalGpuAccess(server, stale);
   return `<details class="cluster-module process-module" data-module="gpu-processes" data-server-id="${escapeHtml(server.server_id)}"${moduleOpen(server.server_id, 'gpu-processes', false)}>${moduleHead}<div class="cluster-content"><div class="task-owner-stack">${ownerGroups}</div>${context}</div></details>`;
 }
 
