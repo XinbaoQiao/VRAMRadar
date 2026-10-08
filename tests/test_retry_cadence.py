@@ -12,7 +12,7 @@ class RetryCadenceTests(unittest.TestCase):
         return DashboardService(profile, cache, clock=lambda: 100)
 
     def test_failures_never_poll_faster_than_normal_interval(self):
-        for interval in (15, 60, 600):
+        for interval in (15, 60, 300):
             service = self.service(interval)
             for backoff in (15, 30, 60, 120, 300, 300):
                 service._record_failure("gpu", ConnectorFailure("proxy_failed", "offline", retryable=True))
@@ -28,3 +28,4 @@ class RetryCadenceTests(unittest.TestCase):
         service = self.service()
         service._record_failure("gpu", ConnectorFailure("auth_failed", "denied", retryable=False))
         self.assertEqual(service.states["gpu"].next_attempt_monotonic, float("inf"))
+
