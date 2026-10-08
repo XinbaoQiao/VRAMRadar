@@ -190,6 +190,7 @@ class TrendStore:
             return 0
         now = time.time() if now is None else float(now)
         added = 0
+        changed = False
         with self._lock:
             series = self._data["series"]
             for key, value, kind in samples:
@@ -201,23 +202,35 @@ class TrendStore:
                 if entry is None:
                     entry = {"kind": kind, "points": []}
                     series[key] = entry
-                entry["kind"] = kind
+                    changed = True
+                if entry["kind"] != kind:
+                    entry["kind"] = kind
+                    changed = True
                 points = entry["points"]
                 if points and (now - points[-1][0]) < interval:
                     # Refresh the bucket's value in place (latest fetch wins).
-                    points[-1] = [points[-1][0], float(value)]
+                    if points[-1][1] != float(value):
+                        points[-1] = [points[-1][0], float(value)]
+                        changed = True
                     continue
                 points.append([now, float(value)])
                 added += 1
+                changed = True
                 if len(points) > MAX_POINTS_PER_SERIES:
                     entry["points"] = points[-MAX_POINTS_PER_SERIES:]
             cutoff = now - RETENTION_SECONDS
             for entry in series.values():
-                entry["points"] = [p for p in entry["points"] if p[0] >= cutoff]
-            try:
-                self._save()
-            except OSError:
-                pass
+                kept = [p for p in entry["points"] if p[0] >= cutoff]
+                if len(kept) != len(entry["points"]):
+                    entry["points"] = kept
+                    changed = True
+            # The strip calls this every second; rewrite the file only when a
+            # point or value actually changed (it used to be rewritten each tick).
+            if changed:
+                try:
+                    self._save()
+                except OSError:
+                    pass
         return added
 
     def series_points(self, key: str, *, since: float | None = None,

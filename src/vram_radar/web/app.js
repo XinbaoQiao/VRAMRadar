@@ -86,7 +86,6 @@ const ui = {
   profileSettings: document.getElementById('profile-settings'),
   extensionsSettings: document.getElementById('extensions-settings'),
   codexEnabled: document.getElementById('quota-usage-enabled'),
-  codexExecutable: document.getElementById('quota-executable'),
   importPanel: document.getElementById('import-panel'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
@@ -99,9 +98,11 @@ const ui = {
 };
 
 let currentProfile = null;
-let codexUsageState = {state: 'disabled', windows: []};
-let codexUsageTimer = null;
-let codexUsageBusy = false;
+// Extensions → quota monitoring: one master switch (profile.codex_usage_enabled) for the
+// taskbar strip and every provider; per-app choices live in the strip's right-click menu.
+let quotaMonitorState = {providers: {}, selected: null, primary: null};
+let quotaMonitorTimer = null;
+let quotaMonitorBusy = false;
 let codexSettingsBusy = false;
 let pendingAliasChoices = [];
 let aliasChoiceDeferredThisSession = false;
@@ -2327,36 +2328,26 @@ function acceptProfile(candidate) {
   window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN');
   syncProfileConvenienceState(currentProfile);
   syncPendingAliasChoices(currentProfile);
-  void pollCodexUsage();
+  void pollQuotaMonitor();
   return true;
 }
 
-function codexUsageMessage(state) {
-  if (!currentProfile?.codex_usage_enabled) return '额度监测已关闭';
-  if (state.state === 'loading') return '正在读取 Codex 额度…';
-  const errors = {
-    not_installed: '尚未找到 Codex，安装后会自动连接',
-    invalid_executable: 'Codex 程序路径无效，请填写可执行文件的完整路径',
-    start_failed: '无法启动 Codex，请检查程序路径和运行权限',
-    login_required: '请在 Codex 中登录 ChatGPT 账号，登录后会自动连接',
-    unsupported_account: '当前登录方式不提供订阅额度，请使用 ChatGPT 账号登录 Codex',
-    timeout: '读取额度超时，请检查网络后重试',
-    service_error: '额度服务暂不可用，请确认 Codex 已登录后重试',
-    invalid_response: '无法识别额度数据，请更新 Codex 后重试',
-    disconnected: 'Codex 连接已断开，请稍后重试',
-  };
-  if (state.state === 'error') return errors[state.code] || '暂时无法读取额度，请稍后重试';
-  if (state.stale) return '数据已过期，请刷新额度';
-  if (!state.windows?.length) return '账号暂未返回可显示的额度';
-  return '额度已更新';
-}
-
-function codexWindowLabel(window) {
-  const minutes = window.window_minutes;
-  if (minutes === 300) return localizedText('5 小时额度');
-  if (minutes === 10080) return localizedText('每周额度');
-  if (!minutes) return localizedText('未知周期');
-  return `${number(minutes)} ${localizedText('分钟额度')}`;
+function quotaMonitorStatus(state = quotaMonitorState, profile = currentProfile) {
+  if (!profile?.codex_usage_enabled) return localizedText('额度监控已关闭');
+  const all = state?.providers && typeof state.providers === 'object' ? state.providers : {};
+  // Count what the taskbar strip shows: the selected apps that are detected here
+  // (an installed but unselected app is not on the strip).
+  const selected = Array.isArray(state?.selected) ? state.selected : null;
+  const providers = selected ? selected.map(id => all[id]) : Object.values(all);
+  const detected = providers.filter(item => item && item.installed).length;
+  const stamps = providers.map(item => Number(item?.fetched_at)).filter(value => Number.isFinite(value) && value > 0);
+  if (Number.isFinite(state?.primary?.fetched_at) && state.primary.fetched_at > 0) stamps.push(state.primary.fetched_at);
+  const latest = stamps.length ? Math.max(...stamps) : null;
+  const time = latest ? new Date(latest * 1000).toLocaleTimeString(activeLocale(), {hour: '2-digit', minute: '2-digit'}) : '';
+  return [
+    localizedText(detected ? `已检测到 ${detected} 个 AI 应用` : '未检测到 AI 应用'),
+    time ? `${localizedText('上次读取')} ${time}` : '',
+  ].filter(Boolean).join(' · ');
 }
 
 // BEGIN quota-gradient (tools/gen_quota_gradient.py)
@@ -2385,86 +2376,67 @@ function resetCountdown(seconds, english) {
   return [days ? `${days}d` : '', hours ? `${hours}h` : ''].filter(Boolean).join(' ');
 }
 
-function codexResetLabel(window, now) {
-  if (!Number.isFinite(window.resets_at)) return localizedText('重置时间未知');
-  const left = Math.ceil((window.resets_at * 1000 - now) / 60000);
-  if (left <= 0) return localizedText('等待额度更新');
-  const countdown = resetCountdown(window.resets_at - now / 1000, globalThis.VRAMRadarI18n?.language === 'en');
-  return `${localizedText('重置倒计时')} ${countdown}`;
+function renderQuotaMonitor(state = quotaMonitorState) {
+  quotaMonitorState = state || quotaMonitorState;
+  const status = document.getElementById('quota-usage-status');
+  const text = quotaMonitorStatus(quotaMonitorState);
+  if (status.textContent !== text) status.textContent = text;
 }
 
-function renderCodexUsage(state = codexUsageState) {
-  codexUsageState = state;
-  const enabled = Boolean(currentProfile?.codex_usage_enabled);
-  const message = localizedText(codexUsageMessage(state));
-  const fetched = Number.isFinite(state.fetched_at)
-    ? new Date(state.fetched_at * 1000).toLocaleTimeString(activeLocale(), {hour: '2-digit', minute: '2-digit'}) : '';
-  document.getElementById('quota-usage-status').textContent =
-    [state.plan, message, fetched ? `${localizedText('上次读取')} ${fetched}` : ''].filter(Boolean).join(' · ');
-  document.getElementById('refresh-quota-usage').disabled = !enabled || state.state === 'loading' || codexUsageBusy;
-  const now = Date.now();
-  const cards = enabled ? (state.windows || []).map(window => {
-    const expired = Number.isFinite(window.resets_at) && window.resets_at * 1000 <= now;
-    const percent = Number.isFinite(window.remaining_percent) && !state.stale && !expired
-      ? Math.max(0, Math.min(100, window.remaining_percent)) : null;
-    const resetTime = Number.isFinite(window.resets_at)
-      ? new Date(window.resets_at * 1000).toLocaleString(activeLocale()) : '';
-    const tone = quotaColor(percent);
-    return `<article class="quota-quota-card${percent != null && percent <= 10 ? ' quota-low' : ''}"${tone ? ` style="--quota-color:${tone}"` : ''}>
-      <div class="quota-quota-label"><span>${escapeHtml(window.name || 'Codex')}</span><strong>${escapeHtml(codexWindowLabel(window))}</strong></div>
-      <div class="quota-quota-value">${percent == null ? '—' : `${number(percent)}<small>%</small>`}<span>${escapeHtml(localizedText('剩余额度'))}</span></div>
-      <div class="quota-quota-track" style="--quota-width:${percent ?? 0}%" ${percent == null ? '' : `role="meter" aria-label="${escapeHtml(localizedText('剩余额度'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`}><i></i></div>
-      <small class="quota-quota-reset" title="${escapeHtml(resetTime)}">${escapeHtml(codexResetLabel(window, now))}</small>
-    </article>`;
-  }).join('') : '';
-  for (const id of ['quota-usage-details']) {
-    const container = document.getElementById(id);
-    if (container.innerHTML !== cards) container.innerHTML = cards;
+// The status line refreshes only while Settings is open on screen and the
+// switch is on; closing Settings or switching off stops the 15 s timer.
+function quotaMonitorVisible() {
+  return Boolean(ui.dialog?.open) && !document.hidden;
+}
+
+function stopQuotaMonitor() {
+  clearTimeout(quotaMonitorTimer);
+  quotaMonitorTimer = null;
+}
+
+async function pollQuotaMonitor() {
+  stopQuotaMonitor();
+  if (quotaMonitorBusy || !api?.get_usage_providers || !quotaMonitorVisible()) {
+    renderQuotaMonitor();
+    return;
   }
-}
-
-async function pollCodexUsage(force = false) {
-  clearTimeout(codexUsageTimer);
-  if (codexUsageBusy || !api?.get_codex_usage) return;
-  codexUsageBusy = true;
+  quotaMonitorBusy = true;
   try {
-    // The native worker owns the five-minute interval, including while hidden.
-    const state = await api.get_codex_usage(force);
-    renderCodexUsage(state);
+    // Native workers own the read intervals; this only reflects their latest state.
+    const [providers, codex] = await Promise.all([
+      api.get_usage_providers(false),
+      currentProfile?.codex_usage_enabled && api.get_codex_usage ? api.get_codex_usage(false) : null,
+    ]);
+    renderQuotaMonitor({providers: providers?.providers || {},
+      selected: Array.isArray(providers?.selected) ? providers.selected : null, primary: codex || null});
   } catch (_) {
-    renderCodexUsage({state: 'error', code: 'unavailable', windows: []});
+    renderQuotaMonitor({providers: {}, selected: null, primary: null});
   } finally {
-    codexUsageBusy = false;
-    renderCodexUsage();
-    if (currentProfile?.codex_usage_enabled) {
-      codexUsageTimer = setTimeout(() => void pollCodexUsage(), codexUsageState.state === 'loading' ? 1000 : 15000);
+    quotaMonitorBusy = false;
+    if (currentProfile?.codex_usage_enabled && quotaMonitorVisible()) {
+      quotaMonitorTimer = setTimeout(() => void pollQuotaMonitor(), 15000);
     }
   }
 }
 
 async function applyCodexSettings(executable = currentProfile?.codex_executable || '') {
+  // Master switch only: the saved executable path and per-app choices are kept as they are.
   if (codexSettingsBusy) return;
   codexSettingsBusy = true;
-  const button = document.getElementById('apply-quota-settings');
-  const automatic = document.getElementById('auto-quota-settings');
-  button.disabled = true;
-  automatic.disabled = true;
   ui.codexEnabled.disabled = true;
   try {
     const result = await api.save_codex_usage_settings(ui.codexEnabled.checked, executable, currentProfile.profile_revision);
     if (!result.ok) throw new Error(result.error);
     acceptProfile(result.profile);
     ui.codexEnabled.checked = Boolean(currentProfile.codex_usage_enabled);
-    ui.codexExecutable.value = currentProfile.codex_executable || '';
-    renderCodexUsage(result.usage);
+    renderQuotaMonitor();
+    void pollQuotaMonitor();
     showToast('额度设置已保存');
   } catch (error) {
     ui.codexEnabled.checked = Boolean(currentProfile?.codex_usage_enabled);
     showToast(error.message || '额度设置保存失败');
   } finally {
     codexSettingsBusy = false;
-    button.disabled = false;
-    automatic.disabled = false;
     ui.codexEnabled.disabled = false;
   }
 }
@@ -4779,8 +4751,7 @@ function openSettings(options = {}) {
   ui.language.value = currentProfile?.ui_language === 'en' ? 'en' : 'zh-CN';
   ui.closeBehavior.value = currentProfile?.close_behavior === 'exit' ? 'exit' : 'tray';
   ui.codexEnabled.checked = Boolean(currentProfile?.codex_usage_enabled);
-  ui.codexExecutable.value = currentProfile?.codex_executable || '';
-  renderCodexUsage();
+  renderQuotaMonitor();
   ui.favoriteAlertEnabled.checked = currentProfile?.favorite_alert_enabled !== false;
   ui.favoriteAlertMinMemory.value = Number(currentProfile?.favorite_alert_min_memory_gib) > 0
     ? String(currentProfile.favorite_alert_min_memory_gib)
@@ -4794,6 +4765,7 @@ function openSettings(options = {}) {
   populateServerEditors(currentProfile?.servers || []);
   setSettingsMode(onboarding ? 'onboarding' : 'settings');
   ui.dialog.showModal();
+  void pollQuotaMonitor();
 }
 
 async function discoverServerConfig() {
@@ -4955,7 +4927,7 @@ function collectProfile() {
     close_behavior: ui.closeBehavior.value,
     ui_language: ui.language.value,
     codex_usage_enabled: ui.codexEnabled.checked,
-    codex_executable: ui.codexExecutable.value.trim(),
+    codex_executable: currentProfile?.codex_executable || '',
     favorite_alert_enabled: ui.favoriteAlertEnabled.checked,
     favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0),
     task_completion_alert_enabled: ui.taskCompletionAlertEnabled.checked,
@@ -5735,9 +5707,6 @@ ui.previousServer.addEventListener('click', () => navigateRelativeServer(-1));
 ui.nextServer.addEventListener('click', () => navigateRelativeServer(1));
 ui.settings.addEventListener('click', () => openSettings({forceNormal: true}));
 ui.codexEnabled.addEventListener('change', () => void applyCodexSettings());
-document.getElementById('apply-quota-settings').addEventListener('click', () => void applyCodexSettings(ui.codexExecutable.value.trim()));
-document.getElementById('auto-quota-settings').addEventListener('click', () => void applyCodexSettings(''));
-document.getElementById('refresh-quota-usage').addEventListener('click', () => void pollCodexUsage(true));
 ui.startOnboarding.addEventListener('click', () => openSettings({onboarding: true}));
 ui.collapseDashboard.addEventListener('click', collapseDashboardDisclosure);
 document.getElementById('collapse-settings').addEventListener('click', collapseSettingsDisclosure);
@@ -5749,6 +5718,7 @@ ui.dialog.addEventListener('close', () => {
   // the same dialog.  Never let that stale event discard the new session's
   // drafts or invalidate its discovery request.
   if (ui.dialog.open) return;
+  stopQuotaMonitor();
   window.VRAMRadarI18n?.setLanguage(currentProfile?.ui_language || 'zh-CN');
   invalidateServerDiscovery();
   ui.editorList.replaceChildren();
@@ -5827,6 +5797,8 @@ window.addEventListener('resize', () => {
   scheduleStuckChromeUpdate();
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopQuotaMonitor();
+  else if (ui.dialog.open) void pollQuotaMonitor();
   if (!document.hidden) {
     scheduleDirectoryFreshnessValidation();
     if (refreshDeferredWhileHidden) {

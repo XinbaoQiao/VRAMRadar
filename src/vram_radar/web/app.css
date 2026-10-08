@@ -50,8 +50,15 @@
   --motion-ease: cubic-bezier(.22, 1, .36, 1);
 }
 * { box-sizing: border-box; }
-.quota-extension-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.quota-extension-row small { display: block; color: var(--muted); font-size: var(--font-small); font-weight: 400; }
+/* Quota monitoring: one compact switch row. The checkbox sits on the title's line and
+   the status line hangs under the label text (checkbox 14px + gap 8px = 22px indent). */
+.quota-extension-body { padding: 14px 16px; }
+.quota-extension-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.quota-extension-row .check-label { align-items: flex-start; gap: 8px; margin: 0; }
+.quota-extension-row .check-label input { flex: none; width: 14px; height: 14px; min-height: 0; margin: 2px 0 0; padding: 0; }
+.quota-extension-row .check-label > span { display: grid; gap: 0; min-width: 0; }
+.quota-extension-row strong { line-height: 18px; }
+.quota-extension-row small { display: block; color: var(--muted); font-size: var(--font-small); font-weight: 400; line-height: 18px; }
 .quota-usage-help { color: var(--muted); font-size: var(--font-small); margin: 8px 0 0; }
 .quota-options-body { padding: 12px; border-top: 1px solid var(--border); }
 .quota-usage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 12px; }
@@ -67,7 +74,8 @@
 .quota-usage-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
 .quota-usage-actions small { flex: 1; color: var(--muted); }
 .quota-usage-path { padding: 12px 0; }
-#quota-usage-status { font-size: var(--font-small); color: var(--muted); overflow-wrap: anywhere; }
+#quota-usage-status { margin: 4px 0 0 22px; font-size: var(--font-small); line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
+#quota-usage-status:empty { display: none; }
 html, .dialog-content, .server-navigator-list, .table-wrap, .command-box pre, .saved-view-chips, .toast { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
 html, .dialog-content, .server-navigator-list { scrollbar-gutter: stable; }
 html::-webkit-scrollbar, .dialog-content::-webkit-scrollbar, .server-navigator-list::-webkit-scrollbar, .table-wrap::-webkit-scrollbar, .command-box pre::-webkit-scrollbar, .saved-view-chips::-webkit-scrollbar, .toast::-webkit-scrollbar, .notification-list::-webkit-scrollbar { width: 10px; height: 10px; }

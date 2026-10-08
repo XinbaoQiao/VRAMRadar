@@ -374,6 +374,29 @@ class HoverSparkRenderTests(unittest.TestCase):
         bitmap.Dispose()
 
 
+class TrendStoreWriteTests(unittest.TestCase):
+    """The strip records every second; the file is rewritten only on a real change."""
+
+    def test_unchanged_value_does_not_rewrite_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TrendStore(Path(tmp) / "default.json")
+            saves = []
+            original = store._save
+            store._save = lambda: (saves.append(1), original())
+            base = 1_700_000_000.0
+            store.record([("kimi", 40.0, "used")], now=base)
+            for second in range(1, 120):
+                store.record([("kimi", 40.0, "used")], now=base + second)
+            self.assertEqual(len(saves), 1)
+            store.record([("kimi", 41.0, "used")], now=base + 121)        # same bucket, new value
+            self.assertEqual(len(saves), 2)
+            store.record([("kimi", 41.0, "used")], now=base + 31 * 60)    # next bucket
+            self.assertEqual(len(saves), 3)
+            reloaded = TrendStore(Path(tmp) / "default.json")
+            self.assertEqual([v for _t, v in reloaded.series_points("kimi", since=0, now=base + 31 * 60)],
+                             [41.0, 41.0])
+
+
 if __name__ == "__main__":
     unittest.main()
 

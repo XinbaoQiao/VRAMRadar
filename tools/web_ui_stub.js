@@ -86,6 +86,7 @@
     request_background_refresh: () => ({ok: true, accepted: false}),
     get_update_progress: () => ({state: 'idle', phase: 'idle'}),
     get_codex_usage: () => ({enabled: false, state: 'disabled', windows: []}),
+    get_usage_providers: () => ({enabled: false, selected: ['codex'], providers: {}}),
     get_cluster_nodes: () => ({ok: true, nodes: servers[0].nodes || [], total: (servers[0].nodes || []).length, revision: 7}),
     inspect_account_directory: () => ({ok: true, path: '~', truncated: false, entries: [
       {name: 'projects', type: 'directory', modified_at: now, child_count: 2},

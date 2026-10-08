@@ -19,13 +19,13 @@ The application connects only to:
 - GitHub's public release service to check for VRAM Radar updates; and
 - a GitHub Release asset after the user accepts an available download or update.
 
-When the optional **Settings → Extensions → Codex usage** feature is enabled,
+When the optional **Settings → Extensions → Quota monitoring** feature is enabled,
 Radar also asks the locally installed Codex app-server to query its account usage
 service. Codex handles its own sign-in and network requests. Radar does not open
 Codex credential files, send prompts, or copy tokens, account email, or raw RPC
 output into its Profile, logs, diagnostics, or interface. The enable switch and
 optional executable path are saved locally; quota values are kept in memory.
-Turning the feature off cancels its pending query. See [Codex usage](docs/subscription-usage.md).
+Turning the feature off cancels its pending query. See [Quota monitoring](docs/subscription-usage.md).
 
 The usage strip's **Models** menu can also show other AI desktop apps found on
 this computer (DeepSeek Harness, Grok, Kimi, Claude, GLM, Qwen, Tencent Yuanbao),

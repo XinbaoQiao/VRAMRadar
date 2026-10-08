@@ -3,6 +3,9 @@
 
   const ENGLISH = new Map([
     ['开启后自动连接本机 Codex，并显示任务栏额度', 'Automatically connects to local Codex and shows quota beside the taskbar'],
+    ['额度监控', 'Quota monitoring'],
+    ['开启后自动读取本机 AI 应用的额度，并显示在任务栏', 'Automatically read quotas from AI apps on this computer and show them on the taskbar.'],
+    ['额度监控已关闭', 'Quota monitoring is off'], ['未检测到 AI 应用', 'No AI apps detected'],
     ['高级：手动指定程序', 'Advanced: choose an executable'], ['保存路径', 'Save path'], ['恢复自动查找', 'Restore automatic detection'],
     ['尚未找到 Codex，安装后会自动连接', 'Codex not found yet. Connects automatically after installation.'],
     ['请在 Codex 中登录 ChatGPT 账号，登录后会自动连接', 'Sign in to Codex with ChatGPT. Connects automatically after sign-in.'],
@@ -1058,6 +1061,7 @@
   const PATTERNS = [
     [/^另有别名：(.+)$/, 'Also known as: $1'],
     [/^第 ([\d,.]+) 组$/, 'Group $1'],
+    [/^已检测到 ([\d,.]+) 个 AI 应用$/, (_, count) => `${counted(count, 'AI app', 'AI apps')} detected`],
     [/^(.+) 经跳板服务器 (.+)$/, '$1 via jump host $2'],
     [/^(.+) 经中转命令$/, '$1 via a relay command'],
     [/^已跳过 ([\d,.]+) 个与现有服务器连接设置相同的 SSH 别名$/, 'Skipped $1 SSH aliases with the same connection settings as an existing server'],

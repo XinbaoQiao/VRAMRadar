@@ -61,11 +61,15 @@ def find_codex(override: str = "") -> Path:
             pass
         return [item[2] for item in sorted(found, reverse=True)]
 
+    stale_override = False
     if override:
         path = Path(override).expanduser()
-        if not path.is_absolute() or not usable(path):
-            raise UsageError("invalid_executable")
-        return path.resolve()
+        if path.is_absolute() and usable(path):
+            return path.resolve()
+        # Settings no longer offer a path picker, so a path saved by an earlier
+        # version must not block monitoring after that copy moves or is removed:
+        # fall back to automatic discovery (a shell shim is still never run).
+        stale_override = True
     candidates: list[Path] = []
     found = shutil.which("codex.exe" if sys.platform == "win32" else "codex")
     if sys.platform == "win32":
@@ -108,7 +112,7 @@ def find_codex(override: str = "") -> Path:
     for candidate in candidates:
         if usable(candidate):
             return candidate.resolve()
-    raise UsageError("not_installed")
+    raise UsageError("invalid_executable" if stale_override else "not_installed")
 
 
 def _number(value: Any) -> float | None:

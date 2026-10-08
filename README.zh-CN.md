@@ -21,11 +21,11 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>下载 v1.0.0</strong></a>
+  <a href="../../releases/latest"><strong>下载 v1.0.1</strong></a>
   · <a href="#安装">安装</a>
   · <a href="#使用">使用</a>
   · <a href="#常见问题">常见问题</a>
-  · <a href="docs/release-notes-v1.0.0.md">更新日志</a>
+  · <a href="docs/release-notes-v1.0.1.md">更新日志</a>
 </p>
 
 ![VRAM Radar GPU 总览（示例数据）](docs/assets/readme/overview-zh.png)
@@ -91,8 +91,8 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.0.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
-| macOS | `VRAMRadar-1.0.0-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-1.0.1.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
+| macOS | `VRAMRadar-1.0.1-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
 
 请勿全局关闭 SmartScreen 或 Gatekeeper。详见
 [Windows 安装与更新](docs/windows-install-and-update.md)、
@@ -105,12 +105,12 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 2. 确认每台服务器是 Direct SSH 还是 Slurm，保存后打开资源视图。监控本机时，添加
    服务器并将连接类型选为 **本地 GPU（NVIDIA / AMD / Intel）**。
 3. 在 **设置** 中选择任务完成和收藏 GPU 的通知。
-4. 显示 AI 额度：打开 **设置 → 扩展功能**，开启 **Codex 额度**。
+4. 显示 AI 额度：打开 **设置 → 扩展功能**，开启 **额度监控**。这是所有 AI 应用共用的总开关；显示哪些应用可在额度条右键菜单中选择。
 
 ### 任务栏额度条
 
 - **单击**：打开 GPU 总览窗口。
-- **双击**：打开设置中的额度详情。
+- **双击**：打开设置中的额度监控开关。
 - **右键** 菜单：
 
 <img src="docs/assets/readme/context-menu-zh.png" width="200" alt="额度条右键菜单">
@@ -149,7 +149,7 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 | 现象 | 检查项 |
 |---|---|
 | 服务器未监控就绪 | 卡片会区分网络、认证、配置和资源读取错误。先确认终端中 `ssh <别名>` 可用，再点 **重新验证**。 |
-| 额度条不显示 | 开启 **设置 → 扩展功能 → Codex 额度**。如果移动过位置，选择 **固定到任务栏**。 |
+| 额度条不显示 | 开启 **设置 → 扩展功能 → 额度监控**。如果移动过位置，选择 **固定到任务栏**。 |
 | 某个应用没有额度 | 确认应用已安装并登录，使用 **显示模型 → 重新检测**；Grok、Kimi 需允许 **自动读取额度**。 |
 | SmartScreen 或 Gatekeeper 阻止启动 | 见 [安装](#安装)。 |
 | 反馈问题 | 使用 **复制诊断信息**（本地脱敏），在 [Issues](../../issues) 中附上系统和应用版本。不要上传密码、私钥或真实服务器地址。 |
@@ -187,9 +187,9 @@ bash Build-VramRadar-macOS.sh --skip-sync
 
 ## 文档
 
-- [更新日志：v1.0.0 发布说明](docs/release-notes-v1.0.0.md)
+- [更新日志：v1.0.1 发布说明](docs/release-notes-v1.0.1.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
 - [SSH 配置发现](docs/server-config-discovery.md)
-- [Codex 额度](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
+- [额度监控](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
 - [Windows 安装与更新](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
 - [产品与架构说明](docs/productization-design.md) · [设计规范](docs/design-system.md)
 

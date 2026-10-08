@@ -37,7 +37,9 @@ def main() -> int:
     def save_display(key, value):
         display[key] = value
         return {"ok": True}
+    overview = {"enabled": True}
     surface = CodexUsageSurface(window, lambda: dict(state), language=lambda: language["value"],
+                                providers=lambda: {"enabled": overview["enabled"], "selected": ["codex"], "providers": {}},
                                 open_settings=details_opened.set, open_home=home_opened.set, refresh=refreshed.set,
                                 display_options=lambda: dict(display), save_display=save_display,
                                 disable=lambda: state.update(enabled=False), quit_application=lambda: None)
@@ -149,8 +151,14 @@ def main() -> int:
                     click_once()
                     click_once()
                     assertions["double_click_cancels_pending_home"] = not surface._click_timer.Enabled
+                    click_once()    # third click of a fast burst must not queue "GPU home" (closes Settings)
+                    assertions["triple_click_keeps_settings_open"] = not surface._click_timer.Enabled
                 invoke(double_check)
                 assertions["double_click_opens_only_details"] = details_opened.wait(2) and not home_opened.is_set()
+                time.sleep(0.05)
+                assertions["triple_click_keeps_settings_open"] = (assertions["triple_click_keeps_settings_open"]
+                                                                  and not home_opened.is_set())
+                invoke(lambda: setattr(surface._click_burst, "until", 0.0))
                 from unittest.mock import patch
                 from System.Drawing import Point
                 def right_click_check():
@@ -404,6 +412,24 @@ def main() -> int:
                 assertions["visible_with_main_window_hidden"] = surface.status_item is not None
                 assertions["percent_and_countdown_visible"] = "%" in str(surface.status_item.button().title())
                 assertions["countdowns_in_menu"] = bool(RESET_RE.search(str(surface.status_item.menu().itemAtIndex_(0).title())))
+            if sys.platform == "win32":
+                # Master switch off: strip and hover card go away on the first tick
+                # (no 3-tick debounce), the leave-grace timer stops, and on again
+                # restores the strip without a restart.  The card state is simulated
+                # so no card is drawn on screen.
+                from vram_radar import ui_dialogs
+                def arm_card():
+                    ui_dialogs._HOVER["shown"] = True
+                    surface._leave_grace.Start()
+                invoke(arm_card)
+                overview["enabled"] = False
+                invoke(tick)
+                assertions["master_off_hides_strip_and_card_at_once"] = (
+                    not surface.form.Visible and not ui_dialogs._HOVER.get("shown")
+                    and not surface._leave_grace.Enabled and not surface._click_timer.Enabled)
+                overview["enabled"] = True
+                invoke(tick)
+                assertions["master_on_restores_strip"] = surface.active and surface.form.Visible
             state["stale"] = True
             invoke(tick)
             captured_text = []
