@@ -3664,6 +3664,33 @@ class ShellApiTests(unittest.TestCase):
         )
         window.destroy.assert_called_once_with()
 
+    def test_cocoa_shutdown_drains_evaluation_and_rejects_late_rpc_replies(self):
+        entered = threading.Event()
+        release = threading.Event()
+        window = Mock()
+
+        def native_evaluate(script):
+            entered.set()
+            release.wait(2)
+            return "received"
+
+        original_evaluate = Mock(side_effect=native_evaluate)
+        window.evaluate_js = original_evaluate
+        with patch("vram_radar.shell.sys.platform", "darwin"):
+            shutdown = WindowShutdownCoordinator(window, threading.Event(), threading.Event())
+        evaluation = threading.Thread(target=window.evaluate_js, args=("pending reply",))
+        evaluation.start()
+        self.assertTrue(entered.wait(1))
+        shutdown.request()
+        self.assertFalse(shutdown.wait(0.05))
+        window.destroy.assert_not_called()
+        release.set()
+        evaluation.join(1)
+        self.assertTrue(shutdown.wait(1))
+        window.destroy.assert_called_once_with()
+        self.assertIsNone(window.evaluate_js("late reply"))
+        original_evaluate.assert_called_once_with("pending reply")
+
     def test_activation_shutdown_wakeup_never_restores_a_disposed_window(self):
         stopped = threading.Event()
         requested = Mock()

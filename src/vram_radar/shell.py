@@ -863,6 +863,20 @@ class WindowShutdownCoordinator:
         self.finished = threading.Event()
         self._lock = threading.Lock()
         self._window_operation_lock = threading.Lock()
+        self._bridge_lock = threading.Lock()
+        self._bridge_closing = False
+        if sys.platform == "darwin":
+            # Cocoa evaluate_js waits for a native callback. RPC return threads
+            # must never submit one after the event loop has been destroyed.
+            evaluate_js = window.evaluate_js
+
+            def evaluate_while_open(*args: Any, **kwargs: Any) -> Any:
+                with self._bridge_lock:
+                    if self._bridge_closing:
+                        return None
+                    return evaluate_js(*args, **kwargs)
+
+            window.evaluate_js = evaluate_while_open
         self._worker: threading.Thread | None = None
         self._tray_controller: WindowsTrayController | None = None
         self._thread: threading.Thread | None = None
@@ -938,6 +952,10 @@ class WindowShutdownCoordinator:
                         logging.getLogger("vram_radar").exception(
                             "failed to flush desktop window state before shutdown"
                         )
+                # Drain native evaluations while the Cocoa loop is still alive,
+                # then reject late RPC replies before destroying the window.
+                with self._bridge_lock:
+                    self._bridge_closing = True
                 self.shutdown_ready.set()
             self.window.destroy()
         except Exception:
