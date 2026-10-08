@@ -307,6 +307,10 @@
     openSettings({forceNormal: true});
     assertions.cancel_discards_removed_server_restore = !settingsServerDrafts.some(s => s.ssh_alias === 'retired-a') && !document.getElementById('removed-server-choices');
     ui.dialog.close();
+    const invisibleProcess = {pid:'1234', name:'GPU 进程', owner_scope:'unknown', command_visibility:'unavailable', metadata_reason:'pid_not_visible'};
+    const missingDetails = renderProcessName(invisibleProcess, 'synthetic-root');
+    assertions.invisible_pid_is_not_reported_as_permission_denied = missingDetails.includes('当前进程视图中找不到') && !missingDetails.includes('权限受限');
+    assertions.missing_process_time_is_not_permission_evidence = formatElapsedSeconds(null) === '不可用';
     window.__interactionChecks = {ok: Object.values(assertions).every(Boolean), assertions,
       positions: {settledY, refreshY, settledTop, refreshedTop: refreshedCard.getBoundingClientRect().top,
         anchorBeforeTop, anchorAfterTop: anchorAfter.getBoundingClientRect().top, bottom:window.__bottomDebug}, scrollCalls};

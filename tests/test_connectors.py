@@ -255,6 +255,26 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(process["metadata_visibility"], "none")
 
     @patch("vram_radar.connectors.run_remote")
+    def test_root_missing_process_details_preserve_gpu_usage_and_observed_reason(self, remote):
+        for status, reason in (("NOT_VISIBLE", "pid_not_visible"),
+                               ("UNREADABLE", "proc_unreadable"),
+                               ("UNAVAILABLE", "query_unavailable"), ("ERR", "unknown")):
+            with self.subTest(status=status):
+                rows = "GPU-a, 1234, [Not Found], 512"
+                remote.return_value = self.direct_protocol(
+                    gpu_rows="0, GPU-a, NVIDIA L40, 49152, 512, 48640, 0, 35",
+                    process_a=rows, process_b=rows, metadata={"1234": ""},
+                ).replace("CURRENT_UID=1001", "CURRENT_UID=0").replace(
+                    "META|1234|OK|", f"META|1234|{status}|")
+                server = ServerProfile(id="gpu", display_name="GPU", backend="direct_ssh", ssh_alias="gpu-alias")
+                process = query_direct_ssh(server)["processes"]["active"][0]
+                self.assertEqual(process["owner_scope"], "unknown")
+                self.assertEqual(process["metadata_reason"], reason)
+                self.assertEqual(process["memory_used_gib"], 0.5)
+                self.assertEqual(process["name"], "GPU 进程")
+                self.assertIsNone(process["user"])
+
+    @patch("vram_radar.connectors.run_remote")
     def test_other_user_command_is_hidden_after_explicit_opt_out(self, remote):
         canary = "OTHER-USER-CANARY"
         process_rows = "GPU-a, 2222, /usr/bin/python, 2048"

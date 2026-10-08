@@ -731,7 +731,7 @@ function renderTaskOwnerGroup(server, options) {
 }
 
 function formatElapsedSeconds(value) {
-  if (value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) return '权限受限';
+  if (value == null || String(value).trim() === '' || !Number.isFinite(Number(value)) || Number(value) < 0) return '不可用';
   let seconds = Math.max(0, Math.floor(Number(value)));
   const days = Math.floor(seconds / 86400);
   seconds %= 86400;
@@ -771,6 +771,14 @@ function processCommandOpenAttr(serverId, process) {
   return openProcessCommands.has(processCommandKey(serverId, process)) ? ' open' : '';
 }
 
+function processMetadataExplanation(process) {
+  if (process.metadata_reason === 'pid_not_visible') return '当前进程视图中找不到此 PID；可能位于其他容器或已退出，不能据此判定权限不足。';
+  if (process.metadata_reason === 'proc_unreadable') return '当前环境无法读取此进程的 /proc 信息。';
+  if (process.metadata_reason === 'query_unavailable') return '进程详情查询未返回结果，原因尚未确定。';
+  if (process.metadata_reason === 'not_sampled') return '本次尚未采集到进程详情。';
+  return '未获取到进程详情；可能与进程隔离、权限或采样时进程变化有关。';
+}
+
 function renderProcessName(process, serverId = '') {
   const preview = String(process.command_preview || '').trim()
     .replaceAll('[已隐藏]', localizedText('[已隐藏]'));
@@ -778,7 +786,7 @@ function renderProcessName(process, serverId = '') {
     ? `<details class="process-command-details" data-server-id="${escapeHtml(serverId)}" data-process-pid="${escapeHtml(process.pid)}" data-process-started="${escapeHtml(process.started_at || '')}"${processCommandOpenAttr(serverId, process)}><summary>查看命令摘要</summary><code>${escapeHtml(preview)}</code><small>敏感参数已遮盖${process.command_truncated ? ' · 已安全截断' : ''}</small></details>`
     : process.command_visibility === 'hidden_for_privacy'
     ? '<span class="process-command-missing">其他用户命令摘要未启用</span>'
-    : '<span class="process-command-missing">命令详情受服务器权限限制</span>';
+    : `<span class="process-command-missing">${escapeHtml(localizedText(processMetadataExplanation(process)))}</span>`;
   return `<div class="process-name-stack">${renderTaskName(process)}${command}</div>`;
 }
 
@@ -790,7 +798,7 @@ function renderProcessAllocations(process) {
 
 function renderProcessTable(processes, currentUser, emptyMessage, serverId = '') {
   if (!processes.length) return `<div class="module-empty">${escapeHtml(emptyMessage)}</div>`;
-  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText(process.timing_status ? '运行时长不可用' : '权限受限'))}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table process-table" role="region" aria-label="当前 GPU 进程，可横向滚动"><table><caption class="sr-only">当前 GPU 进程</caption><thead><tr><th scope="col">用户</th><th scope="col">PID</th><th scope="col">进程 / 任务</th><th scope="col">GPU 明细</th><th scope="col">显存合计</th><th scope="col">进程 CPU</th><th scope="col">运行时长</th><th scope="col">启动时间</th><th scope="col">提醒</th></tr></thead><tbody>${processes.map(process => `<tr><td data-label="用户">${renderTaskUser(process, currentUser)}</td><td class="mono copyable-cell" data-label="PID">${copyableValue(process.pid, 'PID')}</td><td class="task-name-cell process-name-cell" data-label="进程 / 任务">${renderProcessName(process, serverId)}</td><td data-label="GPU 明细">${renderProcessAllocations(process)}</td><td class="number-value" data-label="显存合计">${process.memory_used_gib == null ? '未知' : `${number(process.memory_used_gib)} GiB`}</td><td class="number-value" data-label="进程 CPU">${escapeHtml(formatCpuPercent(process.cpu_percent))}</td><td class="time-value" data-label="运行时长">${renderProcessElapsed(process)}</td><td class="time-value" data-label="启动时间">${process.started_at ? escapeHtml(formatTaskTimestamp(process.started_at)) : escapeHtml(localizedText('不可用'))}</td><td data-label="提醒">${taskCompletionWatchButton(serverId, 'process', process, currentUser)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderProcessOwnerGroup(server, options) {
@@ -836,7 +844,7 @@ function renderDirectProcessModule(server) {
   });
   if (groups.unknown.length) {
     ownerGroups += renderProcessOwnerGroup(server, {
-      key: 'process-unknown', title: '归属不可见', subtitle: '权限受限', iconName: 'users',
+      key: 'process-unknown', title: '归属不可见', subtitle: '未获取到进程归属', iconName: 'users',
       processes: groups.unknown, currentUser, defaultOpen: false, emptyMessage: '',
     });
   }

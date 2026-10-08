@@ -1058,11 +1058,12 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
     for raw in lines[1:-1]:
         if raw.startswith("META|"):
             parts = raw.split("|", 3)
-            if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in {"OK", "ERR"}:
+            if len(parts) != 4 or not parts[1].isdigit() or parts[2] not in {"OK", "ERR", "NOT_VISIBLE", "UNREADABLE", "UNAVAILABLE"}:
                 raise ConnectorFailure("parse_failed", "服务器返回了无效的进程信息", retryable=True)
             if parts[1] in metadata:
                 raise ConnectorFailure("parse_failed", "服务器返回了重复的进程信息", retryable=True)
-            metadata[parts[1]] = _decode_hex(parts[3], "进程信息") if parts[2] == "OK" else ""
+            metadata[parts[1]] = (_decode_hex(parts[3], "进程信息") if parts[2] == "OK"
+                                  else ("" if parts[2] == "ERR" else f"VRAM_METADATA {parts[2]}"))
             continue
         key, separator, value = raw.partition("=")
         if not separator or key not in allowed or key in fields:
@@ -1750,13 +1751,17 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
         if separator and match:
             # Do not expose the remote boot identifier in the UI or cache.
             identity = hashlib.sha256(f"{match[1]}:{pid}:{match[2]}".encode()).hexdigest()
+    source = "ps"
+    if text.startswith("VRAM_PROC\n"):
+        source = "proc"
+        text = text[len("VRAM_PROC\n"):]
     parts = text.strip().split(None, 4)
-    if len(parts) < 4 or parts[0] != pid or not parts[1].isdigit() or not parts[3].isdigit():
+    if len(parts) < 4 or parts[0] != pid or not parts[1].isdigit() or not (parts[3].isdigit() or (source == "proc" and parts[3] == "-")):
         return None
     cpu_percent: float | None = None
     command = parts[4] if len(parts) == 5 else ""
     command_parts = command.split(None, 1)
-    if command_parts and re.fullmatch(r"\d+(?:\.\d+)?", command_parts[0]):
+    if source == "ps" and command_parts and re.fullmatch(r"\d+(?:\.\d+)?", command_parts[0]):
         candidate = float(command_parts[0])
         if 0 <= candidate <= 1_000_000:
             cpu_percent = round(candidate, 2)
@@ -1764,7 +1769,8 @@ def _parse_process_metadata(pid: str, text: str) -> dict[str, Any] | None:
     return {
         "uid": parts[1],
         "user": parts[2],
-        "elapsed_seconds": int(parts[3]),
+        "elapsed_seconds": int(parts[3]) if parts[3].isdigit() else None,
+        "metadata_source": source,
         "process_identity": identity,
         "cpu_percent": cpu_percent,
         "command": command,
@@ -1807,7 +1813,13 @@ def _build_direct_processes(
         )
     active: list[dict[str, Any]] = []
     for pid, process in by_pid.items():
-        metadata = _parse_process_metadata(pid, metadata_text.get(pid, ""))
+        raw_metadata = metadata_text.get(pid, "")
+        metadata = _parse_process_metadata(pid, raw_metadata)
+        metadata_reason = None if metadata else {
+            "VRAM_METADATA NOT_VISIBLE": "pid_not_visible",
+            "VRAM_METADATA UNREADABLE": "proc_unreadable",
+            "VRAM_METADATA UNAVAILABLE": "query_unavailable",
+        }.get(raw_metadata, "not_sampled" if pid not in metadata_text else "unknown")
         uid = metadata["uid"] if metadata else ""
         if uid and current_uid:
             owner_scope = "mine" if uid == current_uid else "other"
@@ -1816,6 +1828,8 @@ def _build_direct_processes(
         raw_command = metadata["command"] if metadata else ""
         redacted_command, command_truncated = redact_command_preview(raw_command)
         safe_process_name, _ = redact_command_preview(process["process_name"], limit=160)
+        if safe_process_name.casefold() in {"[not found]", "[n/a]", "n/a"}:
+            safe_process_name = "GPU 进程"
         elapsed_seconds = metadata["elapsed_seconds"] if metadata else None
         started_at = None
         if elapsed_seconds is not None:
@@ -1856,6 +1870,8 @@ def _build_direct_processes(
                 "cpu_percent": metadata["cpu_percent"] if metadata else None,
                 "started_at": started_at,
                 "metadata_visibility": "full" if metadata else "none",
+                "metadata_reason": metadata_reason,
+                "metadata_source": metadata.get("metadata_source") if metadata else None,
                 "allocations": allocations,
                 "memory_used_gib": round(sum(memory_values), 2) if memory_values else None,
             }
@@ -1880,6 +1896,40 @@ def _build_direct_processes(
         "deferred_new_count": len(second_keys - first_keys),
         "active": active,
     }
+
+
+# Read only the requested visible PID when ps lacks fields (e.g. minimal images).
+# The start tick must remain stable; never search other namespaces or guess a PID.
+PROC_METADATA_FALLBACK = r"""
+proc_metadata() (
+    proc_pid=$1
+    proc_root=${2:-/proc}
+    proc_dir="$proc_root/$proc_pid"
+    stat_line=$(cat "$proc_dir/stat" 2>/dev/null) || return 1
+    stat_fields=${stat_line##*) }
+    proc_start=$(printf '%s\n' "$stat_fields" | awk '{print $20}')
+    case "$proc_start" in ''|*[!0-9]*) return 1 ;; esac
+    proc_uid=$(awk '$1 == "Uid:" {print $2; exit}' "$proc_dir/status" 2>/dev/null) || return 1
+    case "$proc_uid" in ''|*[!0-9]*) return 1 ;; esac
+    proc_user=$(id -nu "$proc_uid" 2>/dev/null) || proc_user=$proc_uid
+    proc_cmd=$(dd if="$proc_dir/cmdline" bs=16384 count=1 2>/dev/null | tr '\000' ' ') || return 1
+    if [ -z "$proc_cmd" ]; then
+        proc_cmd=$(cat "$proc_dir/comm" 2>/dev/null) || return 1
+    fi
+    [ -n "$proc_cmd" ] || return 1
+    proc_elapsed=-
+    proc_hz=$(getconf CLK_TCK 2>/dev/null) || proc_hz=''
+    proc_uptime=$(awk '{print $1; exit}' "$proc_root/uptime" 2>/dev/null) || proc_uptime=''
+    case "$proc_hz" in ''|0|*[!0-9]*) ;; *)
+        proc_elapsed=$(awk -v ticks="$proc_start" -v hz="$proc_hz" -v up="$proc_uptime" 'BEGIN {if (up ~ /^[0-9]+([.][0-9]+)?$/ && up >= ticks/hz) printf "%.0f", int(up-ticks/hz); else printf "-"}')
+    ;; esac
+    stat_line=$(cat "$proc_dir/stat" 2>/dev/null) || return 1
+    stat_fields=${stat_line##*) }
+    proc_after=$(printf '%s\n' "$stat_fields" | awk '{print $20}')
+    [ "$proc_start" = "$proc_after" ] || return 1
+    printf '%s %s %s %s %s' "$proc_pid" "$proc_uid" "$proc_user" "$proc_elapsed" "$proc_cmd"
+)
+"""
 
 
 def query_direct_ssh(
@@ -2004,16 +2054,31 @@ process_start_ticks() {{
     shift 19
     printf '%s' "$1"
 }}
+{PROC_METADATA_FALLBACK}
 for pid in $pids; do
     start_before=$(process_start_ticks "$pid") || start_before=''
-    if meta=$(ps -ww -p "$pid" -o pid= -o uid= -o user:64= -o etimes= -o pcpu= -o args= 2>/dev/null); then
+    meta=''
+    if meta=$(ps -ww -p "$pid" -o pid= -o uid= -o user:64= -o etimes= -o pcpu= -o args= 2>/dev/null) && [ -n "$meta" ]; then
+        :
+    elif meta=$(proc_metadata "$pid"); then
+        meta=$(printf 'VRAM_PROC\\n%s' "$meta")
+    else
+        meta=''
+    fi
+    if [ -n "$meta" ]; then
         start_after=$(process_start_ticks "$pid") || start_after=''
         if [ -n "$boot_id" ] && [ -n "$start_before" ] && [ "$start_before" = "$start_after" ]; then
             meta=$(printf 'VRAM_ID %s %s\\n%s' "$boot_id" "$start_before" "$meta")
         fi
         printf 'META|%s|OK|' "$pid"; printf '%s' "$meta" | hex_encode; printf '\\n'
     else
-        printf 'META|%s|ERR|\\n' "$pid"
+        reason=UNAVAILABLE
+        if [ -d /proc/self ] && [ ! -d "/proc/$pid" ]; then
+            reason=NOT_VISIBLE
+        elif [ -d "/proc/$pid" ] && [ ! -r "/proc/$pid/stat" ]; then
+            reason=UNREADABLE
+        fi
+        printf 'META|%s|%s|\\n' "$pid" "$reason"
     fi
 done
 process_b=''
