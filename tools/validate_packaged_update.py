@@ -8,8 +8,9 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import tempfile
 import time
+
+from check_english_web_ui import temporary_browser_directory
 
 
 def file_hash(path: Path) -> str:
@@ -69,7 +70,7 @@ def wait_for_process_exit(pid: int, timeout: float = 20.0) -> None:
 def validate(installer: Path) -> None:
     installer = installer.resolve()
     version = installer.stem.removeprefix("VRAMRadar-Setup-")
-    with tempfile.TemporaryDirectory(prefix="vram-radar-update-") as temporary:
+    with temporary_browser_directory(prefix="vram-radar-update-") as temporary:
         root = Path(temporary)
         install_root = root / "install"
         home = root / "home"
