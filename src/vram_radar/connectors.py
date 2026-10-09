@@ -20,7 +20,7 @@ from typing import Any
 
 from .askpass import PasswordBroker
 from .models import ServerProfile
-from .namespace_probe import REMOTE_NAMESPACE_PROBE
+from .namespace_probe import namespace_probe_payload
 from .openssh_resolution import OpenSSHEndpointResolution, resolve_openssh_endpoint
 
 
@@ -1059,6 +1059,8 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         "GPU_ACCESS_HEX",
         "GPU_ACCESS_LIMITED",
         "GPU_ACCESS_SUPPORTED",
+        "LOCAL_PROCESS_HEX",
+        "LOCAL_PROCESS_COMPLETE",
     }
     for raw in lines[1:-1]:
         if raw.startswith("META|"):
@@ -1076,7 +1078,7 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         fields[key] = value
     # HOME_HEX was added without changing the direct-GPU protocol version so
     # older cached fixtures remain readable. Fresh probes always include it.
-    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB", "PID_VIEW", "GPU_ACCESS_HEX", "GPU_ACCESS_LIMITED", "GPU_ACCESS_SUPPORTED"}
+    required = allowed - {"HOME_HEX", "CPU_COUNT", "CPU_LOAD_HEX", "CPU_USAGE", "MEM_TOTAL_KIB", "MEM_AVAILABLE_KIB", "PID_VIEW", "GPU_ACCESS_HEX", "GPU_ACCESS_LIMITED", "GPU_ACCESS_SUPPORTED", "LOCAL_PROCESS_HEX", "LOCAL_PROCESS_COMPLETE"}
     if not required.issubset(fields):
         raise ConnectorFailure("parse_failed", "服务器返回了不完整的 GPU 数据项", retryable=True)
     if fields["CURRENT_UID"] and not fields["CURRENT_UID"].isdigit():
@@ -1089,7 +1091,8 @@ def _parse_direct_protocol(output: str) -> tuple[dict[str, str], dict[str, str]]
         raise ConnectorFailure("parse_failed", "服务器返回了过多的进程信息", retryable=True)
     if (fields.get("PID_VIEW", "unknown") not in {"host", "isolated", "unknown"}
             or fields.get("GPU_ACCESS_LIMITED", "0") not in {"0", "1"}
-            or fields.get("GPU_ACCESS_SUPPORTED", "0") not in {"0", "1"}):
+            or fields.get("GPU_ACCESS_SUPPORTED", "0") not in {"0", "1"}
+            or fields.get("LOCAL_PROCESS_COMPLETE", "0") not in {"0", "1"}):
         raise ConnectorFailure("parse_failed", "服务器返回了无效的进程可见性状态", retryable=True)
     return fields, metadata
 
@@ -1933,7 +1936,7 @@ def _build_direct_processes(
 def _build_local_gpu_access(
     encoded: str, current_uid: str, *, sampled_at: datetime,
 ) -> list[dict[str, Any]]:
-    """Visible device users have no inferred nvidia-smi allocation or watch ID."""
+    """Visible device users keep their own identity without an inferred GPU allocation."""
 
     try:
         text = _decode_hex(encoded, "进程信息", limit=1_100_000)
@@ -1946,7 +1949,15 @@ def _build_local_gpu_access(
         if not separator or not pid.isdigit() or pid in seen:
             continue
         try:
-            metadata = _parse_process_metadata(pid, _decode_hex(raw, "进程信息", limit=32768))
+            decoded = _decode_hex(raw, "进程信息", limit=32768)
+            identity = None
+            if decoded.startswith("VRAM_LOCAL_ID "):
+                header, separator, decoded = decoded.partition("\n")
+                match = re.fullmatch(r"VRAM_LOCAL_ID ([0-9a-f]{64})", header)
+                if not separator or not match:
+                    continue
+                identity = match[1]
+            metadata = _parse_process_metadata(pid, decoded)
         except ConnectorFailure:
             continue
         if not metadata or not current_uid or metadata["uid"] != current_uid:
@@ -1960,8 +1971,27 @@ def _build_local_gpu_access(
             "name": infer_process_name("GPU 设备访问进程", metadata["command"]),
             "command_preview": command or None, "command_truncated": truncated,
             "command_visibility": "self", "elapsed_seconds": elapsed, "started_at": started,
+            "process_identity": identity,
         })
     return sorted(rows, key=lambda row: int(row["pid"]))
+
+
+def _build_local_process_snapshot(fields: dict[str, str]) -> tuple[dict[str, str | None], bool]:
+    """A bounded PID scan proves liveness independently of open GPU descriptors."""
+    try:
+        text = _decode_hex(fields.get("LOCAL_PROCESS_HEX", ""), "进程身份", limit=65536)
+    except ConnectorFailure:
+        return {}, False
+    identities: dict[str, str | None] = {}
+    lines = text.splitlines()
+    if len(lines) > 512:
+        return {}, False
+    for line in lines:
+        match = re.fullmatch(r"([1-9][0-9]{0,9})\|([0-9a-f]{64}|-)", line)
+        if not match or match[1] in identities:
+            return {}, False
+        identities[match[1]] = None if match[2] == "-" else match[2]
+    return identities, fields.get("LOCAL_PROCESS_COMPLETE", "0") == "1"
 
 
 # Read only the requested visible PID when ps lacks fields (e.g. minimal images).
@@ -2153,9 +2183,9 @@ fi
 printf 'PID_VIEW=%s\\n' "$pid_view"
 if [ "$pid_view" = isolated ]; then
     namespace_data=''
-    if [ -n "$pids" ] && command -v python3 >/dev/null 2>&1; then
+    if command -v python3 >/dev/null 2>&1; then
         namespace_data=$(python3 - "$pids" "$current_uid" 2>/dev/null <<'VRAM_NAMESPACE_PY'
-{REMOTE_NAMESPACE_PROBE}
+{namespace_probe_payload()}
 VRAM_NAMESPACE_PY
         ) || namespace_data=''
     fi
@@ -2168,7 +2198,7 @@ VRAM_NAMESPACE_PY
         fi
     done
     if [ -n "$namespace_data" ]; then
-        printf '%s\\n' "$namespace_data" | awk '/^GPU_ACCESS_(HEX|LIMITED|SUPPORTED)=/ {{print}}'
+        printf '%s\\n' "$namespace_data" | awk '/^(GPU_ACCESS_(HEX|LIMITED|SUPPORTED)|LOCAL_PROCESS_(HEX|COMPLETE))=/ {{print}}'
     else
         printf 'GPU_ACCESS_SUPPORTED=0\\n'
     fi
@@ -2263,6 +2293,9 @@ printf '{DIRECT_PROTOCOL_END}\\n'
             "active": [],
             "warning": "当前驱动未提供 GPU 进程信息；显存数据仍会正常刷新。",
         }
+    identities, complete = _build_local_process_snapshot(fields)
+    processes["local_process_identities"] = identities
+    processes["local_processes_complete"] = complete
     result = {
         "server_id": server.id,
         "display_name": server.display_name,

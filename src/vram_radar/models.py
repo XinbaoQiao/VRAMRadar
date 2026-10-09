@@ -229,8 +229,8 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
     task_kind = require_bounded_text(
         raw.get("task_kind"), "task completion watch kind", maximum_bytes=32
     ).lower()
-    if task_kind not in {"slurm", "process"}:
-        raise ConfigError("task completion watch kind must be slurm or process")
+    if task_kind not in {"slurm", "process", "local_process"}:
+        raise ConfigError("task completion watch kind must be slurm, process or local_process")
     task_id = require_bounded_text(
         raw.get("task_id"), "task completion watch id", maximum_bytes=128
     )
@@ -242,6 +242,11 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
         # drift by a second between polls. PID plus a generation fingerprint
         # owns lifecycle identity; canonicalize older persisted watch keys.
         task_key = f"process:{task_id}"
+    elif task_kind == "local_process":
+        if not re.fullmatch(r"[1-9][0-9]{0,9}", task_id) or not re.fullmatch(
+            rf"local_process:{re.escape(task_id)}:[0-9a-f]{{64}}", task_key
+        ):
+            raise ConfigError("local process completion watch key does not match its process identity")
     elif task_key != f"slurm:{task_id}" and not task_key.startswith(f"slurm:{task_id}:"):
         raise ConfigError("Slurm completion watch key does not match its job id")
     label = require_bounded_text(
@@ -262,6 +267,8 @@ def normalize_task_completion_watch(raw: Any) -> dict[str, str]:
     ).lower()
     if owner_scope not in {"mine", "other", "unknown"}:
         raise ConfigError("task completion watch owner scope must be mine, other, or unknown")
+    if task_kind == "local_process" and owner_scope != "mine":
+        raise ConfigError("local process completion watch must belong to the current account")
     return {
         "server_id": server_id,
         "task_key": task_key,

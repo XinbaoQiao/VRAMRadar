@@ -382,7 +382,7 @@
     const namespaceServer = {
       server_id: 'synthetic-namespace', connection: {state: 'online'},
       processes: {supported: true, current_user: 'owner', pid_view: 'isolated', active: [namespaceProcess], local_gpu_access_supported: true,
-        local_gpu_access: [{pid: '15109', user: 'owner', owner_scope: 'mine', name: 'train.py', command_preview: 'python train.py', elapsed_seconds: 998}]},
+        local_gpu_access: [{pid: '15109', user: 'owner', owner_scope: 'mine', name: 'train.py', command_preview: 'python train.py', elapsed_seconds: 998, process_identity: 'a'.repeat(64)}]},
     };
     const namespaceFixture = document.createElement('section');
     namespaceFixture.innerHTML = renderDirectProcessModule(namespaceServer);
@@ -393,7 +393,44 @@
     assertions.isolated_gpu_owner_remains_unknown_without_mapping = gpuRow.innerText.includes('2349206') && !gpuRow.querySelector('.self-user-tag');
     assertions.namespace_explanation_distinguishes_ssh_permissions = gpuRow.innerText.includes('独立的 PID 视图') && gpuRow.innerText.includes('不代表 SSH 账号权限不足');
     assertions.local_device_users_show_their_verified_owner = localTable.innerText.includes('15109') && localTable.querySelector('.task-user.self .self-user-tag')?.innerText === '我';
-    assertions.local_device_users_have_no_inferred_vram_or_completion_watch = !localTable.innerText.includes('GiB') && !localTable.innerText.includes('显存') && !localTable.innerText.includes('提醒');
+    assertions.local_device_users_have_no_inferred_vram = !localTable.innerText.includes('GiB') && !localTable.innerText.includes('显存');
+    const localWatch = localTable.querySelector('.task-watch-toggle');
+    const localKey = `local_process:15109:${'a'.repeat(64)}`;
+    assertions.local_device_users_have_scoped_watch_buttons = localWatch && !localWatch.disabled
+      && localWatch.dataset.taskKind === 'local_process' && localWatch.dataset.taskKey === localKey;
+    const savedApi = api;
+    const savedProfile = currentProfile;
+    const localWatchCalls = [];
+    try {
+      api = {set_task_completion_watch: async (...args) => {
+        localWatchCalls.push(args);
+        const [serverId, taskKey, taskKind, taskId, label, watched, owner, ownerScope] = args;
+        const watches = (currentProfile.task_completion_watches || []).filter(w => !(w.server_id === serverId && w.task_key === taskKey));
+        if (watched) watches.push({server_id: serverId, task_key: taskKey, task_kind: taskKind, task_id: taskId, label, owner, owner_scope: ownerScope});
+        return {ok: true, profile: {...currentProfile, profile_revision: Number(currentProfile.profile_revision || 0) + 1, task_completion_watches: watches}};
+      }};
+      localWatch.click();
+      await waitUntil(() => localWatchCalls.length === 1 && currentProfile.task_completion_watches.some(w => w.task_key === localKey), 'Local process watch was not saved');
+      assertions.local_device_watch_click_reaches_the_api = localWatchCalls[0][0] === 'synthetic-namespace'
+        && localWatchCalls[0][1] === localKey && localWatchCalls[0][2] === 'local_process'
+        && localWatchCalls[0][3] === '15109' && localWatchCalls[0][5] === true && localWatchCalls[0][7] === 'mine';
+      assertions.local_device_watch_does_not_follow_gpu_pid_collision = taskCompletionWatchButton(
+        'synthetic-namespace', 'process', {pid: '15109', owner_scope: 'mine', user: 'owner'}, 'owner',
+      ).includes('aria-pressed="false"');
+      assertions.local_device_watch_sidebar_names_the_environment = renderNavigatorTaskWatches().includes('当前环境 PID');
+      namespaceFixture.innerHTML = renderDirectProcessModule(namespaceServer);
+      namespaceFixture.querySelectorAll('details').forEach(detail => { detail.open = true; });
+      const watchedButton = namespaceFixture.querySelector('.local-gpu-access-table .task-watch-toggle');
+      assertions.local_device_watch_shows_saved_state = watchedButton?.getAttribute('aria-pressed') === 'true';
+      watchedButton.click();
+      await waitUntil(() => localWatchCalls.length === 2 && !currentProfile.task_completion_watches.some(w => w.task_key === localKey), 'Local process watch was not removed');
+      assertions.local_device_watch_can_be_cancelled = localWatchCalls[1][1] === localKey && localWatchCalls[1][5] === false;
+    } finally {
+      api = savedApi;
+      acceptProfile({...savedProfile, profile_revision: Number(currentProfile.profile_revision || 0) + 1});
+    }
+    const unknownLocal = taskCompletionWatchButton('synthetic-namespace', 'local_process', {pid:'15109', owner_scope:'mine'}, 'owner');
+    assertions.local_device_without_identity_cannot_follow_a_reused_pid = unknownLocal.includes('disabled') && !unknownLocal.includes('data-task-key=');
     assertions.gpu_memory_survives_namespace_isolation = gpuRow.innerText.includes('4.83 GiB');
     const mappedPid = renderProcessPid({pid: '2349206', visible_pid: '15109'});
     assertions.proven_mapping_keeps_both_distinct_pids = mappedPid.includes('2349206') && mappedPid.includes('15109') && mappedPid.includes('当前环境 PID');

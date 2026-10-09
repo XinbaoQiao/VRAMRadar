@@ -7,8 +7,12 @@ PID_NS_INIT_INO constant in include/uapi/linux/nsfs.h). Device-access rows remai
 separate from nvidia-smi allocations unless that host view proves a PID mapping.
 """
 
+import base64
+import zlib
+
+
 REMOTE_NAMESPACE_PROBE = r'''
-import os, re, sys
+import hashlib, os, re, sys
 try:
     import pwd
 except ImportError:
@@ -122,11 +126,18 @@ def resolve(root, host_root, pid):
     identity = "VRAM_ID %s %s\n" % (boot, before) if re.fullmatch(r"[0-9a-fA-F-]{36}", boot) else ""
     return identity + "VRAM_HOSTPROC " + visible_pid + "\nVRAM_PROC\n" + row
 
-def device_users(root, uid, excluded):
+def device_users(root, uid, excluded, visibility=None):
     rows, limited = [], False
+    boot = read(root + "/sys/kernel/random/boot_id", 64).strip()
+    namespace = link(root + "/self/ns/pid")
+    identified = bool(re.fullmatch(r"[0-9a-fA-F-]{36}", boot) and re.fullmatch(r"pid:\[[0-9]+\]", namespace))
+    if visibility is not None:
+        visibility.update(identities={}, complete=identified)
     try:
         entries = os.scandir(root)
     except OSError:
+        if visibility is not None:
+            visibility["complete"] = False
         return rows, limited
     with entries:
         count = 0
@@ -135,12 +146,21 @@ def device_users(root, uid, excluded):
             if not pid.isdigit():
                 continue
             count += 1
-            if count > 512 or len(rows) >= 32:
+            if count > 512:
                 limited = True
+                if visibility is not None:
+                    visibility["complete"] = False
                 break
+            before = ticks(root, pid)
+            identity = (hashlib.sha256((boot + ":" + namespace + ":" + pid + ":" + before).encode()).hexdigest()
+                        if identified and before and ticks(root, pid) == before else None)
+            if visibility is not None:
+                visibility["identities"][pid] = identity
             if pid in excluded or (status(root, pid).get("Uid") or [""])[0] != uid:
                 continue
-            before = ticks(root, pid)
+            if len(rows) >= 32:
+                limited = True
+                continue
             try:
                 fds = os.scandir(entry.path + "/fd")
             except OSError:
@@ -158,10 +178,14 @@ def device_users(root, uid, excluded):
                 continue
             item = metadata(root, pid)
             if item and before and before == item[0] == ticks(root, pid):
-                rows.append((pid, "VRAM_PROC\n" + item[2]))
+                header = "VRAM_LOCAL_ID " + identity + "\n" if identity else ""
+                rows.append((pid, header + "VRAM_PROC\n" + item[2]))
+    if visibility is not None and (link(root + "/self/ns/pid") != namespace
+                                  or read(root + "/sys/kernel/random/boot_id", 64).strip() != boot):
+        visibility["complete"] = False
     return rows, limited
 
-def probe(root, pids, uid):
+def probe(root, pids, uid, visibility=None):
     roots = host_roots(root)
     resolved, excluded = {}, {str(os.getpid()), str(os.getppid())}
     for pid in pids[:128]:
@@ -173,16 +197,26 @@ def probe(root, pids, uid):
                 if match:
                     excluded.add(match[1])
                 break
-    rows, limited = device_users(root, uid, excluded) if len(resolved) < len(pids) else ([], False)
+    rows, limited = device_users(root, uid, excluded, visibility) if visibility is not None or len(resolved) < len(pids) else ([], False)
     return resolved, rows, limited
 
 if __name__ == "__main__":
     pids = [p for p in sys.argv[1].split() if p.isdigit()]
-    resolved, rows, limited = probe("/proc", pids, sys.argv[2])
+    visibility = {}
+    resolved, rows, limited = probe("/proc", pids, sys.argv[2], visibility)
     for pid, text in resolved.items():
         print("META|%s|OK|%s" % (pid, text.encode().hex()))
     text = "\n".join("%s|%s" % (pid, data.encode().hex()) for pid, data in rows)
     print("GPU_ACCESS_HEX=" + text.encode().hex())
     print("GPU_ACCESS_LIMITED=" + str(int(limited)))
     print("GPU_ACCESS_SUPPORTED=1")
+    visible = "\n".join(pid + "|" + (identity or "-") for pid, identity in visibility.get("identities", {}).items())
+    print("LOCAL_PROCESS_HEX=" + visible.encode().hex())
+    print("LOCAL_PROCESS_COMPLETE=" + str(int(visibility.get("complete", False))))
 '''
+
+
+def namespace_probe_payload() -> str:
+    """Keep the standard-library probe below the existing SSH stdin limit."""
+    encoded = base64.b64encode(zlib.compress(REMOTE_NAMESPACE_PROBE.encode(), 9)).decode("ascii")
+    return f"import base64,zlib\nexec(zlib.decompress(base64.b64decode('{encoded}')))"

@@ -858,6 +858,7 @@
     ['当前进程视图中找不到此 PID；可能位于其他容器或已退出，不能据此判定权限不足。', 'This PID is absent from the current process view. It may be in another container or may have exited; this does not establish a permission failure.'],
     ['当前连接使用独立的 PID 视图，尚未取得此 GPU PID 的映射；这不代表 SSH 账号权限不足。', 'This connection has an isolated PID view, and a mapping for this GPU PID is unavailable. This does not establish an SSH permission failure.'],
     ['当前环境 PID', 'PID in this environment'],
+    ['尚未读到进程身份，请刷新后重试', 'Process identity is not available yet. Refresh and try again.'],
     ['容器 PID 映射未提供', 'Container PID mapping unavailable'],
     ['当前环境 GPU 设备访问进程', 'GPU device users in this environment'],
     ['上次环境 GPU 设备访问进程', 'Last sampled GPU device users in this environment'],

@@ -14,7 +14,7 @@ from vram_radar.connectors import (
     _parse_process_metadata, query_direct_ssh,
 )
 from vram_radar.models import ServerProfile
-from vram_radar.namespace_probe import REMOTE_NAMESPACE_PROBE
+from vram_radar.namespace_probe import REMOTE_NAMESPACE_PROBE, namespace_probe_payload
 
 
 class ProcessNamespaceTests(unittest.TestCase):
@@ -40,6 +40,7 @@ class ProcessNamespaceTests(unittest.TestCase):
         self.write(self.root / "uptime", "1000.0 0\n")
         self.write(self.host / "uptime", "1000.0 0\n")
         self.write(self.host / "sys/kernel/random/boot_id", "00000000-0000-0000-0000-000000000001\n")
+        self.write(self.root / "sys/kernel/random/boot_id", "00000000-0000-0000-0000-000000000001\n")
         self.process(self.root, "15109", nspid="15109")
         self.process(self.host, "2349206", nspid="2349206 15109")
         self.links["/host/proc/2349206/ns/pid"] = "pid:[4026532900]"
@@ -158,6 +159,53 @@ class ProcessNamespaceTests(unittest.TestCase):
         self.process(self.root, "45")
         rows, _ = self.ns["device_users"](self.root.as_posix(), "1001", set())
         self.assertEqual([pid for pid, _ in rows], ["15109"])
+
+    def test_local_identity_survives_closing_gpu_descriptors(self):
+        self.access()
+        first = {}
+        _, rows, _ = self.ns["probe"](self.root.as_posix(), [], "1001", first)
+        self.assertTrue(first["complete"])
+        token = first["identities"]["15109"]
+        self.assertEqual(len(token), 64)
+        text = "\n".join(pid + "|" + data.encode().hex() for pid, data in rows).encode().hex()
+        parsed = _build_local_gpu_access(text, "1001", sampled_at=self.sampled_at)
+        self.assertEqual(parsed[0]["process_identity"], token)
+        self.assertNotIn("memory_used_gib", parsed[0])
+        del self.links[(self.root / "15109/fd/4").as_posix()]
+        second = {}
+        _, rows, _ = self.ns["probe"](self.root.as_posix(), [], "1001", second)
+        self.assertEqual(rows, [])
+        self.assertEqual(second["identities"]["15109"], token)
+
+    def test_local_identity_changes_on_pid_reuse_namespace_change_and_reboot(self):
+        tokens = set()
+        for ticks, namespace, boot in (
+            ("200", "pid:[4026532900]", "00000000-0000-0000-0000-000000000001"),
+            ("201", "pid:[4026532900]", "00000000-0000-0000-0000-000000000001"),
+            ("201", "pid:[4026532901]", "00000000-0000-0000-0000-000000000001"),
+            ("201", "pid:[4026532901]", "00000000-0000-0000-0000-000000000002"),
+        ):
+            self.process(self.root, "15109", ticks=ticks)
+            self.links[self.path("self/ns/pid")] = namespace
+            self.write(self.root / "sys/kernel/random/boot_id", boot)
+            visibility = {}
+            self.ns["device_users"](self.root.as_posix(), "1001", set(), visibility)
+            tokens.add(visibility["identities"]["15109"])
+        self.assertEqual(len(tokens), 4)
+
+    def test_unreadable_stat_preserves_pid_as_unknown(self):
+        (self.root / "15109/stat").unlink()
+        visibility = {}
+        self.ns["device_users"](self.root.as_posix(), "1001", set(), visibility)
+        self.assertTrue(visibility["complete"])
+        self.assertIn("15109", visibility["identities"])
+        self.assertIsNone(visibility["identities"]["15109"])
+
+    def test_compressed_payload_executes_the_same_probe(self):
+        packed = {"__name__": "fixture"}
+        exec(namespace_probe_payload(), packed)
+        self.assertEqual(packed["device_users"].__code__.co_code, self.ns["device_users"].__code__.co_code)
+        self.assertEqual(packed["probe"].__code__.co_consts, self.ns["probe"].__code__.co_consts)
 
     def test_optional_malformed_rows_do_not_invent_owners(self):
         values = ["invalid", "15109|nohex", "15109|" + b"VRAM_PROC\n15109 2002 other 1 python train.py".hex()]

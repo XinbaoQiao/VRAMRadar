@@ -182,7 +182,7 @@ class ModelStorageTests(unittest.TestCase):
         self.assertTrue(profile.servers[0].auto_detect_backend)
         self.assertEqual(Profile.from_dict(profile.to_dict()), profile)
 
-        with self.assertRaisesRegex(ConfigError, "kind must be slurm or process"):
+        with self.assertRaisesRegex(ConfigError, "kind must be slurm, process or local_process"):
             Profile.from_dict(dict(raw, task_completion_watches=[{
                 **raw["task_completion_watches"][0], "task_kind": "shell"
             }]))

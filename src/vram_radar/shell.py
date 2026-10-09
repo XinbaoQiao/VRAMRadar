@@ -1805,6 +1805,20 @@ class AppApi:
                 "owner_scope": owner_scope,
                 "fingerprint": fingerprint,
             }
+        for process in processes.get("local_gpu_access") or []:
+            if not isinstance(process, dict) or process.get("owner_scope") != "mine":
+                continue
+            task_id = str(process.get("pid") or "").strip()
+            identity = str(process.get("process_identity") or "")
+            if not re.fullmatch(r"[1-9][0-9]{0,9}", task_id) or not re.fullmatch(r"[0-9a-f]{64}", identity):
+                continue
+            task_key = f"local_process:{task_id}:{identity}"
+            result[task_key] = {
+                "server_id": server_id, "task_key": task_key, "task_kind": "local_process",
+                "task_id": task_id, "label": str(process.get("name") or f"PID {task_id}"),
+                "owner": str(process.get("user") or process_user), "owner_scope": "mine",
+                "fingerprint": identity,
+            }
         return result
 
     @staticmethod
@@ -1967,15 +1981,28 @@ class AppApi:
                     revision = monitoring.get("revision")
                     if isinstance(revision, int) and not isinstance(revision, bool):
                         process_sample_marker = f"revision:{revision}"
-                if not process_sample_supported and previous:
+                local_sample_supported = (
+                    isinstance(processes, dict) and processes.get("local_processes_complete") is True
+                )
+                local_identities = (processes or {}).get("local_process_identities") or {}
+                if previous:
                     for task_key, task in previous.items():
-                        if task.get("task_kind") == "process":
-                            all_current.setdefault(task_key, task)
-                elif process_sample_supported and previous:
-                    for task_key, task in previous.items():
-                        if task.get("task_kind") != "process":
+                        kind = task.get("task_kind")
+                        if kind not in {"process", "local_process"}:
                             continue
                         missing_key = (server_id, task_key)
+                        supported = process_sample_supported if kind == "process" else local_sample_supported
+                        if kind == "local_process" and task["task_id"] in local_identities:
+                            identity = local_identities[task["task_id"]]
+                            if identity is None or task_key == f"local_process:{task['task_id']}:{identity}":
+                                # Closing a GPU descriptor is not process exit.
+                                # An unreadable stat is unknown, not absence.
+                                all_current.setdefault(task_key, task)
+                        if not supported:
+                            all_current.setdefault(task_key, task)
+                            if kind == "local_process":
+                                self._task_alert_process_missing_once.pop(missing_key, None)
+                            continue
                         if task_key in all_current:
                             self._task_alert_process_missing_once.pop(missing_key, None)
                             continue
@@ -1985,10 +2012,7 @@ class AppApi:
                             or previous_missing_marker is None
                             or previous_missing_marker == process_sample_marker
                         ):
-                            # One otherwise-successful direct-process sample can
-                            # still be transiently empty. Re-reading the same
-                            # snapshot is not a second sample, so preserve the
-                            # baseline until a distinct authoritative absence.
+                            # Re-reading a snapshot is not another absence.
                             if process_sample_marker:
                                 self._task_alert_process_missing_once[missing_key] = process_sample_marker
                             all_current[task_key] = task
@@ -1998,7 +2022,8 @@ class AppApi:
                     task_key: task
                     for task_key, task in all_current.items()
                     if (
-                        (profile.task_completion_alert_enabled and task.get("owner_scope") == "mine")
+                        (profile.task_completion_alert_enabled and task.get("owner_scope") == "mine"
+                         and task.get("task_kind") != "local_process")
                         or self._task_watch_matches(
                             self._task_watch_for_task(watched, server_id, task), task
                         )
@@ -2020,6 +2045,7 @@ class AppApi:
                     explicitly_watched = self._task_watch_matches(matching_watch, task)
                     if not explicitly_watched and not (
                         profile.task_completion_alert_enabled and task.get("owner_scope") == "mine"
+                        and task.get("task_kind") != "local_process"
                     ):
                         continue
                     evidence = self._task_completion_evidence(server, task)
@@ -2047,7 +2073,7 @@ class AppApi:
                 retained_missing = {
                     (server_id, task_key)
                     for task_key, task in current.items()
-                    if task.get("task_kind") == "process"
+                    if task.get("task_kind") in {"process", "local_process"}
                 }
                 self._task_alert_process_missing_once = {
                     key: sample_marker
@@ -2148,6 +2174,14 @@ class AppApi:
             expected_profile=base_profile,
         )
         if result.get("ok"):
+            if watched and watch["task_kind"] == "local_process":
+                # Seed the exact generation selected in the displayed snapshot,
+                # including a process that exits before the next refresh.
+                with self._task_alert_state_lock:
+                    self._task_alert_active.setdefault(watch["server_id"], {}).setdefault(
+                        watch["task_key"], {**watch, "fingerprint": watch["task_key"].rsplit(":", 1)[1]},
+                    )
+                self._persist_notification_state()
             self._evaluate_task_completion_alerts(self.service.snapshot())
         return result
 

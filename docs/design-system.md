@@ -152,6 +152,9 @@ available on demand.
   display scale. Paths, diagnostics, errors, and toast messages use bounded
   containers and safe breaking, while command blocks and wide data tables keep
   intentional horizontal scrolling.
+- Device-access processes offer an explicit completion watch for their own
+  environment identity. Keep process liveness separate from open GPU descriptors
+  and allocation/VRAM attribution; a partial read cannot prove process exit.
 - Keep task nodes and pending reasons on one line. Long values scroll inside
   their cell, retain a full-text tooltip, and have a fixed copy button beside
   them. Preserve the same access in narrow layouts.
