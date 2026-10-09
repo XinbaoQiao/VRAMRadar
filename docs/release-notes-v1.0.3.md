@@ -1,5 +1,8 @@
 ## VRAM Radar 1.0.3 更新说明
 
+- **当前环境进程关注**：独立进程列表增加“关注 / 已关注”按钮，支持取消关注和结束提醒，重启后保留。按具体进程身份判断结束，断线、信息读取不完整或仅关闭 GPU 设备访问不会误报。
+- **完整查看排队原因**：节点和排队原因保持一行，长内容可左右滚动，也可复制。
+- **更简洁的界面说明**：导入结果显示简短摘要，详细说明收进“导入详情”；常用设置和提醒文案更易读。
 - **同版本归属修复**：识别容器内独立的 PID 视图，避免把同号但不同身份的进程误标为 GPU 进程所有者。存在可读取且经过核验的宿主机 procfs 时，补充所属用户，并同时显示 GPU PID 与当前环境 PID。
 - **映射缺失时的独立进程视图**：保留原 GPU 显存和“归属不可见”状态，明确提示容器 PID 映射未提供；另列当前账号打开 NVIDIA 计算设备的进程，不推断其显存归属，也不把设备访问当作正在计算的证明。
 - **任务信息补充查询**：常规进程查询失败时，从可访问的 `/proc/<PID>` 读取用户和命令行；空命令行回退到进程名。读取前后核对进程身份，避免 PID 复用导致错配。
@@ -16,6 +19,9 @@
 
 ## VRAM Radar 1.0.3 release notes
 
+- Follow/unfollow current-environment processes and receive exit notifications. Watches survive restart and bind to the exact process identity; disconnects, incomplete reads and closing GPU device descriptors do not prove exit.
+- Keep nodes and pending reasons on one line, with horizontal scrolling and copying for long values.
+- Show a short import result with details in a collapsed disclosure, and simplify common settings and reminder text.
 - Same-version ownership repair: detect isolated container PID views and reject equal-number PIDs with different identities. Recover owners from a verified readable host procfs when available, while retaining both the GPU PID and the PID visible in the current environment.
 - Without verified mapping, preserve GPU memory and unknown ownership with an explicit container mapping explanation. Separately list current-account processes with open NVIDIA compute-device descriptors, without assigning GPU memory or treating device access as proof of active computation.
 - Recover readable process owners and commands from `/proc/<PID>` when the usual query fails, with process-name fallback and start-tick checks against PID reuse.

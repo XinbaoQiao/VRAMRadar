@@ -104,8 +104,15 @@ def main() -> int:
                     assertions["percent_and_countdown_visible"] = all("%" in label.Text for label in surface._labels[:2]) and all(
                         RESET_RE.fullmatch(label.Text) for label in surface._countdowns[:2])
                     text_controls = [*surface._labels[:2], *surface._captions[:2], *surface._countdowns[:2]]
-                    assertions["both_text_lines_fit"] = all(label.GetPreferredSize(Size(0, 0)).Height <= label.Height
-                        and label.GetPreferredSize(Size(0, 0)).Width <= label.Width for label in text_controls)
+                    # The live taskbar may intentionally clip the strip when
+                    # weather/other widgets leave too little space. Keep that
+                    # geometry as evidence; test complete text with a roomy
+                    # synthetic gap below, independently of this machine.
+                    result["live_text_geometry"] = [{"text": str(label.Text), "width": int(label.Width),
+                        "height": int(label.Height), "preferred_width": int(label.GetPreferredSize(Size(0, 0)).Width),
+                        "preferred_height": int(label.GetPreferredSize(Size(0, 0)).Height)} for label in text_controls]
+                    assertions["live_text_height_fits"] = all(label.GetPreferredSize(Size(0, 0)).Height <= label.Height
+                        for label in text_controls)
                     assertions["no_extra_taskbar_button"] = not surface.form.ShowInTaskbar
                     geometry = windows_taskbar_geometry()
                     # Docked placement: the empty area right of Widgets/left of Start when it fits,
@@ -324,6 +331,12 @@ def main() -> int:
                                  side_effect=lambda bar, elements, margin=6: (bar[0] + 100, bar[0] + 100 + width))
                 with roomy_gap():
                     invoke(select_weekly)
+                    def inspect_roomy_text():
+                        controls = [*surface._labels, *surface._captions, *surface._countdowns]
+                        assertions["both_text_lines_fit"] = all(control.GetPreferredSize(Size(0, 0)).Height <= control.Height
+                            and control.GetPreferredSize(Size(0, 0)).Width <= control.Width
+                            for control in controls if control.Visible)
+                    invoke(inspect_roomy_text)
                 invoke(lambda: assertions.update(text_only_strip=surface._labels[0].Left == round(5*surface._scale)
                     and all(c[1] in {"usage_background", "usage_labels"} for c in surface._display_choices)))
                 display["codex_time_format"] = "days"
