@@ -615,7 +615,10 @@ tr:last-child td { border-bottom: 0; }
 .task-period-head h6 { margin: 0; font-family: var(--display-font); font-size: 13px; font-weight: 650; line-height: 1.4; }
 .task-period-head span { color: var(--muted); font-size: var(--font-caption); font-variant-numeric: tabular-nums; }
 .task-table th, .task-table td { padding: 10px; font-size: var(--font-small); }
-.task-location { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.task-location { min-width: 180px; max-width: 260px; white-space: normal; }
+.task-location .copyable-value { width: 240px; align-items: flex-start; }
+.task-location .copyable-value > span { overflow: visible; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.task-location .context-copy { flex: 0 0 27px; }
 .task-name-cell { min-width: 220px; max-width: 340px; white-space: normal; }
 .task-name, .task-name-preview, .task-name-full { font-family: var(--mono-font); overflow-wrap: anywhere; word-break: break-word; }
 .task-name { display: block; max-width: 310px; line-height: 1.5; }
@@ -1144,7 +1147,8 @@ dialog[open], .notification-center:not([hidden]) { animation: surface-enter .24s
   .task-table td::before { content: attr(data-label); color: var(--muted); font-size: 12px; font-weight: 600; }
   .task-table .task-name-cell { grid-column: 1 / -1; min-width: 0; max-width: none; }
   .task-name, .task-name-details { max-width: none; }
-  .task-table .task-location { max-width: none; }
+  .task-table .task-location { grid-column: 1 / -1; min-width: 0; max-width: none; }
+  .task-location .copyable-value { width: 100%; }
   .task-table .number-value { text-align: left; }
   .global-notice, .update-notice, .error-panel { align-items: flex-start; grid-template-columns: 1fr; flex-direction: column; }
   .error-actions { justify-content: flex-start; }

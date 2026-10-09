@@ -80,6 +80,36 @@
     assertions.abnormal_timing_is_distinct_from_observed_lower_bound =
       abnormalTiming.includes('运行时长不可用') && abnormalTiming.includes('已观测运行至少') && !abnormalTiming.includes('0秒');
     assertions.normal_timing_display_is_unchanged = renderProcessElapsed({elapsed_seconds: 86400}) === '1天';
+    const locationFixture = document.createElement('section');
+    locationFixture.style.cssText = 'position:absolute;left:0;top:0;width:700px;max-width:100%;visibility:hidden;pointer-events:none';
+    const longReason = 'ReqNodeNotAvail, May be reserved for other job, unavailable nodes: gpu-[001-064], maintenance window "overnight" & <pending>';
+    const longNodes = `gpu-${'0123456789'.repeat(18)}`;
+    locationFixture.innerHTML = renderTaskTable([
+      {job_id: 'reason-test', name: 'queued', state: 'PENDING', reason: longReason},
+      {job_id: 'nodes-test', name: 'running', state: 'RUNNING', nodes: longNodes},
+      {job_id: 'short-node', name: 'running', state: 'RUNNING', nodes: 'a100-1'},
+    ]) + renderTaskTable([{job_id: 'recent-node', name: 'finished', state: 'COMPLETED', nodes: longNodes}], true);
+    document.body.appendChild(locationFixture);
+    const locationValues = [...locationFixture.querySelectorAll('.task-location .copyable-value > span')];
+    const expectedLocations = [longReason, longNodes, 'a100-1', longNodes];
+    assertions.task_locations_preserve_full_text_and_copy_values = locationValues.length === 4
+      && locationValues.every((value, index) => value.textContent === expectedLocations[index]
+        && value.title === expectedLocations[index]
+        && value.nextElementSibling?.dataset.copyValue === expectedLocations[index]);
+    const visibleLineCount = value => {
+      const range = document.createRange();
+      range.selectNodeContents(value);
+      return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
+    };
+    assertions.long_task_locations_wrap_without_clipping = locationValues.length === 4
+      && locationValues.every(value => value.scrollWidth <= value.clientWidth + 1
+        && value.scrollHeight <= value.clientHeight + 1
+        && getComputedStyle(value).whiteSpace === 'normal'
+        && getComputedStyle(value).overflow === 'visible')
+      && [locationValues[0], locationValues[1], locationValues[3]].every(value => visibleLineCount(value) > 1);
+    assertions.short_task_node_stays_on_one_line = locationValues.length === 4 && visibleLineCount(locationValues[2]) === 1;
+    assertions.task_locations_escape_scheduler_text = !locationFixture.querySelector('pending');
+    locationFixture.remove();
     window.VRAMRadarI18n.setLanguage('en');
     const translationProbe = document.createElement('div');
     translationProbe.textContent = '已取消收藏 GPU';
