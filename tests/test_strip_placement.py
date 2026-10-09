@@ -28,23 +28,30 @@ class StripPlacementTests(unittest.TestCase):
 
     def test_narrow_left_gap_keeps_left_anchor_instead_of_switching_sides(self):
         # Reading from a 150 % taskbar where the Widgets edge reached x=422 (a second
-        # VRAM Radar strip beside the weather was read as weather content): the gap
-        # 440..491 is narrower than a 69 px strip.  The strip stays at the gap start;
-        # left_slot's "fits" answer (None) is not the placement rule.
-        from vram_radar.usage_surface import left_slot
+        # VRAM Radar strip beside the weather was read as weather content).  Placement
+        # caps that news-width edge (4 x bar height from the Widgets left) so the
+        # strip stays on the left; left_slot's "fits" answer is not the rule.
+        from vram_radar.usage_surface import left_slot, weather_place_right
         bar = (0, 1528, 2560, 1600)
         elements = {"WidgetsButton": (9, 1528, 422, 1600), "StartButton": (509, 1528, 577, 1600),
                     "SearchButton": (580, 1540, 909, 1588), "TaskViewButton": (913, 1528, 979, 1600)}
+        capped = weather_place_right(elements["WidgetsButton"], bar) + 18
         target = docked_target(bar, (2200, 1528, 2560, 1600), elements, (69, 51), 18)
         self.assertEqual(target[0], "left")
-        self.assertEqual(docked_point(bar, target, 69), (440, 1538))
-        self.assertIsNone(left_slot(bar, elements, (69, 51), 18))
+        self.assertEqual(docked_point(bar, target, 69), (capped, 1538))
+        self.assertLess(capped, 422)   # news width must not set the left edge
+        # Capped edge leaves enough room for a 69 px strip; docked_target still
+        # answers "left" (the historical left_slot-None case was the uncapped gap).
+        self.assertEqual(left_slot(bar, elements, (69, 51), 18), (capped, 1538))
 
-    def test_tray_fallback_anchor_is_width_independent(self):
+    def test_empty_uia_stays_left_not_tray(self):
+        # Failed / empty layout used to jump the strip to the notification area.
         a = docked_target(BAR, TRAY, {}, (200, 34))
         b = docked_target(BAR, TRAY, {}, (260, 34))
+        self.assertEqual(a[0], "left")
         self.assertEqual(a, b)
-        self.assertEqual(docked_point(BAR, a, 200)[0], 1700 - 200 - 1)
+        self.assertEqual(docked_point(BAR, a, 200)[0], a[1])
+        self.assertEqual(docked_point(BAR, a, 400)[0], a[1])  # width grows right
 
     def test_transient_lookup_failure_keeps_last_good(self):
         layout = FakeLayout([GOOD, {}, {"WidgetsButton": (0, 1032, 150, 1080)}, GOOD])
@@ -135,6 +142,35 @@ class StripPlacementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeftAnchorStabilityTests(unittest.TestCase):
+    """Quota strip left edge stays put across weather length and model width."""
+
+    def test_news_width_weather_does_not_move_left_edge_past_cap(self):
+        from vram_radar.usage_surface import weather_place_right
+        bar = (0, 1528, 2560, 1600)
+        tray = (2200, 1528, 2560, 1600)
+        temp = {"WidgetsButton": (9, 1528, 150, 1600), "StartButton": (623, 1528, 691, 1600)}
+        news = {"WidgetsButton": (9, 1528, 480, 1600), "StartButton": (623, 1528, 691, 1600)}
+        left_temp = docked_target(bar, tray, temp, (200, 51), 18)[1]
+        left_news = docked_target(bar, tray, news, (200, 51), 18)[1]
+        self.assertEqual(left_temp, 150 + 18)
+        self.assertEqual(left_news, weather_place_right(news["WidgetsButton"], bar) + 18)
+        self.assertLess(left_news, 480)          # capped below raw news ink
+        self.assertLessEqual(left_news - left_temp, 4 * 72)  # within place span
+
+    def test_model_count_width_keeps_left_edge(self):
+        target = docked_target(BAR, TRAY, GOOD, (200, 34))
+        self.assertEqual(target[0], "left")
+        xs = [docked_point(BAR, target, w)[0] for w in (120, 200, 360, 480)]
+        self.assertEqual(xs, [target[1]] * 4)
+
+    def test_left_aligned_widgets_still_use_tray(self):
+        elements = {"WidgetsButton": (1400, 1032, 1600, 1080), "StartButton": (700, 1032, 748, 1080)}
+        target = docked_target(BAR, TRAY, elements, (200, 34), 6, 4)
+        self.assertEqual(target[0], "tray")
+        self.assertEqual(docked_point(BAR, target, 200)[0], 1400 - 4 - 200 - 1)
 
 
 class WidestWeatherTests(unittest.TestCase):

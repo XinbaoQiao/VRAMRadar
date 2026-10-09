@@ -314,7 +314,9 @@ def left_gap(bar, elements, margin=6):
     for key in LEFT_BOUND_IDS:
         rect = elements.get(key)
         if rect and rect[2] > rect[0] and bar[0] <= rect[0] < bar[2]:
-            left_edge = max(left_edge, rect[2] + margin)
+            # Cap news-width weather so the strip's left edge stays near the
+            # temperature widget instead of drifting toward Start.
+            left_edge = max(left_edge, weather_place_right(rect, bar) + margin)
     candidates = [rect[0] for key, rect in elements.items()
                   if (key in RIGHT_BOUND_IDS or key == "first_app") and rect and rect[2] > rect[0]
                   and rect[0] >= left_edge - margin and rect[0] <= bar[2]]
@@ -468,6 +470,23 @@ WEATHER_BLANK_RUN = 0.5
 # 10 px gap.  0.2 x (10 px) read that as "under the strip" and jumped the
 # strip one bar height right and back (10-03 review).
 WEATHER_OCCLUDED_SLACK = 0.15
+# Max weather width (x taskbar height) that may push the quota strip right.
+# Icon + temperature + a short condition fit; a 2-line news headline must not
+# shove the strip toward Start / the right half of the bar.
+WEATHER_PLACE_MAX_HEIGHTS = 4.0
+
+
+def weather_place_right(rect, bar) -> int:
+    """Right edge of weather used to anchor the strip (capped).
+
+    Ink / UIA may grow with a news headline far past the temperature widget.
+    Placement only reserves a few bar-heights so the quota strip stays on the
+    left; news may draw under the strip rather than move it.
+    """
+    left, top, right, bottom = rect
+    height = max(1, (bar[3] - bar[1]) if bar else (bottom - top))
+    span = max(bottom - top, round(height * WEATHER_PLACE_MAX_HEIGHTS))
+    return min(int(right), int(left) + span)
 
 
 def weather_scan_limit(elements, own=None):
@@ -913,21 +932,30 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     ``slot`` is "left" (anchor = left edge of the strip) or "tray"
     (anchor = right edge the strip must stay left of).  Anchors rather than
     final x keep a width change from looking like a side switch.
+
+    Left-edge rule: on a centered taskbar the strip's left edge is
+    ``weather_place_right(Widgets) + margin``.  Content width grows to the
+    right via ``docked_point``.  The tray side is only for left-aligned
+    taskbars where Widgets sits on the right half -- an empty / failed UIA
+    reading must not jump the strip to the notification area.
     """
     width, height = size
     y = bar[1] + (bar[3] - bar[1] - height) // 2
-    # Centered taskbar: the empty area left of Start is authoritative.  A
-    # strip wider than the gap is compacted/clipped by the caller; it never
-    # switches to the tray side (which has even less room and covers pinned
-    # icons).  Only a left-aligned layout (no left gap) uses the tray anchor.
+    widgets = elements.get("WidgetsButton") if elements else None
+    # Left-aligned icons: Widgets lives on the right half -- tray side only.
+    if widgets and widgets[0] > (bar[0] + bar[2]) / 2:
+        right = tray[0]
+        if widgets[0] < tray[0]:
+            right = widgets[0] - widgets_gap
+        return ("tray", right, y)
     gap = left_gap(bar, elements, margin) if elements else None
     if gap is not None:
         return ("left", gap[0], y)
-    right = tray[0]
-    widgets = elements.get("WidgetsButton") if elements else None
-    if widgets and widgets[0] > (bar[0] + bar[2]) / 2 and widgets[0] < tray[0]:
-        right = widgets[0] - widgets_gap
-    return ("tray", right, y)
+    # UIA miss / Start not exposed yet: still prefer left (first paint).
+    left_edge = bar[0] + margin
+    if widgets and widgets[2] > widgets[0] and bar[0] <= widgets[0] < bar[2]:
+        left_edge = max(left_edge, weather_place_right(widgets, bar) + margin)
+    return ("left", left_edge, y)
 
 
 def docked_point(bar, target, width):
@@ -2019,7 +2047,7 @@ class CodexUsageSurface:
 
         # 2 s: a growing weather text is re-measured within a few seconds.
         self._layout = TaskbarLayout(interval=2.0, background=True)
-        self._slot = "tray"
+        self._slot = "left"
         self._placer = PlacementDebouncer(confirm=3, switch_confirm=5)
         self._bar_handle = None
         self._obscured_ticks = 0
@@ -2042,6 +2070,15 @@ class CodexUsageSurface:
                 size = (form.Width, form.Height)
                 own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
                 elements = self._layout.elements(bar_handle, bar, own)
+                committed = self._placer.current
+                # Hold a committed left anchor while UIA is briefly unreadable
+                # so empty readings cannot flip the strip to the tray side.
+                if (committed is not None and committed[0] == "left"
+                        and not usable_layout(elements)):
+                    x, y = docked_point(bar, committed, size[0])
+                    if (form.Left, form.Top) != (x, y):
+                        form.Location = Point(x, y)
+                    return
                 target = self._placer.propose(docked_target(bar, tray, elements, size, strip_margin(self._scale), scale(4)))
                 self._slot = target[0]
                 x, y = docked_point(bar, target, size[0])
