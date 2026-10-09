@@ -260,20 +260,30 @@ class CodexMonitorTransientTests(unittest.TestCase):
         from vram_radar.usage_monitor import CodexUsageMonitor, UsageError
         good = {"windows": [{"id": "codex:primary", "remaining_percent": 60, "window_minutes": 300,
                              "resets_at": time.time() + 3600}], "fetched_at": time.time()}
-        fetch = Mock(side_effect=[good, UsageError("timeout"), good])
+        retry_entered = threading.Event()
+        def response(_runtime, _executable, cancel):
+            if fetch.call_count == 1:
+                return good
+            if fetch.call_count == 2:
+                raise UsageError("timeout")
+            # Entering this next fetch proves the timeout was committed and
+            # retried. Keep it pending until close() so a delayed observer
+            # cannot exhaust a finite fixture or sample a later good result.
+            retry_entered.set()
+            cancel.wait()
+            return good
+        fetch = Mock(side_effect=response)
         monitor = CodexUsageMonitor(Path("unused"), fetch=fetch, interval=0.05)
         seen = []
         try:
             monitor.configure(True, "")
-            deadline = time.monotonic() + 3
-            while fetch.call_count < 2 and time.monotonic() < deadline:
-                time.sleep(0.005)
-            time.sleep(0.02)
+            self.assertTrue(retry_entered.wait(3), "timeout was not retried")
             seen.append(monitor.snapshot())
         finally:
             monitor.close()
         state = seen[0]
         self.assertNotEqual(state["state"], "error")
+        self.assertEqual(state["refresh_error"], "timeout")
         self.assertEqual(state["windows"][0]["remaining_percent"], 60)
 
     def test_missing_codex_says_so(self):
