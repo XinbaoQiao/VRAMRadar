@@ -4674,14 +4674,14 @@ function collapseDashboardDisclosure() {
   openContextNotes.clear();
   directoryTrees.forEach((_state, serverId) => repaintDirectory(serverId));
   applyDashboardDisclosureMode();
-  showToast('已一键收起当前页面的全部内容');
+  showToast('已收起当前页面。');
 }
 
 function collapseSettingsDisclosure() {
   const visibleDetails = [...ui.dialog.querySelectorAll('.dialog-content details')]
     .filter(detail => !detail.closest('[hidden]'));
   setDetailsOpen(visibleDetails, false);
-  showToast('已收起设置中的全部说明与高级选项');
+  showToast('已收起说明和高级设置。');
 }
 
 function prepareSettingsDisclosure() {
@@ -4746,8 +4746,8 @@ function setSettingsMode(mode) {
   ui.dialogKicker.textContent = onboarding ? '首次使用引导' : '设置与服务器';
   ui.dialogTitle.textContent = onboarding ? '欢迎使用显存雷达' : '本地配置';
   ui.dialogDescription.textContent = onboarding
-    ? '按三步完成首台服务器配置；需要时展开详细说明。'
-    : '先通过自动发现完成基础设置；需要时展开登录与高级选项。';
+    ? '添加服务器后即可查看 GPU 状态。'
+    : '管理服务器和界面设置。';
   ui.settingsDisclosureTools.hidden = onboarding;
   ui.closeSettings.hidden = onboarding;
   ui.cancelSettings.hidden = onboarding;
@@ -4806,7 +4806,7 @@ async function discoverServerConfig() {
   );
   ui.discoverServerConfig.disabled = true;
   ui.importStatus.hidden = false;
-  ui.importStatus.textContent = '正在本地查找用户、系统、编辑器和便携式 SSH 配置…';
+  ui.importStatus.textContent = '正在查找本机 SSH 配置…';
   try {
     const result = await api.discover_server_config();
     if (!requestIsCurrent()) return;
@@ -4833,15 +4833,29 @@ function applyImportedServerConfig(result) {
   const visibleCandidates = result.servers.filter(server => !ignoredAliasKeys.has(sshAliasKey(server.ssh_alias)));
   populateServerEditors(visibleCandidates, {importedCandidate: true, allowEmpty: true});
   const pendingRemovalCount = result.servers.length - visibleCandidates.length;
-  const warning = result.warnings.length ? `；${result.warnings.join('；')}` : '';
-  const sourceSummary = paths.length > 1 ? `（合并 ${paths.length} 个来源）` : '';
-  const syncSummary = paths.length > 1 ? '；多来源导入不会绑定单一文件自动同步' : '';
-  const removalSummary = pendingRemovalCount ? `；已保留 ${pendingRemovalCount} 台本次移除项` : '';
-  ui.importStatus.textContent = `已解析 ${visibleCandidates.length} 台服务器候选${sourceSummary}；尚未保存，尚未连接验证${removalSummary}${syncSummary}${warning}`;
+  ui.importStatus.innerHTML = renderImportFeedback(visibleCandidates.length, paths, result.warnings || [], pendingRemovalCount);
   renderImportAliasChoices(result.pending_alias_choices || []);
   renderRemovedServerChoices([...(result.removed_servers || []),
     ...result.servers.filter(server => ignoredAliasKeys.has(sshAliasKey(server.ssh_alias)))]);
   if (settingsMode === 'onboarding' && visibleCandidates.length && !document.getElementById('removed-server-choices')) setOnboardingStep(3);
+}
+
+function renderImportFeedback(count, paths = [], warnings = [], removedCount = 0) {
+  const summary = count
+    ? `找到 ${count} 台服务器。还未保存，也未测试连接。`
+    : '没有找到可导入的服务器。';
+  const nextStep = count
+    ? '检查下方列表，再点击“保存并开始验证”。'
+    : '请换一个配置文件，或手动添加服务器。';
+  const details = [
+    ...(paths.length > 1 ? [`已合并读取 ${paths.length} 个配置文件。`, '多个配置文件不支持启动时自动同步。'] : []),
+    ...(removedCount ? [`此前移除的 ${removedCount} 台服务器仍未添加。`] : []),
+    ...warnings,
+  ];
+  const detailMarkup = details.length
+    ? `<details class="import-details"><summary>导入详情</summary><ul>${details.map(detail => `<li>${escapeHtml(detail)}</li>`).join('')}</ul></details>`
+    : '';
+  return `<p class="import-result">${escapeHtml(summary)}</p><p class="import-next-step">${escapeHtml(nextStep)}</p>${detailMarkup}`;
 }
 
 function renderRemovedServerChoices(candidates) {
@@ -4858,7 +4872,7 @@ function renderRemovedServerChoices(candidates) {
   panel.id = 'removed-server-choices';
   panel.className = 'removed-server-disclosure';
   panel.innerHTML = `<summary><span>发现曾主动移除的服务器</span><span class="removed-server-count">${servers.length}</span></summary><div class="removed-server-content">
-    <p class="editor-help">以下服务器曾被你移除。勾选要重新添加的服务器，再点击“添加所选服务器”；保存配置后生效。未勾选的服务器仍保持移除。</p>
+    <p class="editor-help">勾选要恢复的服务器，再点击“添加所选服务器”。保存后生效，未勾选的不会恢复。</p>
     <div class="removed-server-list">${servers.map((server, index) => `<label class="removed-server-option"><input type="checkbox" value="${index}"><span>${escapeHtml(server.display_name || server.id)} · ${escapeHtml(server.ssh_alias)}<small>${escapeHtml(server.ssh_config_file || '')}</small></span></label>`).join('')}</div>
     <button type="button" class="button" disabled>添加所选服务器</button></div>`;
   const button = panel.querySelector('button');
@@ -4886,7 +4900,7 @@ function renderRemovedServerChoices(candidates) {
     settingsServerPageOffset = 0;
     renderServerEditorPage();
     renderRemovedServerChoices(servers.filter((server, index) => !selected.has(index)));
-    showToast('已添加到待保存配置；保存后生效');
+    showToast('已添加，保存后生效。');
     if (settingsMode === 'onboarding') setOnboardingStep(3);
   });
   ui.importStatus.after(panel);
@@ -4895,7 +4909,7 @@ function renderRemovedServerChoices(candidates) {
 async function importServerConfig() {
   ui.importServerConfig.disabled = true;
   ui.importStatus.hidden = false;
-  ui.importStatus.textContent = '正在读取并解析本地配置…';
+  ui.importStatus.textContent = '正在读取配置文件…';
   try {
     const result = await api.import_server_config(ui.serverConfigPath.value.trim());
     if (!result.ok) throw new Error(result.error);
@@ -5849,4 +5863,3 @@ document.addEventListener('toggle', () => scheduleStuckChromeUpdate(), true);
 pinnedServerIds = loadPinnedFromStorage();
 
 applyUiZoom(loadUiZoomPreference(), {persist: false});
-

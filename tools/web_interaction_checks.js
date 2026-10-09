@@ -110,6 +110,27 @@
     assertions.short_task_node_stays_on_one_line = locationValues.length === 4 && visibleLineCount(locationValues[2]) === 1;
     assertions.task_locations_escape_scheduler_text = !locationFixture.querySelector('pending');
     locationFixture.remove();
+    const importFeedbackFixture = document.createElement('div');
+    importFeedbackFixture.className = 'import-status';
+    importFeedbackFixture.style.cssText = 'position:absolute;left:0;top:0;width:500px;visibility:hidden;pointer-events:none';
+    const importWarning = 'OpenSSH 静态配置无法判断直连或 Slurm；将在保存验证时自动识别，失败时可手动选择';
+    const quotedWarning = '<b>Diagnostic & "quoted" text</b>';
+    importFeedbackFixture.innerHTML = renderImportFeedback(11, ['./config-a', './config-b'], [importWarning, quotedWarning], 2);
+    document.body.append(importFeedbackFixture);
+    const importDetails = importFeedbackFixture.querySelector('details');
+    assertions.import_primary_feedback_is_short_and_actionable =
+      importFeedbackFixture.querySelector('.import-result').textContent === '找到 11 台服务器。还未保存，也未测试连接。'
+      && importFeedbackFixture.querySelector('.import-next-step').textContent.includes('保存并开始验证')
+      && !importFeedbackFixture.querySelector('.import-result').textContent.includes('OpenSSH');
+    assertions.import_diagnostics_are_preserved_and_default_collapsed = Boolean(importDetails && !importDetails.open
+      && [...importDetails.querySelectorAll('li')].some(item => item.textContent === importWarning)
+      && [...importDetails.querySelectorAll('li')].some(item => item.textContent === quotedWarning)
+      && !importDetails.querySelector('b'));
+    importDetails.querySelector('summary').click();
+    assertions.import_diagnostics_can_be_expanded = importDetails.open;
+    const emptyImportFeedback = renderImportFeedback(0);
+    assertions.empty_import_gives_a_manual_next_step = emptyImportFeedback.includes('没有找到可导入的服务器。')
+      && emptyImportFeedback.includes('手动添加服务器') && !emptyImportFeedback.includes('保存并开始验证');
     window.VRAMRadarI18n.setLanguage('en');
     const translationProbe = document.createElement('div');
     translationProbe.textContent = '已取消收藏 GPU';
@@ -121,6 +142,8 @@
     showToast('已恢复监控');
     await wait(100);
     const hasChinese = value => /[一-鿿]/u.test(value);
+    assertions.import_feedback_and_details_translate_to_english = !hasChinese(importFeedbackFixture.textContent);
+    importFeedbackFixture.remove();
     assertions.dynamic_english_text_and_attributes_are_translated =
       [translationProbe.textContent, ui.toast.textContent, ...['title', 'aria-label', 'alt', 'data-label'].map(name => translationProbe.getAttribute(name))].every(value => !hasChinese(value));
     assertions.command_redaction_marker_is_english = renderProcessName({pid: 1,

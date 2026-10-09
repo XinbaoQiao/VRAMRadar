@@ -905,6 +905,13 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .check-label { display: flex; align-items: center; gap: 7px; margin-right: auto; }
 .check-label input { width: auto; }
 .import-status { padding: 9px 10px; border-radius: 8px; color: var(--muted); background: var(--surface); font-size: 12px; line-height: 1.5; }
+.import-result { margin: 0; color: var(--text); font-size: var(--font-small); font-weight: 600; }
+.import-next-step { margin: 4px 0 0; }
+.import-details { margin-top: 8px; }
+.import-details > summary { width: fit-content; color: var(--cyan-text); cursor: pointer; }
+.import-details > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-radius: 3px; }
+.import-details ul { margin: 8px 0 0; padding-left: 20px; }
+.import-details li + li { margin-top: 5px; }
 .import-privacy { padding: 9px 10px; color: var(--muted); background: color-mix(in srgb, var(--green) 6%, var(--surface)); border: 1px solid color-mix(in srgb, var(--green) 28%, var(--border)); border-radius: 9px; font-size: 12px; line-height: 1.5; }
 .import-privacy strong { color: var(--green-text); }
 .import-help, .platform-guide, .guide-more { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }

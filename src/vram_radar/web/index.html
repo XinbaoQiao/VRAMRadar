@@ -147,7 +147,7 @@
   <dialog id="settings-dialog">
     <form id="settings-form" method="dialog">
       <header class="dialog-header">
-        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">先通过自动发现完成基础设置；需要时展开登录与高级选项。</p></div>
+        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">管理服务器和界面设置。</p></div>
         <div class="dialog-header-actions">
           <div id="settings-disclosure-tools" class="disclosure-tools" aria-label="设置内容显示方式">
             <button id="collapse-settings" class="button compact-button" type="button">一键收起</button>
@@ -187,7 +187,7 @@
           </div>
           <div class="task-completion-setting">
             <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong></span></label>
-            <p class="task-watch-policy"><span>默认提醒当前账号下的 Slurm 任务与 GPU 进程；也可在任务表中单独关注</span><br><span>其他用户的任务不会自动关注；只提醒你在任务表中逐项选择的任务。</span></p>
+            <p class="task-watch-policy"><span>默认提醒我的 GPU 任务结束。</span><br><span>其他用户的任务需在任务表中手动关注。</span></p>
           </div>
           <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
           <details class="local-tools">
@@ -205,13 +205,13 @@
         </details>
         <details id="import-panel" class="import-panel settings-group">
           <summary class="settings-section-heading import-intro">
-            <div><h3>服务器发现与导入</h3><p>自动读取本机 SSH 配置；未检测到时查看说明</p></div>
+            <div><h3>服务器发现与导入</h3><p>从本机 SSH 配置添加服务器</p></div>
             <span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span>
           </summary>
           <div class="settings-group-body import-panel-body">
           <ol class="import-steps" aria-label="服务器导入步骤">
             <li><span>1</span><div><strong>自动发现</strong><small>本地扫描 SSH 配置，不连接服务器</small></div></li>
-            <li><span>2</span><div><strong>检查类型</strong><small>确认每台服务器是 SSH 直连还是 Slurm</small></div></li>
+            <li><span>2</span><div><strong>检查连接信息</strong><small>确认服务器名称和登录方式</small></div></li>
             <li><span>3</span><div><strong>保存并查看</strong><small>密码可选，只保存在系统凭据库</small></div></li>
           </ol>
           <label><span>服务器设置文件路径</span><input id="server-config-path" placeholder="servers.toml 或 ~/.ssh/config"></label>
@@ -221,7 +221,7 @@
             <button id="import-server-config" class="button primary" type="button">导入并替换列表</button>
           </div>
           <div id="import-status" class="import-status" aria-live="polite" hidden></div>
-          <div class="import-privacy">只读取本机服务器别名；不执行配置命令，不连接服务器，不读取私钥、密码或 <code>known_hosts</code>。</div>
+          <div class="import-privacy">只在本机读取服务器配置，不执行配置命令或连接服务器。不读取私钥、密码或 <code>known_hosts</code>。</div>
           <details class="import-help">
             <summary><span><strong>自动检测不到？</strong><small>按 Windows 或 macOS 教程找到 SSH 配置，命令可一键复制</small></span><span class="summary-action"><span class="when-closed">展开教程</span><span class="when-open">收起</span></span></summary>
             <div class="import-help-body">
@@ -290,7 +290,7 @@
       <header class="dialog-header">
         <div>
           <h2 id="alias-choice-title">发现可能重复的服务器</h2>
-          <p id="alias-choice-description">以下 SSH 别名可能指向同一台服务器。请为每组选择要保留的连接；也可全部保留为独立服务器。</p>
+          <p id="alias-choice-description">这些连接可能指向同一台服务器。每组可保留一个，也可全部保留。</p>
         </div>
         <div class="dialog-header-actions">
           <button id="alias-choice-close" class="button icon-button" type="button" aria-label="关闭"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 6 12 12"></path><path d="m18 6-12 12"></path></svg></button>
@@ -319,10 +319,10 @@
         </div>
       <div class="field-grid server-primary-fields">
         <label><span>显示名称</span><input data-field="display_name" required maxlength="80" placeholder="4090 实验服务器"></label>
-        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="local">本地 GPU（NVIDIA / AMD / Intel）</option></select><small>自动识别会在保存验证时实际连接；失败后可手动指定。</small></label>
+        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="local">本地 GPU（NVIDIA / AMD / Intel）</option></select><small>保存后会自动识别；失败时可手动选择。</small></label>
         <label><span>OpenSSH 别名（优先）</span><input data-field="ssh_alias" placeholder="gpu-lab"></label>
         <label><span>主机地址</span><input data-field="host" placeholder="gpu.example.edu"></label>
-        <p class="editor-help primary-help">填写 OpenSSH 别名或主机地址之一。自动导入将沿用 SSH Config，并确认私钥路径与连接类型。</p>
+        <p class="editor-help primary-help">填写 SSH 别名或主机地址即可。导入的服务器会沿用原有 SSH 配置。</p>
       </div>
       <div class="connection-test-result" role="status" aria-live="polite" hidden></div>
       <details class="server-editor-more">
@@ -334,7 +334,7 @@
             <label class="check-label"><input data-field="port_override" type="checkbox"><span>覆盖 OpenSSH 配置中的端口</span></label>
             <label><span>用户名</span><input data-field="username" placeholder="alice"></label>
             <label><span>私钥路径（可选）</span><input data-field="identity_file" placeholder="选择或粘贴私钥路径"></label>
-            <label><span>OpenSSH 配置文件（可选）</span><input data-field="ssh_config_file" placeholder="~/.ssh/config"><small>自动导入会填写来源；切换直连或文件移动后可在这里清除或修改。</small></label>
+            <label><span>OpenSSH 配置文件（可选）</span><input data-field="ssh_config_file" placeholder="~/.ssh/config"><small>导入时自动填写。文件移动或切换为直连后，可在这里修改或清除。</small></label>
             <label class="password-field"><span>登录密码（可选）</span><input data-field="password" type="password" autocomplete="new-password" maxlength="4096" placeholder="留空则保持已有密码"><small data-password-status>未保存密码</small></label>
             <label class="check-label clear-password"><input data-field="clear_password" type="checkbox"><span>删除已保存的登录密码</span></label>
             <label data-slurm-environment hidden><span>Slurm 模块名（可选）</span><input data-field="slurm_module" maxlength="256" placeholder="slurm/23.11"><small>仅填写模块名；程序会安全调用 Environment Modules/Lmod。</small></label>
@@ -345,7 +345,7 @@
             <input data-field="show_other_user_commands" type="checkbox">
             <span><strong>显示其他用户的任务与命令摘要</strong><small data-command-summary-help>SSH 直连：显示其他用户的 GPU 进程与经本地遮盖、限长的命令摘要。</small></span>
           </label>
-          <p class="editor-help">尚未完成 SSH 免密登录配置时，已保存的密码用于认证；完成 SSH Key 配置后会优先使用私钥，仅在密钥被拒绝时改用已保存的密码。首次连接前，请先在 OpenSSH 中核对并接受正确的主机密钥。</p>
+          <p class="editor-help">优先使用 SSH 密钥。密钥尚未配置或被拒绝时，使用已保存的密码。首次连接前，请在终端核对并接受服务器的主机密钥。</p>
         </div>
       </details>
       <details class="ssh-key-setup">
@@ -371,7 +371,7 @@
           </details>
           <div class="ssh-key-setup-actions">
             <button class="configure-ssh-key button primary" type="button">配置并验证</button>
-            <span>请先保存地址和用户名；如当前密钥不能登录，再保存一次服务器密码。</span>
+            <span>先保存地址和用户名。密钥无法登录时，还需保存服务器密码。</span>
           </div>
           <div class="ssh-key-setup-result connection-test-result" role="status" aria-live="polite" hidden></div>
         </div>

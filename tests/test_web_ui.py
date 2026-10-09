@@ -242,7 +242,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("data-task-owner", self.javascript)
         self.assertIn("data-task-owner-scope", self.javascript)
         self.assertNotIn("if (!mine) return '';", self.javascript)
-        self.assertIn("其他用户的任务不会自动关注", self.markup)
+        self.assertIn("其他用户的任务需在任务表中手动关注", self.markup)
         self.assertIn('data-server-navigator-filter="watches"', self.markup)
         self.assertNotIn('data-server-navigator-filter="recent"', self.markup)
         self.assertNotIn('id="task-completion-watch-list"', self.markup)
@@ -585,11 +585,11 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript.index("function applyImportedServerConfig"):
             self.javascript.index("function collectProfile")
         ]
-        self.assertIn("已解析", import_flow)
-        self.assertIn("尚未保存", import_flow)
-        self.assertIn("尚未连接验证", import_flow)
+        self.assertIn("找到 ${count} 台服务器", import_flow)
+        self.assertIn("还未保存", import_flow)
+        self.assertIn("未测试连接", import_flow)
         self.assertNotIn("正在验证并导入", import_flow)
-        self.assertLess(import_flow.index("已解析"), import_flow.index("尚未保存"))
+        self.assertLess(import_flow.index("找到 ${count}"), import_flow.index("还未保存"))
 
     def test_removed_import_candidates_persist_as_alias_tombstones(self):
         self.assertIn("let pendingIgnoredSshAliases = new Set()", self.javascript)
@@ -613,8 +613,8 @@ class WebUiContractTests(unittest.TestCase):
             imported,
         )
         self.assertIn("result.servers.length - visibleCandidates.length", imported)
-        self.assertIn("已保留 ${pendingRemovalCount} 台本次移除项", imported)
-        self.assertIn("已解析 ${visibleCandidates.length} 台服务器候选", imported)
+        self.assertIn("此前移除的 ${removedCount} 台服务器仍未添加", imported)
+        self.assertIn("renderImportFeedback(visibleCandidates.length", imported)
 
         editor = self.javascript[
             self.javascript.index("function addServerEditor"):

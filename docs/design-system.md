@@ -138,6 +138,14 @@ available on demand.
 - First-run steps expose only the content required for the current decision.
   "稍后设置" returns to the compact setup landing page, not an empty dashboard.
 - Show errors near the affected flow and provide the next action.
+- Write primary feedback as a short result followed by one next action. Use
+  familiar words and short sentences instead of joining several notices with
+  semicolons. State unsaved or unverified status before asking users to proceed.
+- Keep configuration parsing notes, source merging and other implementation
+  details in an optional disclosure, with one point per line. Keep failures and
+  required actions visible. Preserve exact diagnostic text inside the disclosure.
+- Use the same plain language in Chinese and English. Shorter copy must retain
+  conditions, uncertainty, account scope and security consequences.
 - Preserve keyboard focus, visible labels, responsive layout, reduced-motion
   support, and at least 44 px targets on compact/touch layouts.
 - Header actions wrap instead of overflowing under a narrow viewport or high
