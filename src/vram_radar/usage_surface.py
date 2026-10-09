@@ -933,17 +933,22 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     (anchor = right edge the strip must stay left of).  Anchors rather than
     final x keep a width change from looking like a side switch.
 
-    Left-edge rule: on a centered taskbar the strip's left edge is
-    ``weather_place_right(Widgets) + margin``.  Content width grows to the
-    right via ``docked_point``.  The tray side is only for left-aligned
-    taskbars where Widgets sits on the right half -- an empty / failed UIA
-    reading must not jump the strip to the notification area.
+    Portable left-edge rule (any DPI / bar origin / width):
+    * centered taskbar with a measurable gap -> left at
+      ``weather_place_right(Widgets) + margin`` (news width capped);
+    * Widgets on the right half -> tray side (left-aligned icons);
+    * Widgets on the left half but Start not exposed yet -> left by Widgets;
+    * otherwise (empty UIA, left-aligned without Widgets) -> tray.
+    Callers that already committed a left anchor must hold it across brief
+    empty readings (see ``refresh_left_anchor``) so a flicker cannot jump
+    the strip to the notification area on a centered taskbar.
     """
     width, height = size
     y = bar[1] + (bar[3] - bar[1] - height) // 2
     widgets = elements.get("WidgetsButton") if elements else None
-    # Left-aligned icons: Widgets lives on the right half -- tray side only.
-    if widgets and widgets[0] > (bar[0] + bar[2]) / 2:
+    mid = (bar[0] + bar[2]) / 2
+    # Left-aligned icons: Widgets lives on the right half -> tray side only.
+    if widgets and widgets[0] > mid:
         right = tray[0]
         if widgets[0] < tray[0]:
             right = widgets[0] - widgets_gap
@@ -951,11 +956,33 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     gap = left_gap(bar, elements, margin) if elements else None
     if gap is not None:
         return ("left", gap[0], y)
-    # UIA miss / Start not exposed yet: still prefer left (first paint).
-    left_edge = bar[0] + margin
-    if widgets and widgets[2] > widgets[0] and bar[0] <= widgets[0] < bar[2]:
-        left_edge = max(left_edge, weather_place_right(widgets, bar) + margin)
-    return ("left", left_edge, y)
+    # Widgets still on the left half but Start/Search not readable yet: keep
+    # the left slot from the weather edge (relative to this bar).
+    if widgets and widgets[2] > widgets[0] and bar[0] <= widgets[0] < mid:
+        return ("left", max(bar[0] + margin, weather_place_right(widgets, bar) + margin), y)
+    # Empty UIA or left-aligned without Widgets: tray is the portable default.
+    return ("tray", tray[0], y)
+
+
+def refresh_left_anchor(bar, committed, size, margin=6):
+    """Re-apply a committed left anchor on the current bar geometry.
+
+    Keeps the strip on the left across brief UIA failures without using
+    machine-specific coordinates: Y is re-centered on ``bar``, and X is
+    clamped into this bar (primary or secondary).  If the old anchor lies
+    on another monitor, snap to ``bar[0] + margin``.
+    """
+    if not committed or committed[0] != "left" or not bar or not size:
+        return None
+    width = size[0]
+    height = size[1]
+    y = bar[1] + (bar[3] - bar[1] - height) // 2
+    anchor = int(committed[1])
+    if not (bar[0] <= anchor < bar[2]):
+        anchor = bar[0] + margin
+    else:
+        anchor = min(max(anchor, bar[0]), max(bar[0], bar[2] - width))
+    return ("left", anchor, y)
 
 
 def docked_point(bar, target, width):
@@ -2071,15 +2098,25 @@ class CodexUsageSurface:
                 own = (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None
                 elements = self._layout.elements(bar_handle, bar, own)
                 committed = self._placer.current
-                # Hold a committed left anchor while UIA is briefly unreadable
-                # so empty readings cannot flip the strip to the tray side.
-                if (committed is not None and committed[0] == "left"
-                        and not usable_layout(elements)):
-                    x, y = docked_point(bar, committed, size[0])
-                    if (form.Left, form.Top) != (x, y):
-                        form.Location = Point(x, y)
-                    return
-                target = self._placer.propose(docked_target(bar, tray, elements, size, strip_margin(self._scale), scale(4)))
+                margin = strip_margin(self._scale)
+                proposed = docked_target(bar, tray, elements, size, margin, scale(4))
+                # Hold a committed left anchor across brief empty / tray
+                # proposals unless Widgets is clearly on the right half
+                # (genuine left-aligned layout).  Refresh Y/clamp X to the
+                # current bar so monitor or DPI changes stay portable.
+                widgets = elements.get("WidgetsButton") if elements else None
+                mid = (bar[0] + bar[2]) / 2
+                allow_tray = bool(widgets and widgets[0] > mid)
+                if (committed is not None and committed[0] == "left" and not allow_tray
+                        and (not usable_layout(elements) or proposed[0] == "tray")):
+                    held = refresh_left_anchor(bar, committed, size, margin)
+                    if held is not None:
+                        self._slot = held[0]
+                        x, y = docked_point(bar, held, size[0])
+                        if (form.Left, form.Top) != (x, y):
+                            form.Location = Point(x, y)
+                        return
+                target = self._placer.propose(proposed)
                 self._slot = target[0]
                 x, y = docked_point(bar, target, size[0])
                 if (form.Left, form.Top) != (x, y):

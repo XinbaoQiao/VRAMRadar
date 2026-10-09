@@ -1,7 +1,7 @@
 import unittest
 
 from vram_radar.usage_surface import (PlacementDebouncer, TaskbarLayout, docked_point, docked_target,
-                                      exclude_rect, settle_color, usable_layout)
+                                      exclude_rect, refresh_left_anchor, settle_color, usable_layout)
 
 BAR = (0, 1032, 1920, 1080)
 TRAY = (1700, 1032, 1920, 1080)
@@ -44,14 +44,27 @@ class StripPlacementTests(unittest.TestCase):
         # answers "left" (the historical left_slot-None case was the uncapped gap).
         self.assertEqual(left_slot(bar, elements, (69, 51), 18), (capped, 1538))
 
-    def test_empty_uia_stays_left_not_tray(self):
-        # Failed / empty layout used to jump the strip to the notification area.
+    def test_empty_uia_defaults_to_tray_width_independent(self):
+        # Empty UIA cannot tell centered from left-aligned; tray is the portable
+        # default.  Callers hold a committed left anchor across brief empties.
         a = docked_target(BAR, TRAY, {}, (200, 34))
         b = docked_target(BAR, TRAY, {}, (260, 34))
-        self.assertEqual(a[0], "left")
+        self.assertEqual(a[0], "tray")
         self.assertEqual(a, b)
-        self.assertEqual(docked_point(BAR, a, 200)[0], a[1])
-        self.assertEqual(docked_point(BAR, a, 400)[0], a[1])  # width grows right
+        self.assertEqual(docked_point(BAR, a, 200)[0], 1700 - 200 - 1)
+        self.assertEqual(docked_point(BAR, b, 260)[0], 1700 - 260 - 1)
+
+    def test_left_aligned_without_widgets_uses_tray(self):
+        # Win10-style left icons, no Widgets button: no left gap -> tray.
+        elements = {"StartButton": (8, 1032, 56, 1080), "first_app": (60, 1032, 108, 1080)}
+        target = docked_target(BAR, TRAY, elements, (200, 34), 6)
+        self.assertEqual(target[0], "tray")
+
+    def test_widgets_left_without_start_stays_left(self):
+        elements = {"WidgetsButton": (0, 1032, 150, 1080)}
+        target = docked_target(BAR, TRAY, elements, (200, 34), 6)
+        self.assertEqual(target[0], "left")
+        self.assertEqual(target[1], 156)
 
     def test_transient_lookup_failure_keeps_last_good(self):
         layout = FakeLayout([GOOD, {}, {"WidgetsButton": (0, 1032, 150, 1080)}, GOOD])
@@ -171,6 +184,43 @@ class LeftAnchorStabilityTests(unittest.TestCase):
         target = docked_target(BAR, TRAY, elements, (200, 34), 6, 4)
         self.assertEqual(target[0], "tray")
         self.assertEqual(docked_point(BAR, target, 200)[0], 1400 - 4 - 200 - 1)
+
+    def test_refresh_left_anchor_recenters_y_on_new_bar(self):
+        # Taskbar moved to another monitor: keep left slot, snap into new bar.
+        committed = ("left", 156, 1039)
+        new_bar = (1920, 1400, 3840, 1448)
+        held = refresh_left_anchor(new_bar, committed, (200, 34), 12)
+        self.assertEqual(held[0], "left")
+        self.assertEqual(held[1], 1920 + 12)   # old X not on this bar -> bar+margin
+        self.assertEqual(held[2], 1400 + (48 - 34) // 2)
+
+    def test_refresh_left_anchor_clamps_within_same_bar(self):
+        committed = ("left", 156, 1039)
+        held = refresh_left_anchor(BAR, committed, (200, 34), 6)
+        self.assertEqual(held, ("left", 156, 1032 + (48 - 34) // 2))
+
+    def test_dpi_matrix_left_edge_is_relative(self):
+        from vram_radar.usage_surface import strip_margin, taskbar_scale
+        for dpi, bar_h in ((96, 48), (120, 60), (144, 72), (192, 96)):
+            m = strip_margin(taskbar_scale(dpi, None))
+            bar = (0, 1000, 1920, 1000 + bar_h)
+            tray = (1600, 1000, 1920, 1000 + bar_h)
+            weather_end = 10 + round(bar_h * 2.5)
+            elements = {"WidgetsButton": (10, 1000, weather_end, 1000 + bar_h),
+                        "StartButton": (700, 1000, 700 + bar_h, 1000 + bar_h)}
+            target = docked_target(bar, tray, elements, (180, max(20, bar_h - 14)), m)
+            self.assertEqual(target[0], "left")
+            self.assertEqual(target[1], weather_end + m)
+            self.assertLess(target[1], (bar[0] + bar[2]) / 2)
+
+    def test_committed_left_survives_empty_via_refresh(self):
+        # Simulates position(): empty UIA proposes tray, but refresh keeps left.
+        committed = ("left", 156, 1039)
+        proposed = docked_target(BAR, TRAY, {}, (200, 34))
+        self.assertEqual(proposed[0], "tray")
+        held = refresh_left_anchor(BAR, committed, (200, 34), 6)
+        self.assertEqual(held[0], "left")
+        self.assertEqual(docked_point(BAR, held, 200)[0], held[1])
 
 
 class WidestWeatherTests(unittest.TestCase):
