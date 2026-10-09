@@ -937,6 +937,7 @@
     ['任务名称', 'Job name'],
     ['状态', 'State'],
     ['节点或排队原因', 'Node or pending reason'],
+    ['节点或排队原因，可左右滚动', 'Node or pending reason; scroll horizontally'],
     ['运行时长', 'Elapsed'],
     ['提交时间', 'Submitted'],
     ['时间限额', 'Time limit'],

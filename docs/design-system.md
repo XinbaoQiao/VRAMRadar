@@ -152,6 +152,9 @@ available on demand.
   display scale. Paths, diagnostics, errors, and toast messages use bounded
   containers and safe breaking, while command blocks and wide data tables keep
   intentional horizontal scrolling.
+- Keep task nodes and pending reasons on one line. Long values scroll inside
+  their cell, retain a full-text tooltip, and have a fixed copy button beside
+  them. Preserve the same access in narrow layouts.
 - Use one thin tokenized scrollbar treatment for the document, dialogs,
   navigator, tables, and code blocks. Animate only compositor-friendly
   `transform` and `opacity`; disclosure height and padding changes are immediate,

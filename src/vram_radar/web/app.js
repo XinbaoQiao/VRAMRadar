@@ -636,6 +636,13 @@ function copyableValue(value, label) {
   return `<span class="copyable-value"><span title="${safeText}">${safeText}</span>${contextCopyButton(text, label)}</span>`;
 }
 
+function renderTaskLocation(task) {
+  const text = String(formatTaskLocation(task) ?? '').trim();
+  const safeText = escapeHtml(text || '--');
+  const label = escapeHtml(localizedText('节点或排队原因，可左右滚动'));
+  return `<span class="copyable-value"><span class="task-location-scroll" tabindex="0" role="region" aria-label="${label}" title="${safeText}">${safeText}</span>${contextCopyButton(text, '节点或排队原因')}</span>`;
+}
+
 function renderTaskName(task) {
   const name = String(task.name || '').trim();
   if (!name) return '<span class="task-name missing">未记录</span>';
@@ -682,7 +689,7 @@ function renderTaskTable(tasks, recent = false, currentUser = '', emptyMessage =
     : `<td class="time-value" data-label="提交时间">${escapeHtml(formatTaskTimestamp(task.submitted_at))}</td><td class="time-value" data-label="时间限额">${escapeHtml(formatSlurmDuration(task.time_limit))}</td>`;
   const runDuration = task => !recent && task.state === 'PENDING' ? '尚未开始' : formatSlurmDuration(task.elapsed);
   const actionHeader = recent ? '' : '<th scope="col">提醒</th>';
-  return `<div class="table-wrap task-table" role="region" aria-label="GPU 任务列表，可横向滚动"><table><caption class="sr-only">${recent ? '近 24 小时 GPU 任务结果' : '当前 GPU 任务队列'}</caption><thead><tr><th scope="col">用户</th><th scope="col">任务 ID</th><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">节点或排队原因</th><th scope="col">运行时长</th>${timeHeaders}<th scope="col">占用 GPU</th>${actionHeader}</tr></thead><tbody>${tasks.map(task => `<tr><td data-label="用户">${renderTaskUser(task, currentUser)}</td><td class="mono copyable-cell" data-label="任务 ID">${copyableValue(task.job_id, '任务 ID')}</td><td class="task-name-cell" data-label="任务名称">${renderTaskName(task)}</td><td data-label="状态">${taskBadge(task.state)}</td><td class="task-location" data-label="节点或排队原因">${copyableValue(formatTaskLocation(task), '节点或排队原因')}</td><td class="time-value" data-label="运行时长">${escapeHtml(runDuration(task))}</td>${timeCells(task)}<td class="number-value" data-label="占用 GPU">${escapeHtml(formatTaskGpuCount(task.gpu_count))}</td>${recent ? '' : `<td data-label="提醒">${taskCompletionWatchButton(serverId, 'slurm', task, currentUser)}</td>`}</tr>`).join('')}</tbody></table></div>`;
+  return `<div class="table-wrap task-table" role="region" aria-label="GPU 任务列表，可横向滚动"><table><caption class="sr-only">${recent ? '近 24 小时 GPU 任务结果' : '当前 GPU 任务队列'}</caption><thead><tr><th scope="col">用户</th><th scope="col">任务 ID</th><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">节点或排队原因</th><th scope="col">运行时长</th>${timeHeaders}<th scope="col">占用 GPU</th>${actionHeader}</tr></thead><tbody>${tasks.map(task => `<tr><td data-label="用户">${renderTaskUser(task, currentUser)}</td><td class="mono copyable-cell" data-label="任务 ID">${copyableValue(task.job_id, '任务 ID')}</td><td class="task-name-cell" data-label="任务名称">${renderTaskName(task)}</td><td data-label="状态">${taskBadge(task.state)}</td><td class="task-location" data-label="节点或排队原因">${renderTaskLocation(task)}</td><td class="time-value" data-label="运行时长">${escapeHtml(runDuration(task))}</td>${timeCells(task)}<td class="number-value" data-label="占用 GPU">${escapeHtml(formatTaskGpuCount(task.gpu_count))}</td>${recent ? '' : `<td data-label="提醒">${taskCompletionWatchButton(serverId, 'slurm', task, currentUser)}</td>`}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function partitionTasksByOwner(items, currentUser) {

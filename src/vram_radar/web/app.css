@@ -76,13 +76,13 @@
 .quota-usage-path { padding: 12px 0; }
 #quota-usage-status { margin: 4px 0 0 22px; font-size: var(--font-small); line-height: 18px; color: var(--muted); overflow-wrap: anywhere; }
 #quota-usage-status:empty { display: none; }
-html, .dialog-content, .server-navigator-list, .table-wrap, .command-box pre, .saved-view-chips, .toast { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
+html, .dialog-content, .server-navigator-list, .table-wrap, .task-location-scroll, .command-box pre, .saved-view-chips, .toast { scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
 html, .dialog-content, .server-navigator-list { scrollbar-gutter: stable; }
-html::-webkit-scrollbar, .dialog-content::-webkit-scrollbar, .server-navigator-list::-webkit-scrollbar, .table-wrap::-webkit-scrollbar, .command-box pre::-webkit-scrollbar, .saved-view-chips::-webkit-scrollbar, .toast::-webkit-scrollbar, .notification-list::-webkit-scrollbar { width: 10px; height: 10px; }
-html::-webkit-scrollbar-track, .dialog-content::-webkit-scrollbar-track, .server-navigator-list::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-track, .command-box pre::-webkit-scrollbar-track, .saved-view-chips::-webkit-scrollbar-track, .toast::-webkit-scrollbar-track, .notification-list::-webkit-scrollbar-track { background: transparent; }
-html::-webkit-scrollbar-thumb, .dialog-content::-webkit-scrollbar-thumb, .server-navigator-list::-webkit-scrollbar-thumb, .table-wrap::-webkit-scrollbar-thumb, .command-box pre::-webkit-scrollbar-thumb, .saved-view-chips::-webkit-scrollbar-thumb, .toast::-webkit-scrollbar-thumb, .notification-list::-webkit-scrollbar-thumb { min-height: 34px; background: var(--scrollbar-thumb); border: 3px solid transparent; border-radius: var(--radius-md); background-clip: padding-box; }
-html::-webkit-scrollbar-thumb:hover, .dialog-content::-webkit-scrollbar-thumb:hover, .server-navigator-list::-webkit-scrollbar-thumb:hover, .table-wrap::-webkit-scrollbar-thumb:hover, .command-box pre::-webkit-scrollbar-thumb:hover, .saved-view-chips::-webkit-scrollbar-thumb:hover, .toast::-webkit-scrollbar-thumb:hover, .notification-list::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); border: 3px solid transparent; background-clip: padding-box; }
-html::-webkit-scrollbar-corner, .dialog-content::-webkit-scrollbar-corner, .server-navigator-list::-webkit-scrollbar-corner, .table-wrap::-webkit-scrollbar-corner, .command-box pre::-webkit-scrollbar-corner, .saved-view-chips::-webkit-scrollbar-corner, .toast::-webkit-scrollbar-corner, .notification-list::-webkit-scrollbar-corner { background: transparent; }
+html::-webkit-scrollbar, .dialog-content::-webkit-scrollbar, .server-navigator-list::-webkit-scrollbar, .table-wrap::-webkit-scrollbar, .task-location-scroll::-webkit-scrollbar, .command-box pre::-webkit-scrollbar, .saved-view-chips::-webkit-scrollbar, .toast::-webkit-scrollbar, .notification-list::-webkit-scrollbar { width: 10px; height: 10px; }
+html::-webkit-scrollbar-track, .dialog-content::-webkit-scrollbar-track, .server-navigator-list::-webkit-scrollbar-track, .table-wrap::-webkit-scrollbar-track, .task-location-scroll::-webkit-scrollbar-track, .command-box pre::-webkit-scrollbar-track, .saved-view-chips::-webkit-scrollbar-track, .toast::-webkit-scrollbar-track, .notification-list::-webkit-scrollbar-track { background: transparent; }
+html::-webkit-scrollbar-thumb, .dialog-content::-webkit-scrollbar-thumb, .server-navigator-list::-webkit-scrollbar-thumb, .table-wrap::-webkit-scrollbar-thumb, .task-location-scroll::-webkit-scrollbar-thumb, .command-box pre::-webkit-scrollbar-thumb, .saved-view-chips::-webkit-scrollbar-thumb, .toast::-webkit-scrollbar-thumb, .notification-list::-webkit-scrollbar-thumb { min-height: 34px; background: var(--scrollbar-thumb); border: 3px solid transparent; border-radius: var(--radius-md); background-clip: padding-box; }
+html::-webkit-scrollbar-thumb:hover, .dialog-content::-webkit-scrollbar-thumb:hover, .server-navigator-list::-webkit-scrollbar-thumb:hover, .table-wrap::-webkit-scrollbar-thumb:hover, .task-location-scroll::-webkit-scrollbar-thumb:hover, .command-box pre::-webkit-scrollbar-thumb:hover, .saved-view-chips::-webkit-scrollbar-thumb:hover, .toast::-webkit-scrollbar-thumb:hover, .notification-list::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); border: 3px solid transparent; background-clip: padding-box; }
+html::-webkit-scrollbar-corner, .dialog-content::-webkit-scrollbar-corner, .server-navigator-list::-webkit-scrollbar-corner, .table-wrap::-webkit-scrollbar-corner, .task-location-scroll::-webkit-scrollbar-corner, .command-box pre::-webkit-scrollbar-corner, .saved-view-chips::-webkit-scrollbar-corner, .toast::-webkit-scrollbar-corner, .notification-list::-webkit-scrollbar-corner { background: transparent; }
 [hidden] { display: none !important; }
 html, body { min-height: 100%; }
 html { zoom: var(--ui-zoom, 1); }
@@ -616,8 +616,9 @@ tr:last-child td { border-bottom: 0; }
 .task-period-head span { color: var(--muted); font-size: var(--font-caption); font-variant-numeric: tabular-nums; }
 .task-table th, .task-table td { padding: 10px; font-size: var(--font-small); }
 .task-location { min-width: 180px; max-width: 260px; white-space: normal; }
-.task-location .copyable-value { width: 240px; align-items: flex-start; }
-.task-location .copyable-value > span { overflow: visible; white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+.task-location .copyable-value { width: 240px; }
+.task-location .task-location-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; white-space: nowrap; text-overflow: clip; line-height: 1.5; }
+.task-location-scroll:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; border-radius: 3px; }
 .task-location .context-copy { flex: 0 0 27px; }
 .task-name-cell { min-width: 220px; max-width: 340px; white-space: normal; }
 .task-name, .task-name-preview, .task-name-full { font-family: var(--mono-font); overflow-wrap: anywhere; word-break: break-word; }

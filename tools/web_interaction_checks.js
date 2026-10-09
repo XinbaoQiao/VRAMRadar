@@ -101,13 +101,27 @@
       range.selectNodeContents(value);
       return new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size;
     };
-    assertions.long_task_locations_wrap_without_clipping = locationValues.length === 4
-      && locationValues.every(value => value.scrollWidth <= value.clientWidth + 1
+    assertions.task_locations_stay_on_one_line = locationValues.length === 4
+      && locationValues.every(value => visibleLineCount(value) === 1
         && value.scrollHeight <= value.clientHeight + 1
-        && getComputedStyle(value).whiteSpace === 'normal'
-        && getComputedStyle(value).overflow === 'visible')
-      && [locationValues[0], locationValues[1], locationValues[3]].every(value => visibleLineCount(value) > 1);
-    assertions.short_task_node_stays_on_one_line = locationValues.length === 4 && visibleLineCount(locationValues[2]) === 1;
+        && getComputedStyle(value).whiteSpace === 'nowrap'
+        && getComputedStyle(value).overflowX === 'auto'
+        && getComputedStyle(value).textOverflow === 'clip');
+    assertions.long_task_locations_scroll_to_the_end = [locationValues[0], locationValues[1], locationValues[3]].every(value => {
+      const copyLeft = value.nextElementSibling.getBoundingClientRect().left;
+      value.scrollLeft = value.scrollWidth;
+      const reachedEnd = value.scrollLeft > 0
+        && Math.abs(value.scrollWidth - value.clientWidth - value.scrollLeft) <= 1
+        && Math.abs(value.nextElementSibling.getBoundingClientRect().left - copyLeft) <= 1;
+      value.scrollLeft = 0;
+      return reachedEnd;
+    });
+    assertions.task_location_scroll_is_keyboard_accessible = locationValues.length === 4
+      && locationValues.every(value => value.tabIndex === 0
+        && value.getAttribute('aria-label') === localizedText('节点或排队原因，可左右滚动'));
+    assertions.short_task_node_needs_no_scrolling = locationValues.length === 4
+      && visibleLineCount(locationValues[2]) === 1
+      && locationValues[2].scrollWidth <= locationValues[2].clientWidth + 1;
     assertions.task_locations_escape_scheduler_text = !locationFixture.querySelector('pending');
     locationFixture.remove();
     const importFeedbackFixture = document.createElement('div');
