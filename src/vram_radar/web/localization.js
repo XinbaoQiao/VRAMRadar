@@ -257,6 +257,7 @@
     ['服务器密码不可用，请在本地配置中重新保存', 'Server password unavailable; save it again in local settings'],
     ['SSH 自动恢复尚未验证成功，5 分钟后重试', 'SSH recovery is not yet verified; retrying in 5 minutes'],
     ['SSH 自动恢复配置已变化或无效，请核对本机授权', 'SSH recovery configuration changed or is invalid; review the local authorization'],
+    ['本机密码连接配置已变化，请修复本机授权', 'The local password connection configuration changed; repair its local authorization'],
     ['服务器拒绝连接，SSH 端口可能未开放或 SSH 服务未运行', 'The server refused the connection; the SSH port may be closed or the SSH service may not be running'], ['服务器查询超时', 'Server query timed out'],
     ['服务器没有返回可验证的 SSH Key 结果', 'Server did not return a verifiable SSH key result'],
     ['服务器没有返回可验证的公钥安装结果，未更新本地配置', 'Server did not return a verifiable key-installation result; local settings were not updated'],

@@ -761,6 +761,7 @@ def _run_bounded_process(
     stdout_limit: int,
     stderr_limit: int,
     input_data: bytes | None = None,
+    cwd: str | None = None,
 ) -> _BoundedProcessResult:
     """Run a child while keeping both captured streams within fixed memory bounds."""
 
@@ -775,6 +776,7 @@ def _run_bounded_process(
             else creationflags
         ),
         env=env,
+        **({"cwd": cwd} if cwd is not None else {}),
         bufsize=0,
         start_new_session=os.name != "nt",
     )
@@ -909,7 +911,9 @@ def run_remote(
                 retryable=False,
                 state="misconfigured",
             )
-    if server.identity_file and password is None:
+    from .ssh_transport import current_transport
+    transport = current_transport(server)
+    if server.identity_file and password is None and transport is None:
         identity_path = Path(resolve_identity_path(server))
         if not identity_path.is_file():
             raise ConnectorFailure(
@@ -918,7 +922,7 @@ def run_remote(
                 retryable=False,
                 state="misconfigured",
             )
-    argv = ssh_argv(
+    argv = transport.command(remote_script, server.connect_timeout_seconds) if transport else ssh_argv(
         server,
         remote_script,
         password_auth=password is not None,
@@ -954,6 +958,7 @@ def run_remote(
                     stdout_limit=MAX_REMOTE_STDOUT_BYTES,
                     stderr_limit=MAX_REMOTE_STDERR_BYTES,
                     input_data=stdin_data,
+                    **({"cwd": transport.cwd} if transport else {}),
                 )
         except FileNotFoundError as exc:
             raise ConnectorFailure("ssh_missing", "本机未找到 OpenSSH 客户端", retryable=False, state="misconfigured") from exc
@@ -973,7 +978,7 @@ def run_remote(
             raise classify_process_error(
                 detail,
                 returncode=result.returncode,
-                password_auth=password is not None,
+                password_auth=password is not None or transport is not None,
             )
         return result.stdout.decode("utf-8", errors="replace")
 

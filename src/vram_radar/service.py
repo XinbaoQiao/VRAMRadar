@@ -672,6 +672,7 @@ class DashboardService:
         startup_notices: list[dict[str, str]] | None = None,
         profile_persist: Callable[[Profile], bool] | None = None,
         ssh_recovery: Callable[[ServerProfile], bool | None] | None = None,
+        ssh_transport: Callable | None = None,
     ) -> None:
         self.profile = profile
         self.cache = cache
@@ -683,6 +684,7 @@ class DashboardService:
         self.logger = logger or logging.getLogger("vram_radar")
         self.profile_persist = profile_persist
         self.ssh_recovery = ssh_recovery
+        self.ssh_transport = ssh_transport
         self.profile_mutation_lock = threading.RLock()
         self._notices = [
             {
@@ -1260,6 +1262,12 @@ class DashboardService:
         server: ServerProfile,
         operation: Callable[..., dict[str, Any]],
     ) -> dict[str, Any]:
+        if self.ssh_transport is not None:
+            transport = self.ssh_transport(server)
+            if transport is not None:
+                from .ssh_transport import transport_scope
+                with transport_scope(server, transport):
+                    return operation(server)
         # Always try the user's existing non-interactive OpenSSH path first.
         # A Profile can outlive a Keychain/Credential Manager item after a
         # cross-machine migration; a stale auth_ref must never block a valid
