@@ -19,6 +19,18 @@ from .models import ServerProfile
 _active = ContextVar("radar_host_transport", default=None)
 
 
+def _long_path(path: Path) -> Path:
+    """Prefer the Windows long path so short 8.3 names do not break pin checks."""
+    import os
+    if os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(32768)
+        n = ctypes.windll.kernel32.GetLongPathNameW(str(path), buf, len(buf))
+        if n:
+            return Path(buf.value)
+    return path
+
+
 def regular_path(path):
     if not path.is_absolute():
         raise ValueError("relative path")
@@ -28,7 +40,7 @@ def regular_path(path):
             raise ValueError("linked path")
     if not path.is_file():
         raise ValueError("not a regular file")
-    return path.resolve(strict=True)
+    return _long_path(path.resolve(strict=True))
 
 
 @dataclass(frozen=True)
@@ -93,7 +105,7 @@ class HostSshTransport:
                 with path.open("rb") as stream:
                     if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
                         raise ValueError("pinned file changed")
-            return Transport(str(regular_path(python)), str(regular_path(helper)), str(cwd.resolve(strict=True)), server.ssh_alias)
+            return Transport(str(regular_path(python)), str(regular_path(helper)), str(_long_path(cwd.resolve(strict=True))), server.ssh_alias)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             raise ConnectorFailure("host_transport_config_invalid",
                                    "本机密码连接配置已变化，请修复本机授权", retryable=False,

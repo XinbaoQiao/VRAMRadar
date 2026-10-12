@@ -55,9 +55,10 @@ class HostTransportTests(unittest.TestCase):
                 self.assertIsNone(current_transport(replace(self.server, id='other')))
             self.assertIsNone(current_transport(self.server))
             args, kwargs = child.call_args
-            self.assertEqual(args[0][:4], [sys.executable, '-I', '-B', str(self.helper)])
+            self.assertEqual(args[0][:3], [sys.executable, '-I', '-B'])
+            self.assertEqual(Path(args[0][3]).resolve(), self.helper.resolve())
             self.assertEqual(kwargs['input_data'], b'printf live')
-            self.assertEqual(kwargs['cwd'], str(self.root))
+            self.assertEqual(Path(kwargs['cwd']).resolve(), Path(self.root).resolve())
             self.assertIsNone(kwargs['env']); broker.assert_not_called()
 
     def test_service_bypasses_key_repair_and_app_secret_store_without_retry(self):
