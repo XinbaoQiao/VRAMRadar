@@ -1198,7 +1198,9 @@ def windows_taskbar_palette(bar=None, exclude=None, near=None):
 # left gap.  Type never goes below 90 % of the normal strip font (12/13 px at
 # 100 %, i.e. the original two-app layout); after that content is compacted,
 # and as a last resort the strip is clipped to the gap.
-FIT_PLAN = ((1.0, 0), (1.0, 1), (0.95, 1), (0.9, 1), (0.9, 2))
+# Prefer smaller type while keeping the separate reset countdown; only drop
+# the countdown (level >= 1) after the 90 % floor still does not fit.
+FIT_PLAN = ((1.0, 0), (0.95, 0), (0.9, 0), (0.9, 1), (0.9, 2))
 FIT_FACTORS = tuple(dict.fromkeys(factor for factor, _ in FIT_PLAN))
 
 

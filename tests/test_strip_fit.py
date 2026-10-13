@@ -90,6 +90,19 @@ class StripFitTests(unittest.TestCase):
         self.assertEqual(FIT_PLAN[0], (1.0, 0))
         self.assertGreaterEqual(min(factor for factor, _ in FIT_PLAN), 0.9)
 
+    def test_fit_plan_keeps_reset_while_shrinking(self):
+        """Tight left gaps must shrink type before hiding Nd Nh countdowns."""
+        self.assertEqual(
+            FIT_PLAN,
+            ((1.0, 0), (0.95, 0), (0.9, 0), (0.9, 1), (0.9, 2)),
+        )
+        # Every shrink step above the drop keeps level 0 (reset label shown).
+        before_drop = [(f, lv) for f, lv in FIT_PLAN if lv < 1]
+        self.assertEqual(before_drop, [(1.0, 0), (0.95, 0), (0.9, 0)])
+        first_drop = next(i for i, (_, lv) in enumerate(FIT_PLAN) if lv >= 1)
+        self.assertEqual(FIT_PLAN[first_drop - 1], (0.9, 0))
+        self.assertGreaterEqual(FIT_PLAN[first_drop][1], 1)
+
     def test_fit_choice(self):
         self.assertEqual(fit_choice([300, 280, 260], 325), 0)
         self.assertEqual(fit_choice([400, 330, 300], 325), 2)
