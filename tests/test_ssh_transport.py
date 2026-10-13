@@ -94,6 +94,31 @@ class HostTransportTests(unittest.TestCase):
         operation.assert_called_once_with(self.server)
         secret.get.assert_not_called(); recovery.assert_not_called()
 
+    def test_stale_host_transport_warns_once_per_server(self):
+        self.register()
+        profile = Profile.from_dict({'schema_version': 1, 'id': 'test', 'display_name': 'Test',
+                                     'servers': [self.server.to_dict()]})
+        logger = Mock()
+        service = DashboardService(profile, SnapshotCache(storage_paths(self.root), 'test'),
+                                   logger=logger, ssh_recovery=Mock(return_value=None),
+                                   ssh_transport=self.resolver)
+        self.helper.write_text('# modified')
+        operation = Mock(return_value={'via': 'key'})
+        service._authenticated_call(self.server, operation)
+        service._authenticated_call(self.server, operation)
+        self.assertEqual(logger.warning.call_count, 1)
+        # Healthy registration clears the warn latch.
+        self.helper.write_text('# fixture')
+        self.binding['files_sha256'][str(self.helper)] = __import__('hashlib').sha256(self.helper.read_bytes()).hexdigest()
+        self.register()
+        service._authenticated_call(self.server, Mock(side_effect=[
+            ConnectorFailure('auth_failed', 'rejected', retryable=False),
+            {'via': 'transport'},
+        ]))
+        self.helper.write_text('# modified again')
+        service._authenticated_call(self.server, operation)
+        self.assertEqual(logger.warning.call_count, 2)
+
     def test_stale_host_transport_surfaces_after_key_auth_fails_without_password(self):
         self.register()
         profile = Profile.from_dict({'schema_version': 1, 'id': 'test', 'display_name': 'Test',

@@ -685,6 +685,8 @@ class DashboardService:
         self.profile_persist = profile_persist
         self.ssh_recovery = ssh_recovery
         self.ssh_transport = ssh_transport
+        # server ids already warned for a stale host-transport pin (avoid log spam)
+        self._transport_config_warned: set[str] = set()
         self.profile_mutation_lock = threading.RLock()
         self._notices = [
             {
@@ -1273,14 +1275,18 @@ class DashboardService:
             except ConnectorFailure as exc:
                 if getattr(exc, "code", None) == "host_transport_config_invalid":
                     transport_config_error = exc
-                    self.logger.warning(
-                        "server=%s code=%s message=%s; continuing with key then other password paths",
-                        server.id,
-                        exc.code,
-                        str(exc),
-                    )
+                    if server.id not in self._transport_config_warned:
+                        self._transport_config_warned.add(server.id)
+                        self.logger.warning(
+                            "server=%s code=%s message=%s; continuing with key then other password paths",
+                            server.id,
+                            exc.code,
+                            str(exc),
+                        )
                 else:
                     raise
+            else:
+                self._transport_config_warned.discard(server.id)
         # Always try the user's existing non-interactive OpenSSH path first.
         # A Profile can outlive a Keychain/Credential Manager item after a
         # cross-machine migration; a stale auth_ref must never block a valid
