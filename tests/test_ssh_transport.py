@@ -61,20 +61,51 @@ class HostTransportTests(unittest.TestCase):
             self.assertEqual(Path(kwargs['cwd']).resolve(), Path(self.root).resolve())
             self.assertIsNone(kwargs['env']); broker.assert_not_called()
 
-    def test_service_bypasses_key_repair_and_app_secret_store_without_retry(self):
+    def test_service_tries_key_then_host_password_transport(self):
         self.register()
         profile = Profile.from_dict({'schema_version': 1, 'id': 'test', 'display_name': 'Test',
                                      'servers': [self.server.to_dict()]})
-        secret, recovery = Mock(), Mock()
+        secret, recovery = Mock(), Mock(return_value=None)
         service = DashboardService(profile, SnapshotCache(storage_paths(self.root), 'test'),
                                    secret_store=secret, ssh_recovery=recovery, ssh_transport=self.resolver)
-        def failure(server):
-            self.assertIsNotNone(current_transport(server))
-            raise ConnectorFailure('auth_failed', 'rejected', retryable=False)
-        operation = Mock(side_effect=failure)
-        with self.assertRaises(ConnectorFailure): service._authenticated_call(self.server, operation)
-        self.assertEqual(operation.call_count, 1); secret.get.assert_not_called(); recovery.assert_not_called()
+        phases = []
+        def operation(server, **_kwargs):
+            using_transport = current_transport(server) is not None
+            phases.append(using_transport)
+            if not using_transport:
+                raise ConnectorFailure('auth_failed', 'rejected', retryable=False)
+            return {'ok': True}
+        self.assertEqual(service._authenticated_call(self.server, operation), {'ok': True})
+        self.assertEqual(phases, [False, True])  # key/config first, then host password transport
+        secret.get.assert_not_called(); recovery.assert_not_called()
         self.assertIsNone(current_transport(self.server))
+
+    def test_stale_host_transport_does_not_block_successful_key_auth(self):
+        self.register()
+        profile = Profile.from_dict({'schema_version': 1, 'id': 'test', 'display_name': 'Test',
+                                     'servers': [self.server.to_dict()]})
+        secret, recovery = Mock(), Mock(return_value=None)
+        service = DashboardService(profile, SnapshotCache(storage_paths(self.root), 'test'),
+                                   secret_store=secret, ssh_recovery=recovery, ssh_transport=self.resolver)
+        # Drift the registration so resolve fails closed, but key auth still works.
+        self.helper.write_text('# modified')
+        operation = Mock(return_value={'via': 'key'})
+        self.assertEqual(service._authenticated_call(self.server, operation), {'via': 'key'})
+        operation.assert_called_once_with(self.server)
+        secret.get.assert_not_called(); recovery.assert_not_called()
+
+    def test_stale_host_transport_surfaces_after_key_auth_fails_without_password(self):
+        self.register()
+        profile = Profile.from_dict({'schema_version': 1, 'id': 'test', 'display_name': 'Test',
+                                     'servers': [self.server.to_dict()]})
+        service = DashboardService(profile, SnapshotCache(storage_paths(self.root), 'test'),
+                                   secret_store=Mock(), ssh_recovery=Mock(return_value=None), ssh_transport=self.resolver)
+        self.helper.write_text('# modified')
+        operation = Mock(side_effect=ConnectorFailure('auth_failed', 'rejected', retryable=False))
+        with self.assertRaises(ConnectorFailure) as raised:
+            service._authenticated_call(self.server, operation)
+        self.assertEqual(raised.exception.code, 'host_transport_config_invalid')
+        self.assertEqual(operation.call_count, 1)
 
     def test_context_is_not_inherited_by_another_thread(self):
         from concurrent.futures import ThreadPoolExecutor

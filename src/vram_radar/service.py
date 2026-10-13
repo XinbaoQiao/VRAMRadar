@@ -1262,12 +1262,25 @@ class DashboardService:
         server: ServerProfile,
         operation: Callable[..., dict[str, Any]],
     ) -> dict[str, Any]:
+        # Resolve an optional host password-transport registration without
+        # letting a stale pin block OpenSSH key/agent auth.  Order is always:
+        # key/config first, then host transport, then secret-store password.
+        transport = None
+        transport_config_error = None
         if self.ssh_transport is not None:
-            transport = self.ssh_transport(server)
-            if transport is not None:
-                from .ssh_transport import transport_scope
-                with transport_scope(server, transport):
-                    return operation(server)
+            try:
+                transport = self.ssh_transport(server)
+            except ConnectorFailure as exc:
+                if getattr(exc, "code", None) == "host_transport_config_invalid":
+                    transport_config_error = exc
+                    self.logger.warning(
+                        "server=%s code=%s message=%s; continuing with key then other password paths",
+                        server.id,
+                        exc.code,
+                        str(exc),
+                    )
+                else:
+                    raise
         # Always try the user's existing non-interactive OpenSSH path first.
         # A Profile can outlive a Keychain/Credential Manager item after a
         # cross-machine migration; a stale auth_ref must never block a valid
@@ -1288,7 +1301,7 @@ class DashboardService:
                 recovered = self.ssh_recovery(server)
                 if recovered:
                     # Only the failed read-only collection is repeated, once.
-                    # Never recurse or fall through to password after recovery.
+                    # Never recurse into password after a verified key recovery.
                     self.logger.info("server=%s SSH access recovery verified; retrying collection", server.id)
                     try:
                         return identity_call()
@@ -1303,11 +1316,16 @@ class DashboardService:
             # Password is a fallback only for an authentication rejection.
             # DNS, host-key, proxy and collector failures must retain their
             # original classification and must not cause a second connection.
-            if (
-                identity_failure.code not in PASSWORD_FALLBACK_AUTH_CODES
-                or not server.auth_ref
-            ):
+            if identity_failure.code not in PASSWORD_FALLBACK_AUTH_CODES:
                 raise
+            if transport is not None:
+                from .ssh_transport import transport_scope
+                with transport_scope(server, transport):
+                    return operation(server)
+            if not server.auth_ref:
+                if transport_config_error is not None:
+                    raise transport_config_error
+                raise identity_failure
         getter = getattr(self.secret_store, "get", None)
         if getter is None:
             raise ConnectorFailure(
