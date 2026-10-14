@@ -49,7 +49,7 @@ def _command(browser: str, profile: Path, *extra: str) -> list[str]:
         "--allow-file-access-from-files",
         f"--user-data-dir={profile}",
         "--hide-scrollbars",
-        "--window-size=1100,1400",
+        "--window-size=980,1600",
         "--virtual-time-budget=9000",
         *extra,
     ]

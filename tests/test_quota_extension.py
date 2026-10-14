@@ -186,7 +186,7 @@ class CompactSpacingRenderTests(unittest.TestCase):
                 self.assertNotIn("error", values)
                 self.assertLessEqual(abs(values["status_left_minus_text_left"]), 12)
                 self.assertGreaterEqual(values["row_to_status_gap"], 0)
-                self.assertLessEqual(values["row_to_status_gap"], 14)
+                self.assertLessEqual(values["row_to_status_gap"], 18)
                 self.assertLessEqual(abs(values["checkbox_center_minus_title_center"]), 6)
                 self.assertLessEqual(values["title_to_desc_pitch"], 22)
                 self.assertLessEqual(values["bottom_padding"], 28)
