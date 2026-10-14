@@ -147,7 +147,7 @@
   <dialog id="settings-dialog">
     <form id="settings-form" method="dialog">
       <header class="dialog-header">
-        <div><div id="dialog-kicker" class="dialog-kicker">设置与服务器</div><h2 id="dialog-title">本地配置</h2><p id="dialog-description">管理服务器和界面设置。</p></div>
+        <div><div id="dialog-kicker" class="dialog-kicker"></div><h2 id="dialog-title">设置</h2><p id="dialog-description">按左侧分类管理服务器与界面。</p></div>
         <div class="dialog-header-actions">
           <div id="settings-disclosure-tools" class="disclosure-tools" aria-label="设置内容显示方式" hidden>
             <button id="collapse-settings" class="button compact-button" type="button">一键收起</button>
@@ -186,12 +186,12 @@
             <section id="settings-pane-appearance" class="settings-pane" data-settings-pane="appearance" hidden aria-labelledby="settings-appearance-title">
               <header class="settings-pane-head">
                 <h3 id="settings-appearance-title">显示与语言</h3>
-                <p>名称、语言、刷新与关闭</p>
+                <p>应用名称、语言与窗口行为</p>
               </header>
               <div class="settings-form-grid">
                 <label class="settings-field"><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
                 <label class="settings-field"><span>界面语言</span><select id="ui-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
-                <label class="settings-field"><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
+                <label class="settings-field"><span>刷新间隔 (秒)</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
                 <label class="settings-field"><span>关闭窗口时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
               </div>
             </section>
@@ -199,12 +199,12 @@
             <section id="settings-pane-notifications" class="settings-pane" data-settings-pane="notifications" aria-labelledby="settings-notifications-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-notifications-title">通知</h3>
-                <p>空闲与任务提醒</p>
+                <p>GPU 空闲与任务结束提醒</p>
               </header>
               <div class="settings-pref-list">
                 <div class="favorite-alert-setting">
                   <label class="settings-pref check-label"><input id="favorite-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>收藏 GPU 空闲提醒</strong><small>整卡空闲或达到显存阈值时</small></span></label>
-                  <label class="settings-field settings-field-follow"><span>最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：仅提醒整卡空闲"></label>
+                  <label class="settings-field settings-field-follow"><span>最低空闲显存 (GiB)</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空则仅提醒整卡空闲"></label>
                 </div>
                 <div class="task-completion-setting">
                   <label class="settings-pref check-label"><input id="task-completion-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>本人任务结束提醒</strong><small>默认关注本人任务</small></span></label>
@@ -215,7 +215,7 @@
             <section id="settings-pane-cache" class="settings-pane" data-settings-pane="cache" aria-labelledby="settings-cache-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-cache-title">缓存清理</h3>
-                <p>清理缓存；保留服务器与凭据</p>
+                <p>清理过期缓存，保留服务器与凭据</p>
               </header>
               <div class="settings-pref-list cache-cleanup-setting">
                 <label class="settings-pref check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span class="settings-pref-text"><strong>定期清理缓存</strong><small>不删除服务器与凭据</small></span></label>
@@ -236,7 +236,7 @@
             <section id="settings-pane-updates" class="settings-pane" data-settings-pane="updates" aria-labelledby="settings-updates-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-updates-title">应用更新</h3>
-                <p>检查正式发布版本</p>
+                <p>检查官方新版本</p>
               </header>
               <div class="settings-pref settings-pref-action update-settings-row">
                 <div class="settings-pref-text"><strong>检查更新</strong><small id="update-check-status">新版本进入通知中心</small></div>
@@ -247,7 +247,7 @@
             <section id="settings-pane-diagnostics" class="settings-pane" data-settings-pane="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-diagnostics-title">诊断与日志</h3>
-                <p>排查连接；复制时隐藏敏感信息</p>
+                <p>排查连接问题，复制时隐藏敏感信息</p>
               </header>
               <div class="settings-inline-actions local-tools-actions">
                 <button id="copy-diagnostics" class="button" type="button">复制诊断</button>
@@ -258,7 +258,7 @@
             <section id="extensions-settings" class="settings-pane" data-settings-pane="extensions" aria-labelledby="extensions-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="extensions-title">扩展功能</h3>
-                <p>可选工具状态</p>
+                <p>可选附加功能</p>
               </header>
               <div class="quota-extension-body">
                 <div class="quota-extension-row">
@@ -284,9 +284,9 @@
             <li><span>2</span><div><strong>检查连接信息</strong><small>确认名称与登录方式</small></div></li>
             <li><span>3</span><div><strong>保存并查看</strong><small>密码可选，存于系统凭据库</small></div></li>
           </ol>
-          <label><span>服务器设置文件路径</span><input id="server-config-path" placeholder="servers.toml 或 ~/.ssh/config"></label>
+          <label><span>SSH 配置文件路径</span><input id="server-config-path" placeholder="servers.toml 或 ~/.ssh/config"></label>
           <div class="import-actions">
-            <label class="check-label"><input id="auto-sync-servers" type="checkbox"><span>启动时自动同步此文件</span></label>
+            <label class="check-label"><input id="auto-sync-servers" type="checkbox"><span>启动时自动同步</span></label>
             <button id="discover-server-config" class="button" type="button">自动发现并导入</button>
             <button id="import-server-config" class="button primary" type="button">导入并替换列表</button>
           </div>
@@ -334,7 +334,7 @@
           </details>
           </div>
         </details>
-        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动调整顺序</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动调整顺序</p></div><button id="add-server" class="button" type="button">添加服务器</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
           <span id="server-editor-page-status" class="server-editor-page-status" aria-live="polite"></span>
@@ -354,7 +354,7 @@
         <button id="cancel-settings" class="button" type="button">取消</button>
         <button id="onboarding-back" class="button" type="button" hidden>上一步</button>
         <button id="onboarding-next" class="button primary" type="button" hidden>下一步</button>
-        <button id="save-settings" class="button primary" type="submit">保存并开始验证</button>
+        <button id="save-settings" class="button primary" type="submit">保存并验证</button>
       </footer>
     </form>
   </dialog>

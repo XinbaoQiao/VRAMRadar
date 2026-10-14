@@ -4806,11 +4806,11 @@ function setSettingsMode(mode) {
   settingsMode = mode;
   const onboarding = mode === 'onboarding';
   ui.dialog.classList.toggle('onboarding-mode', onboarding);
-  ui.dialogKicker.textContent = onboarding ? '首次使用引导' : '设置与服务器';
-  ui.dialogTitle.textContent = onboarding ? '欢迎使用显存雷达' : '本地配置';
+  ui.dialogKicker.textContent = onboarding ? '首次使用引导' : '';
+  ui.dialogTitle.textContent = onboarding ? '欢迎使用显存雷达' : '设置';
   ui.dialogDescription.textContent = onboarding
     ? '添加服务器后即可查看 GPU 状态。'
-    : '管理服务器和界面设置。';
+    : '按左侧分类管理服务器与界面。';
   ui.settingsDisclosureTools.hidden = onboarding;
   ui.closeSettings.hidden = onboarding;
   ui.cancelSettings.hidden = onboarding;
@@ -4930,7 +4930,7 @@ function renderImportFeedback(count, paths = [], warnings = [], removedCount = 0
     ? `找到 ${count} 台服务器。还未保存，也未测试连接。`
     : '没有找到可导入的服务器。';
   const nextStep = count
-    ? '检查下方列表，再点击“保存并开始验证”。'
+    ? '检查下方列表，再点击“保存并验证”。'
     : '请换一个配置文件，或手动添加服务器。';
   const details = [
     ...(paths.length > 1 ? [`已合并读取 ${paths.length} 个配置文件。`, '多个配置文件不支持启动时自动同步。'] : []),
