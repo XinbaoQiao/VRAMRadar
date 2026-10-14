@@ -916,61 +916,114 @@ label { display: grid; gap: 5px; color: var(--muted); font-size: var(--font-smal
 label > span:first-child { font-weight: 620; }
 label small { color: var(--muted); font-size: var(--font-caption); font-weight: 500; line-height: 1.5; }
 input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: var(--radius-sm); padding: 8px 9px; }
-.settings-prefs {
+
+#settings-disclosure-tools[hidden] { display: none !important; }
+.settings-layout {
   display: grid;
-  gap: 0;
-  width: 100%;
-  max-width: 560px;
+  grid-template-columns: 188px minmax(0, 1fr);
+  align-items: stretch;
+  min-height: min(520px, 70vh);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
   overflow: hidden;
 }
-.settings-prefs-note {
+.settings-layout--flat {
+  display: block;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+  min-height: 0;
+}
+.settings-layout--flat .settings-nav { display: none; }
+.settings-layout--flat .settings-panes {
+  display: grid;
+  gap: 18px;
+}
+.settings-layout--flat .settings-pane {
+  display: grid !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 16px 18px 18px;
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+}
+.settings-nav-note {
   display: flex;
   align-items: center;
-  gap: 8px;
+  margin: 0 6px 8px;
+  padding: 0;
+}
+.settings-nav-item {
+  appearance: none;
+  display: block;
+  width: 100%;
   margin: 0;
-  padding: 10px 14px;
-  color: var(--muted);
-  font-size: var(--font-small);
-  line-height: 1.35;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 92%, var(--shell));
-}
-.settings-block {
-  display: grid;
-  gap: 14px;
-  padding: 18px 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.settings-block:last-child { border-bottom: 0; }
-.settings-block-head {
-  display: grid;
-  gap: 3px;
-  margin-bottom: 2px;
-}
-.settings-block-head h3 {
-  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
   font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.settings-nav-item:hover {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.settings-nav-item[aria-current="page"] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--text);
+  font-weight: 650;
+}
+.settings-panes {
+  min-width: 0;
+  background: var(--surface);
+}
+.settings-pane {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+  padding: 18px 20px 22px;
+  max-width: 560px;
+}
+.settings-pane[hidden] { display: none !important; }
+.settings-pane-head {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+.settings-pane-head h3 {
+  margin: 0;
+  font-size: 15px;
   line-height: 1.3;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  text-transform: none;
   color: var(--text);
 }
-.settings-block-head p {
+.settings-pane-head p {
   margin: 0;
   color: var(--muted);
   font-size: var(--font-small);
-  line-height: 1.35;
+  line-height: 1.4;
+}
+.settings-pane-servers {
+  max-width: none;
 }
 .settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 240px));
   justify-content: start;
   gap: 14px 16px;
-  max-width: 100%;
 }
 .settings-field {
   display: grid;
@@ -1078,6 +1131,17 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   justify-content: flex-start;
   gap: 10px;
 }
+/* Legacy names kept for older tests / flat onboarding cards */
+.settings-prefs { display: contents; }
+.settings-prefs-note { display: none; }
+.settings-block {
+  display: grid;
+  gap: 14px;
+}
+.settings-block-head { display: grid; gap: 4px; }
+.settings-block-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.settings-block-head p { margin: 0; color: var(--muted); font-size: var(--font-small); }
+
 /* Import / servers keep the older disclosure chrome. */
 .settings-section { border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--surface-2) 72%, var(--surface)); }
 .settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }

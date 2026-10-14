@@ -94,6 +94,7 @@ const ui = {
   onboardingProgress: document.getElementById('onboarding-progress'),
   onboardingWelcome: document.getElementById('onboarding-welcome'),
   profileSettings: document.getElementById('profile-settings'),
+  settingsNav: document.getElementById('settings-nav'),
   extensionsSettings: document.getElementById('extensions-settings'),
   codexEnabled: document.getElementById('quota-usage-enabled'),
   importPanel: document.getElementById('import-panel'),
@@ -4717,6 +4718,32 @@ function invalidateServerDiscovery() {
   ui.discoverServerConfig.disabled = false;
 }
 
+
+let activeSettingsPane = 'appearance';
+
+function showSettingsPane(paneId, options = {}) {
+  const next = String(paneId || 'appearance');
+  activeSettingsPane = next;
+  const layout = ui.profileSettings;
+  const flat = layout?.classList.contains('settings-layout--flat');
+  if (layout && !flat) {
+    layout.querySelectorAll('.settings-pane').forEach((pane) => {
+      const match = pane.dataset.settingsPane === next;
+      pane.hidden = !match;
+    });
+  }
+  layout?.querySelectorAll('.settings-nav-item').forEach((item) => {
+    const match = item.dataset.settingsPane === next;
+    if (match) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  });
+  if (options.scroll !== false) {
+    const pane = layout?.querySelector(`.settings-pane[data-settings-pane="${next}"]`);
+    pane?.scrollIntoView({ block: 'nearest' });
+    ui.dialog?.querySelector('.dialog-content')?.scrollTo?.({ top: 0 });
+  }
+}
+
 function setOnboardingStep(step) {
   const nextStep = Math.max(1, Math.min(3, Number(step) || 1));
   const onboarding = settingsMode === 'onboarding';
@@ -4727,9 +4754,30 @@ function setOnboardingStep(step) {
   onboardingStep = nextStep;
   ui.onboardingProgress.hidden = !onboarding;
   ui.onboardingWelcome.hidden = !onboarding || onboardingStep !== 1;
-  ui.importPanel.hidden = onboarding && onboardingStep !== 2;
-  ui.profileSettings.hidden = onboarding && onboardingStep !== 3;
-  ui.extensionsSettings.hidden = onboarding;
+  if (ui.profileSettings) {
+    ui.profileSettings.hidden = onboarding && onboardingStep === 1;
+    ui.profileSettings.classList.toggle('settings-layout--flat', Boolean(onboarding && onboardingStep === 3));
+  }
+  if (ui.settingsNav) ui.settingsNav.hidden = Boolean(onboarding);
+  if (onboarding && onboardingStep === 2) {
+    showSettingsPane('servers', { scroll: false });
+    if (ui.importPanel) {
+      ui.importPanel.hidden = false;
+      ui.importPanel.open = true;
+    }
+  } else if (onboarding && onboardingStep === 3) {
+    // Flat stack: all preference panes + servers visible for review.
+    ui.profileSettings?.querySelectorAll('.settings-pane').forEach((pane) => { pane.hidden = false; });
+    if (ui.importPanel) {
+      ui.importPanel.hidden = false;
+      ui.importPanel.open = true;
+    }
+    const firstEditor = ui.editorList.querySelector('.server-editor');
+    if (firstEditor) firstEditor.open = true;
+  } else if (!onboarding) {
+    showSettingsPane(activeSettingsPane || 'appearance', { scroll: false });
+  }
+  ui.importPanel.hidden = onboarding && onboardingStep !== 2 && onboardingStep !== 3;
   ui.serverSettingsHeading.hidden = onboarding && onboardingStep !== 3;
   ui.editorList.hidden = onboarding && onboardingStep !== 3;
   ui.editorToolbar.hidden = (onboarding && onboardingStep !== 3)
@@ -4738,14 +4786,8 @@ function setOnboardingStep(step) {
   ui.onboardingNext.hidden = !onboarding || onboardingStep === 3;
   ui.onboardingLater.hidden = !onboarding;
   ui.saveSettings.hidden = onboarding && onboardingStep !== 3;
-  ui.settingsDisclosureTools.hidden = onboarding && onboardingStep === 1;
+  ui.settingsDisclosureTools.hidden = true;
   ui.onboardingNext.textContent = onboardingStep === 1 ? '开始设置' : '手动填写或检查';
-  if (onboarding && onboardingStep === 2) ui.importPanel.open = true;
-  if (onboarding && onboardingStep === 3) {
-    if (ui.profileSettings) ui.profileSettings.hidden = false;
-    const firstEditor = ui.editorList.querySelector('.server-editor');
-    if (firstEditor) firstEditor.open = true;
-  }
   [...ui.onboardingProgress.querySelectorAll('[data-onboarding-marker]')].forEach(marker => {
     const markerStep = Number(marker.dataset.onboardingMarker);
     marker.classList.toggle('current', markerStep === onboardingStep);
@@ -4792,6 +4834,14 @@ function setSettingsMode(mode) {
   }
 }
 
+
+ui.settingsNav?.addEventListener('click', (event) => {
+  const item = event.target.closest('.settings-nav-item');
+  if (!item || !ui.settingsNav.contains(item)) return;
+  event.preventDefault();
+  showSettingsPane(item.dataset.settingsPane || 'appearance');
+});
+
 function openSettings(options = {}) {
   renderImportAliasChoices([]);
   renderRemovedServerChoices([]);
@@ -4828,6 +4878,7 @@ function openSettings(options = {}) {
   ui.importStatus.hidden = true;
   populateServerEditors(currentProfile?.servers || []);
   setSettingsMode(onboarding ? 'onboarding' : 'settings');
+  if (!onboarding) showSettingsPane('appearance', { scroll: false });
   ui.dialog.showModal();
   void pollQuotaMonitor();
 }

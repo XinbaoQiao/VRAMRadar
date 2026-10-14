@@ -27,6 +27,7 @@ window.addEventListener('load', () => setTimeout(() => {
     servers: currentProfile?.servers || [{id: 'lab', display_name: 'lab'}],
   };
   openSettings({forceNormal: true});
+  if (typeof showSettingsPane === 'function') showSettingsPane('appearance', {scroll: false});
   document.querySelectorAll('details.settings-group').forEach((node) => { node.open = false; });
   const stack = document.getElementById('profile-settings');
   stack?.scrollIntoView({block: 'start'});
@@ -49,7 +50,7 @@ def _command(browser: str, profile: Path, *extra: str) -> list[str]:
         "--allow-file-access-from-files",
         f"--user-data-dir={profile}",
         "--hide-scrollbars",
-        "--window-size=980,1600",
+        "--window-size=1100,900",
         "--virtual-time-budget=9000",
         *extra,
     ]

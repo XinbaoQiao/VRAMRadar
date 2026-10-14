@@ -599,6 +599,8 @@
     ['检查 GitHub 正式版本', 'Check official GitHub releases'],
     ['连接异常时使用；复制时隐藏敏感信息', 'Use when connections fail; secrets are hidden when copying'],
     ['按需开启常用工具状态', 'Turn on optional tool status as needed'],
+    ['导入 SSH 配置并管理已添加的服务器', 'Import SSH config and manage added servers'],
+    ['设置分类', 'Settings categories'],
     ['偏好、缓存与诊断只保存在本机。', 'Preferences, caches, and diagnostics stay on this computer.'],
     ['收藏 GPU 空闲时提醒', 'Notify when a favorite GPU is free'],
     ['整卡空闲或达到设定显存时通知', 'Notify when a whole card is free or meets the memory threshold'],

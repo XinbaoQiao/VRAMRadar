@@ -32,10 +32,13 @@ window.addEventListener('load', () => setTimeout(() => {
   api.get_codex_usage = async () => ({enabled: on, state: on ? 'ready' : 'disabled', fetched_at: now, windows: []});
   currentProfile = {...currentProfile, codex_usage_enabled: on};
   openSettings({forceNormal: true});
-    ui.codexEnabled.checked = on;
+  if (typeof showSettingsPane === 'function') showSettingsPane('extensions', {scroll: false});
+  ui.codexEnabled.checked = on;
   clearTimeout(quotaMonitorTimer);
   renderQuotaMonitor({providers, primary: {fetched_at: now}});
-  document.getElementById('extensions-settings')?.scrollIntoView({block: 'start'});
+  const ext = document.getElementById('extensions-settings');
+  if (ext) ext.hidden = false;
+  ext?.scrollIntoView({block: 'start'});
   setTimeout(writeExtensionMetrics, 400);
 }, 1200));
 function textBox(node) {
