@@ -921,7 +921,19 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .settings-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }
 .settings-group[open] > summary { background: color-mix(in srgb, var(--cyan) 3%, var(--surface)); border-bottom: 1px solid var(--border); }
 .settings-group-body { padding: 18px; }
-.task-completion-setting, .update-settings-row { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.task-completion-setting, 
+.cache-cleanup-setting {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 96%, var(--shell));
+}
+.cache-cleanup-setting > label > span:first-child { font-weight: 600; }
+.cache-cleanup-actions { margin: 0; padding: 0; border: 0; background: transparent; }
+.update-settings-row { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .update-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .update-settings-row > div { display: grid; gap: 3px; }
 .update-settings-row small, .task-watch-item small { color: var(--muted); }

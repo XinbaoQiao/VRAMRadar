@@ -45,6 +45,10 @@ const ui = {
   favoriteAlertMinMemory: document.getElementById('favorite-alert-min-memory'),
   taskCompletionAlertEnabled: document.getElementById('task-completion-alert-enabled'),
   checkForUpdates: document.getElementById('check-for-updates'),
+  cacheCleanupEnabled: document.getElementById('cache-cleanup-enabled'),
+  cacheCleanupInterval: document.getElementById('cache-cleanup-interval'),
+  cacheCleanupStatus: document.getElementById('cache-cleanup-status'),
+  runCacheCleanup: document.getElementById('run-cache-cleanup'),
   updateCheckStatus: document.getElementById('update-check-status'),
   copyDiagnostics: document.getElementById('copy-diagnostics'),
   openLogsDirectory: document.getElementById('open-logs-directory'),
@@ -4805,6 +4809,19 @@ function openSettings(options = {}) {
     : '';
   ui.favoriteAlertMinMemory.disabled = !ui.favoriteAlertEnabled.checked;
   ui.taskCompletionAlertEnabled.checked = currentProfile?.task_completion_alert_enabled !== false;
+  if (ui.cacheCleanupEnabled) {
+    ui.cacheCleanupEnabled.checked = currentProfile?.cache_cleanup_enabled !== false;
+  }
+  if (ui.cacheCleanupInterval) {
+    const hours = Number(currentProfile?.cache_cleanup_interval_hours) || 24;
+    const allowed = ['6', '12', '24', '48', '168'];
+    const value = String(hours);
+    ui.cacheCleanupInterval.value = allowed.includes(value) ? value : '24';
+    ui.cacheCleanupInterval.disabled = ui.cacheCleanupEnabled ? !ui.cacheCleanupEnabled.checked : false;
+  }
+  if (ui.cacheCleanupStatus && !ui.cacheCleanupStatus.dataset.locked) {
+    ui.cacheCleanupStatus.textContent = '可随时手动清理一次';
+  }
   ui.serverConfigPath.value = currentProfile?.server_config_path || '';
   ui.autoSyncServers.checked = Boolean(currentProfile?.auto_sync_servers);
   pendingIgnoredSshAliases = new Set(currentProfile?.ignored_ssh_aliases || []);
@@ -4993,6 +5010,10 @@ function collectProfile() {
     favorite_alert_min_memory_gib: Number(ui.favoriteAlertMinMemory.value || 0),
     task_completion_alert_enabled: ui.taskCompletionAlertEnabled.checked,
     task_completion_watches: (currentProfile.task_completion_watches || []).map(item => ({...item})),
+    cache_cleanup_enabled: ui.cacheCleanupEnabled ? ui.cacheCleanupEnabled.checked : true,
+    cache_cleanup_interval_hours: ui.cacheCleanupInterval
+      ? Number(ui.cacheCleanupInterval.value || 24)
+      : 24,
     servers,
   };
 }
@@ -5148,6 +5169,34 @@ async function loadApplication() {
   if (!hasServers) openSettings({onboarding: true});
 }
 
+
+
+function syncCacheCleanupControls() {
+  if (!ui.cacheCleanupInterval || !ui.cacheCleanupEnabled) return;
+  ui.cacheCleanupInterval.disabled = !ui.cacheCleanupEnabled.checked;
+}
+
+async function runCacheCleanupNow() {
+  if (!api?.run_cache_cleanup) {
+    showToast('当前版本不支持缓存清理');
+    return;
+  }
+  if (ui.runCacheCleanup) ui.runCacheCleanup.disabled = true;
+  try {
+    const result = await api.run_cache_cleanup();
+    if (!result?.ok) throw new Error(result?.error || '清理未能完成');
+    const message = result.message || `已清理 ${result.removed_items || 0} 项，约释放 ${result.freed_mb || 0} MB`;
+    if (ui.cacheCleanupStatus) {
+      ui.cacheCleanupStatus.textContent = message;
+      ui.cacheCleanupStatus.dataset.locked = '1';
+    }
+    showToast(message);
+  } catch (error) {
+    showToast(error.message || String(error));
+  } finally {
+    if (ui.runCacheCleanup) ui.runCacheCleanup.disabled = false;
+  }
+}
 
 function whatsNewLanguage() {
   return (window.VRAMRadarI18n?.language || currentProfile?.ui_language || 'zh-CN') === 'en' ? 'en' : 'zh';
@@ -5776,6 +5825,8 @@ ui.saveView.addEventListener('click', saveCurrentView);
 ui.copyDiagnostics.addEventListener('click', () => copyRedactedDiagnostics());
 ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
 ui.checkForUpdates.addEventListener('click', () => void checkForUpdates({interactive: true}));
+ui.cacheCleanupEnabled?.addEventListener('change', syncCacheCleanupControls);
+ui.runCacheCleanup?.addEventListener('click', () => { void runCacheCleanupNow(); });
 ui.taskAlertIndicator.addEventListener('click', () => {
   void setNotificationCenterOpen(ui.notificationCenter.hidden);
 });

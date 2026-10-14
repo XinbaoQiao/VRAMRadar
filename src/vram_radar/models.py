@@ -748,6 +748,10 @@ class Profile:
     favorite_alert_min_memory_gib: float = 0.0
     task_completion_alert_enabled: bool = True
     task_completion_watches: tuple[dict[str, str], ...] = ()
+    # Periodic disk cache cleanup (see housekeeping.run_maintenance). Default
+    # matches the historical daily housekeeper; credentials/servers untouched.
+    cache_cleanup_enabled: bool = True
+    cache_cleanup_interval_hours: int = 24
     saved_views: tuple[dict[str, Any], ...] = ()
     schema_version: int = 1
 
@@ -942,6 +946,18 @@ class Profile:
         if len(saved_view_rows) > MAX_SAVED_VIEWS:
             raise ConfigError(f"profile saved_views cannot contain more than {MAX_SAVED_VIEWS} entries")
         saved_views = tuple(normalize_saved_view(item) for item in saved_view_rows)
+        cache_cleanup_enabled = raw.get("cache_cleanup_enabled", True)
+        if not isinstance(cache_cleanup_enabled, bool):
+            raise ConfigError("profile cache_cleanup_enabled must be true or false")
+        cache_cleanup_interval_hours = raw.get("cache_cleanup_interval_hours", 24)
+        if (
+            isinstance(cache_cleanup_interval_hours, bool)
+            or not isinstance(cache_cleanup_interval_hours, int)
+            or not 1 <= cache_cleanup_interval_hours <= 168
+        ):
+            raise ConfigError(
+                "profile cache_cleanup_interval_hours must be an integer between 1 and 168"
+            )
         view_ids = [view["id"] for view in saved_views]
         if len(view_ids) != len(set(view_ids)):
             raise ConfigError("saved view ids must be unique within a profile")
@@ -980,6 +996,8 @@ class Profile:
             favorite_alert_min_memory_gib=float(favorite_alert_min_memory),
             task_completion_alert_enabled=task_completion_alert_enabled,
             task_completion_watches=task_completion_watches,
+            cache_cleanup_enabled=cache_cleanup_enabled,
+            cache_cleanup_interval_hours=cache_cleanup_interval_hours,
             saved_views=saved_views,
         )
 
@@ -1013,6 +1031,8 @@ class Profile:
             "favorite_alert_min_memory_gib": self.favorite_alert_min_memory_gib,
             "task_completion_alert_enabled": self.task_completion_alert_enabled,
             "task_completion_watches": [dict(watch) for watch in self.task_completion_watches],
+            "cache_cleanup_enabled": self.cache_cleanup_enabled,
+            "cache_cleanup_interval_hours": self.cache_cleanup_interval_hours,
             "saved_views": [dict(view) for view in self.saved_views],
             "servers": [server.to_dict() for server in self.servers],
         }

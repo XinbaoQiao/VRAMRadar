@@ -173,7 +173,7 @@
           </div>
         </section>
         <details id="profile-settings" class="settings-section settings-group profile-settings" aria-labelledby="profile-settings-title">
-          <summary class="settings-section-heading"><div><h3 id="profile-settings-title">界面、提醒与更新</h3><p>语言、刷新、任务提醒和版本检查</p></div><span class="settings-summary-side"><span class="local-only-badge">仅本机</span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></span></summary>
+          <summary class="settings-section-heading"><div><h3 id="profile-settings-title">界面、提醒与更新</h3><p>语言、刷新、任务提醒、缓存清理和版本检查</p></div><span class="settings-summary-side"><span class="local-only-badge">仅本机</span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></span></summary>
           <div class="settings-group-body">
           <div class="field-grid profile-fields">
             <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
@@ -188,6 +188,17 @@
           <div class="task-completion-setting">
             <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong></span></label>
             <p class="task-watch-policy"><span>默认提醒我的 GPU 任务结束。</span><br><span>其他用户的任务需在任务表中手动关注。</span></p>
+          </div>
+          <div class="cache-cleanup-setting">
+            <label class="check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span><strong>定期清理缓存</strong><small>仅清理过期临时文件与缓存，不删除服务器、凭据或个人配置</small></span></label>
+            <label><span>清理间隔</span><select id="cache-cleanup-interval">
+              <option value="6">每 6 小时</option>
+              <option value="12">每 12 小时</option>
+              <option value="24" selected>每天</option>
+              <option value="48">每 2 天</option>
+              <option value="168">每周</option>
+            </select></label>
+            <div class="update-settings-row cache-cleanup-actions"><div><strong>立即清理</strong><small id="cache-cleanup-status">可随时手动清理一次</small></div><button id="run-cache-cleanup" class="button" type="button">立即清理</button></div>
           </div>
           <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
           <details class="local-tools">

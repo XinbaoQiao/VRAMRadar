@@ -194,15 +194,56 @@ def _prune_usage_trend(cache: Path) -> int:
         return 0
 
 
+def _folder_bytes(paths: Any) -> dict[str, int]:
+    cache, config, logs = Path(paths.cache), Path(paths.config), Path(paths.logs)
+    return {
+        "logs": directory_size(logs),
+        "cache": directory_size(cache),
+        "config": directory_size(config),
+    }
+
+
+def summarize_cleanup(summary: dict[str, Any]) -> dict[str, Any]:
+    """User-facing totals from a ``run_maintenance`` result (no paths/secrets)."""
+    removed = 0
+    for key, value in summary.items():
+        if key in {"bytes", "bytes_before", "bytes_freed", "removed_items", "ok"}:
+            continue
+        if isinstance(value, int) and value > 0:
+            removed += value
+    before = summary.get("bytes_before") if isinstance(summary.get("bytes_before"), dict) else {}
+    after = summary.get("bytes") if isinstance(summary.get("bytes"), dict) else {}
+    before_total = sum(int(v) for v in before.values()) if before else 0
+    after_total = sum(int(v) for v in after.values()) if after else 0
+    freed = max(0, before_total - after_total) if before else 0
+    return {
+        "ok": True,
+        "removed_items": removed,
+        "bytes_freed": freed,
+        "details": {
+            key: value
+            for key, value in summary.items()
+            if key not in {"bytes", "bytes_before", "bytes_freed", "removed_items", "ok"}
+        },
+    }
+
+
 def run_maintenance(paths: Any, profile_id: str, known_server_ids: Iterable[str] = (), *,
                     now: float | None = None, current_pid: int | None = None,
                     alive: Callable[[int], bool] = pid_alive) -> dict[str, Any]:
-    """One light pass; every step is independent and failures are only counted."""
+    """One light pass; every step is independent and failures are only counted.
+
+    Safe targets only: old logs, stale update stages, orphan ``.tmp`` files,
+    invalid profile *backups*, expired snapshots of removed servers, dead
+    WebView session folders, and expired usage-trend points. Live profiles,
+    credentials, and server lists are never deleted.
+    """
     from .storage import prune_orphan_temporaries
     from .updater import prune_stale_stages
 
     now = time.time() if now is None else now
     cache, config, logs = Path(paths.cache), Path(paths.config), Path(paths.logs)
+    bytes_before = _folder_bytes(paths)
     steps: dict[str, Callable[[], int]] = {
         "logs": lambda: prune_log_files(logs, now=now),
         "update_stages": lambda: prune_stale_stages(cache / "updates", now=now),
@@ -212,14 +253,17 @@ def run_maintenance(paths: Any, profile_id: str, known_server_ids: Iterable[str]
         "webview": lambda: prune_webview_sessions(cache, current_pid=current_pid, alive=alive),
         "usage_trend": lambda: _prune_usage_trend(cache),
     }
-    summary: dict[str, Any] = {}
+    summary: dict[str, Any] = {"bytes_before": bytes_before}
     for name, step in steps.items():
         try:
             summary[name] = int(step())
         except Exception as exc:  # housekeeping must never stop the app
             summary[name] = f"failed:{type(exc).__name__}"
-    summary["bytes"] = {name: directory_size(folder) for name, folder in
-                        (("logs", logs), ("cache", cache), ("config", config))}
+    summary["bytes"] = _folder_bytes(paths)
+    totals = summarize_cleanup(summary)
+    summary["removed_items"] = totals["removed_items"]
+    summary["bytes_freed"] = totals["bytes_freed"]
+    summary["ok"] = True
     return summary
 
 
@@ -482,7 +526,8 @@ class Housekeeper:
                  first_maintenance: float = 600.0, maintenance_interval: float = DAY,
                  check_interval: float = 600.0, clock: Callable[[], float] = time.monotonic,
                  trim: Callable[[], dict[str, Any]] | None = None, first_trim: float = 180.0,
-                 trim_interval: float = 3600.0, diagnostics: Callable[[], Any] | None = None) -> None:
+                 trim_interval: float = 3600.0, diagnostics: Callable[[], Any] | None = None,
+                 maintenance_enabled: bool = True) -> None:
         self.maintenance = maintenance
         self.trim = trim
         self.trim_interval = trim_interval
@@ -491,6 +536,7 @@ class Housekeeper:
         self.sampler = sampler
         self.restart = restart
         self.is_idle = is_idle
+        self.maintenance_enabled = maintenance_enabled
         self.maintenance_interval = maintenance_interval
         self.check_interval = check_interval
         self.clock = clock
@@ -503,10 +549,19 @@ class Housekeeper:
         self.stop_event = threading.Event()
         self.thread: threading.Thread | None = None
 
+    def configure_maintenance(self, *, enabled: bool, interval_seconds: float) -> None:
+        """Apply user schedule without restarting the background thread."""
+        self.maintenance_enabled = bool(enabled)
+        self.maintenance_interval = max(3600.0, float(interval_seconds))
+        # If the next pass is farther than the new interval, pull it forward.
+        now = self.clock()
+        if self.maintenance_enabled and self.next_maintenance - now > self.maintenance_interval:
+            self.next_maintenance = now + min(600.0, self.maintenance_interval)
+
     def step(self) -> None:
         """One iteration (also driven directly by tests with a fake clock)."""
         now = self.clock()
-        if now >= self.next_maintenance:
+        if self.maintenance_enabled and now >= self.next_maintenance:
             self.next_maintenance = now + self.maintenance_interval
             try:
                 summary = self.maintenance()

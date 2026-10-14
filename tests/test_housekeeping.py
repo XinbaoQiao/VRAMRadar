@@ -87,6 +87,46 @@ class PruneTests(unittest.TestCase):
         self.assertIn("cache", summary["bytes"])
 
 
+
+
+    def test_maintenance_reports_freed_bytes(self):
+        paths = storage_paths(self.root)
+        paths.cache.mkdir(parents=True, exist_ok=True)
+        paths.logs.mkdir(parents=True, exist_ok=True)
+        paths.config.mkdir(parents=True, exist_ok=True)
+        stale = paths.cache / "updates" / ("a" * 32)
+        stale.mkdir(parents=True)
+        touch(stale / "payload.bin", self.now - 3 * DAY, size=4096)
+        summary = hk.run_maintenance(paths, "default", now=self.now, alive=lambda pid: True)
+        self.assertTrue(summary["ok"])
+        self.assertIn("bytes_freed", summary)
+        self.assertIn("removed_items", summary)
+        self.assertGreaterEqual(summary["removed_items"], 1)
+        self.assertGreaterEqual(summary["bytes_freed"], 0)
+        totals = hk.summarize_cleanup(summary)
+        self.assertEqual(totals["removed_items"], summary["removed_items"])
+
+
+class ScheduleTests(unittest.TestCase):
+    def test_disabled_maintenance_skips_disk_pass(self):
+        calls = []
+        clock = [0.0]
+        keeper = hk.Housekeeper(
+            lambda: calls.append("run") or {"ok": True},
+            first_maintenance=0.0,
+            maintenance_interval=100.0,
+            check_interval=1000.0,
+            clock=lambda: clock[0],
+            maintenance_enabled=False,
+        )
+        keeper.step()
+        self.assertEqual(calls, [])
+        keeper.configure_maintenance(enabled=True, interval_seconds=3600.0)
+        clock[0] = keeper.next_maintenance
+        keeper.step()
+        self.assertEqual(calls, ["run"])
+
+
 class WatchdogTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -89,6 +89,7 @@ from .housekeeping import (
     prune_webview_sessions,
     run_maintenance,
     start_tracing_if_requested,
+    summarize_cleanup,
     trim_memory,
     webview_storage_path,
     write_diagnostics,
@@ -764,9 +765,18 @@ def start_housekeeping(api: Any, paths: StoragePaths, profile_id: str, window: A
     # Diagnostics stay off unless runtime/diagnostics.on exists ("trace" in
     # it also turns on tracemalloc); see housekeeping.write_diagnostics.
     start_tracing_if_requested(paths.runtime)
-    keeper = Housekeeper(maintenance, watchdog=HealthWatchdog(paths.runtime / f"{profile_id}.health.json"),
-                         restart=restart, is_idle=idle, trim=trim_memory,
-                         diagnostics=lambda: write_diagnostics(paths.runtime, paths.logs))
+    profile = api.profile
+    keeper = Housekeeper(
+        maintenance,
+        watchdog=HealthWatchdog(paths.runtime / f"{profile_id}.health.json"),
+        restart=restart,
+        is_idle=idle,
+        trim=trim_memory,
+        diagnostics=lambda: write_diagnostics(paths.runtime, paths.logs),
+        maintenance_enabled=bool(getattr(profile, "cache_cleanup_enabled", True)),
+        maintenance_interval=max(3600.0, float(getattr(profile, "cache_cleanup_interval_hours", 24)) * 3600.0),
+    )
+    api._housekeeper = keeper
     keeper.start()
     return keeper
 
@@ -3686,6 +3696,8 @@ class AppApi:
                 "favorite_alert_min_memory_gib",
                 "task_completion_alert_enabled",
                 "task_completion_watches",
+                "cache_cleanup_enabled",
+                "cache_cleanup_interval_hours",
                 "saved_views",
                 "pending_alias_choices",
                 "resolved_alias_choice_keys",
@@ -3940,6 +3952,7 @@ class AppApi:
                 raise RuntimeError("profile_commit_failed") from exc
             self.profile = profile
             self._configure_usage(profile)
+            self._apply_cache_cleanup_schedule()
             self._profile_revision += 1
             self._reset_favorite_alerts_if_changed(old_profile, profile)
             self._reset_task_alerts_if_servers_changed(old_profile, profile)
@@ -4447,6 +4460,53 @@ class AppApi:
             message = "" if isinstance(exc, http.client.HTTPException) else str(exc)
             return {"ok": False, "error": message or "更新失败，当前版本未被修改"}
 
+
+
+    def _apply_cache_cleanup_schedule(self) -> None:
+        """Push profile cleanup schedule into the running housekeeper."""
+        keeper = getattr(self, "_housekeeper", None)
+        if keeper is None:
+            return
+        profile = self.profile
+        enabled = bool(getattr(profile, "cache_cleanup_enabled", True))
+        hours = int(getattr(profile, "cache_cleanup_interval_hours", 24) or 24)
+        hours = min(168, max(1, hours))
+        keeper.configure_maintenance(enabled=enabled, interval_seconds=float(hours) * 3600.0)
+
+    def run_cache_cleanup(self) -> dict[str, Any]:
+        """One-shot safe disk cleanup plus a light memory trim."""
+        try:
+            summary = run_maintenance(
+                self.paths,
+                self.profile.id,
+                [server.id for server in self.profile.servers],
+            )
+            totals = summarize_cleanup(summary)
+            trim = trim_memory()
+            logging.getLogger("vram_radar").info(
+                "manual cleanup removed=%s freed=%s trim=%s",
+                totals.get("removed_items"),
+                totals.get("bytes_freed"),
+                {key: trim.get(key) for key in ("gc", "private_mb", "working_set_mb")},
+            )
+            freed = int(totals.get("bytes_freed") or 0)
+            items = int(totals.get("removed_items") or 0)
+            freed_mb = round(freed / (1024 * 1024), 1) if freed else 0.0
+            message = f"已清理 {items} 项，约释放 {freed_mb} MB"
+            return {
+                "ok": True,
+                "removed_items": items,
+                "bytes_freed": freed,
+                "freed_mb": freed_mb,
+                "details": totals.get("details") or {},
+                "memory_trim": trim,
+                "message": message,
+            }
+        except Exception as exc:
+            logging.getLogger("vram_radar").info(
+                "manual cleanup failed (%s)", type(exc).__name__
+            )
+            return {"ok": False, "error": "清理未能完成", "code": "cleanup_failed"}
 
     def dismiss_whats_new(self, version: str = "") -> dict[str, Any]:
         """Remember that the user closed the what's-new card for ``version``."""
