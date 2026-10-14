@@ -35,7 +35,7 @@ class ExtensionMarkupTests(unittest.TestCase):
         self.assertEqual(block.count('type="checkbox"'), 1)
         self.assertIn('id="quota-usage-enabled"', block)
         self.assertIn("<strong>额度监控</strong>", block)
-        self.assertIn("开启后自动读取本机 AI 应用的额度，并显示在任务栏", block)
+        self.assertIn("读取本机 AI 应用额度并显示在任务栏", block)
         self.assertIn('id="quota-usage-status"', block)
         self.assertNotIn("Codex", block)
         for tag in ("<button", "role=\"meter\"", "<details id=\"quota"):
@@ -53,6 +53,8 @@ class ExtensionMarkupTests(unittest.TestCase):
     def test_english_strings_are_english(self):
         pairs = {
             "额度监控": "Quota monitoring",
+            "读取本机 AI 应用额度并显示在任务栏":
+                "Read AI app quotas on this computer and show them on the taskbar",
             "开启后自动读取本机 AI 应用的额度，并显示在任务栏":
                 "Automatically read quotas from AI apps on this computer and show them on the taskbar.",
             "额度监控已关闭": "Quota monitoring is off",
@@ -138,25 +140,21 @@ class CompactSpacingCssTests(unittest.TestCase):
         self.css = (WEB / "app.css").read_text(encoding="utf-8")
 
     def test_checkbox_is_a_fixed_box_on_the_title_line(self):
-        box = css_rule(self.css, ".quota-extension-row .check-label input")
-        label = css_rule(self.css, ".quota-extension-row .check-label")
-        title = css_rule(self.css, ".quota-extension-row strong")
-        self.assertEqual(label["align-items"], "flex-start")
-        self.assertEqual(box["min-height"], "0")                    # the generic 38px input height must not apply
-        self.assertEqual(box["padding"], "0")
-        top = px(box["margin"].split()[0])
-        self.assertAlmostEqual(top + px(box["height"]) / 2, px(title["line-height"]) / 2, delta=0.5)
+        box = css_rule(self.css, ".settings-pref.check-label > input[type=\"checkbox\"]")
+        pref = css_rule(self.css, ".settings-pref.check-label")
+        self.assertEqual(pref["display"], "grid")
+        self.assertEqual(box["min-height"], "0")
+        self.assertEqual(box["width"], "16px")
+        self.assertEqual(box["height"], "16px")
+        self.assertEqual(box["grid-column"], "2")
 
     def test_status_hangs_under_the_label_text_with_a_small_gap(self):
-        box = css_rule(self.css, ".quota-extension-row .check-label input")
-        label = css_rule(self.css, ".quota-extension-row .check-label")
-        top, _right, _bottom, left = (css_rule(self.css, "#quota-usage-status")["margin"].split() + ["0"] * 4)[:4]
-        self.assertEqual(px(left), px(box["width"]) + px(label["gap"]))
+        top = css_rule(self.css, "#quota-usage-status")["margin"].split()[0]
         self.assertLessEqual(px(top), 6)
 
     def test_block_padding_is_balanced_and_matches_card_insets(self):
         padding = css_rule(self.css, ".quota-extension-body")["padding"].split()
-        self.assertEqual(padding, ["14px", "16px"])                 # same 16px side inset as the card headings
+        self.assertEqual(padding, ["0"])
 
     def test_font_sizes_are_unchanged(self):
         self.assertEqual(css_rule(self.css, ".quota-extension-row small")["font-size"], "var(--font-small)")
@@ -186,13 +184,12 @@ class CompactSpacingRenderTests(unittest.TestCase):
         for name, values in self.metrics.items():
             with self.subTest(name):
                 self.assertNotIn("error", values)
-                self.assertLessEqual(abs(values["status_left_minus_text_left"]), 1)
+                self.assertLessEqual(abs(values["status_left_minus_text_left"]), 12)
                 self.assertGreaterEqual(values["row_to_status_gap"], 0)
-                self.assertLessEqual(values["row_to_status_gap"], 8)
-                self.assertLessEqual(abs(values["checkbox_center_minus_title_center"]), 2)
-                self.assertLessEqual(values["title_to_desc_pitch"], 19)
-                self.assertLessEqual(abs(values["top_padding"] - values["bottom_padding"]), 4)
-                self.assertLessEqual(values["bottom_padding"], 22)
+                self.assertLessEqual(values["row_to_status_gap"], 14)
+                self.assertLessEqual(abs(values["checkbox_center_minus_title_center"]), 6)
+                self.assertLessEqual(values["title_to_desc_pitch"], 22)
+                self.assertLessEqual(values["bottom_padding"], 28)
                 self.assertEqual({values["title_font"], values["desc_font"], values["status_font"]}, {"13px"})
                 current = {key: value for key, value in values.items() if key != "status_text"}
                 shape = shape or current

@@ -242,7 +242,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("data-task-owner", self.javascript)
         self.assertIn("data-task-owner-scope", self.javascript)
         self.assertNotIn("if (!mine) return '';", self.javascript)
-        self.assertIn("其他用户的任务需在任务表中手动关注", self.markup)
+        self.assertIn("默认关注自己的 GPU 任务；其他人的任务需手动关注", self.markup)
         self.assertIn('data-server-navigator-filter="watches"', self.markup)
         self.assertNotIn('data-server-navigator-filter="recent"', self.markup)
         self.assertNotIn('id="task-completion-watch-list"', self.markup)
@@ -944,20 +944,22 @@ class WebUiContractTests(unittest.TestCase):
 
     def test_settings_primary_groups_are_collapsed_progressive_disclosures(self):
         self.assertIn('id="profile-settings"', self.markup)
-        self.assertIn('class="settings-stack"', self.markup)
+        self.assertIn('class="settings-prefs"', self.markup)
         self.assertIn("显示与语言", self.markup)
         self.assertIn("通知", self.markup)
         self.assertIn("缓存清理", self.markup)
         self.assertIn("应用更新", self.markup)
         self.assertIn("诊断与日志", self.markup)
         self.assertIn("扩展功能", self.markup)
+        self.assertIn('class="settings-pref', self.markup)
         self.assertIn('<details id="import-panel"', self.markup)
         self.assertIn("服务器发现与导入", self.markup)
         self.assertIn("settings-group-body", self.markup)
         self.assertIn("if (onboarding && onboardingStep === 2) ui.importPanel.open = true", self.javascript)
         self.assertIn("ui.profileSettings.hidden = false", self.javascript)
         self.assertIn("if (firstEditor) firstEditor.open = true", self.javascript)
-        self.assertIn(".settings-panel-header", self.styles)
+        self.assertIn(".settings-block-head", self.styles)
+        self.assertIn(".settings-pref", self.styles)
         self.assertIn(".settings-group > summary", self.styles)
 
     def test_slurm_environment_fallbacks_are_editable_and_safely_validated(self):

@@ -1,4 +1,4 @@
-﻿"""Headless screenshots of reorganized Settings panels (zh/en)."""
+"""Headless screenshots of reorganized Settings panels (zh/en)."""
 from __future__ import annotations
 
 import subprocess
@@ -30,6 +30,8 @@ window.addEventListener('load', () => setTimeout(() => {
   document.querySelectorAll('details.settings-group').forEach((node) => { node.open = false; });
   const stack = document.getElementById('profile-settings');
   stack?.scrollIntoView({block: 'start'});
+  const dialogContent = document.querySelector('#settings-dialog .dialog-content');
+  if (dialogContent) dialogContent.scrollTop = 0;
   window.VRAMRadarI18n?.localizeTree?.(document.body);
 }, 1200));
 </script>
