@@ -55,7 +55,8 @@ class HostTransportTests(unittest.TestCase):
                 self.assertIsNone(current_transport(replace(self.server, id='other')))
             self.assertIsNone(current_transport(self.server))
             args, kwargs = child.call_args
-            self.assertEqual(args[0][:3], [sys.executable, '-I', '-B'])
+            self.assertEqual(Path(args[0][0]).resolve(), Path(sys.executable).resolve())
+            self.assertEqual(args[0][1:3], ['-I', '-B'])
             self.assertEqual(Path(args[0][3]).resolve(), self.helper.resolve())
             self.assertEqual(kwargs['input_data'], b'printf live')
             self.assertEqual(Path(kwargs['cwd']).resolve(), Path(self.root).resolve())
@@ -140,8 +141,11 @@ class HostTransportTests(unittest.TestCase):
 
     def test_reparse_paths_are_rejected_and_normal_paths_are_canonical(self):
         import stat
-        with patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=0x400)):
-            with self.assertRaises(ValueError): regular_path(self.helper)
+        if sys.platform.startswith('win'):
+            with patch.object(Path, 'lstat', return_value=SimpleNamespace(st_mode=stat.S_IFREG, st_file_attributes=0x400)):
+                with self.assertRaises(ValueError): regular_path(self.helper)
+        else:
+            self.assertEqual(regular_path(self.helper), self.helper.resolve(strict=True))
         self.register()
         self.assertEqual(self.resolver(self.server).helper, str(self.helper.resolve(strict=True)))
 
