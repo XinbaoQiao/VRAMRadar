@@ -90,18 +90,75 @@ class StripFitTests(unittest.TestCase):
         self.assertEqual(FIT_PLAN[0], (1.0, 0))
         self.assertGreaterEqual(min(factor for factor, _ in FIT_PLAN), 0.9)
 
-    def test_fit_plan_keeps_reset_while_shrinking(self):
-        """Tight left gaps must shrink type before hiding Nd Nh countdowns."""
-        self.assertEqual(
-            FIT_PLAN,
-            ((1.0, 0), (0.95, 0), (0.9, 0), (0.9, 1), (0.9, 2)),
-        )
-        # Every shrink step above the drop keeps level 0 (reset label shown).
-        before_drop = [(f, lv) for f, lv in FIT_PLAN if lv < 1]
-        self.assertEqual(before_drop, [(1.0, 0), (0.95, 0), (0.9, 0)])
-        first_drop = next(i for i, (_, lv) in enumerate(FIT_PLAN) if lv >= 1)
-        self.assertEqual(FIT_PLAN[first_drop - 1], (0.9, 0))
-        self.assertGreaterEqual(FIT_PLAN[first_drop][1], 1)
+    def test_fit_plan_never_drops_reset_countdown(self):
+        """FIT_PLAN only shrinks type; known Nd Nh resets stay on the strip."""
+        self.assertEqual(FIT_PLAN, ((1.0, 0), (0.95, 0), (0.9, 0)))
+        self.assertTrue(all(level == 0 for _, level in FIT_PLAN))
+        self.assertGreaterEqual(min(factor for factor, _ in FIT_PLAN), 0.9)
+
+    def test_typical_left_gap_keeps_icon_reset_labels(self):
+        """Centered-taskbar gap (weather capped) + 4 icon cells keeps resets."""
+        import clr
+        clr.AddReference("System.Drawing")
+        clr.AddReference("System.Windows.Forms")
+        from System.Drawing import Font, FontStyle, GraphicsUnit, Size
+        from System.Windows.Forms import Application, Form, FormBorderStyle, Label
+        from vram_radar.usage_surface import place_columns, strip_icon_px, strip_reset_text
+
+        Application.EnableVisualStyles()
+        cells = [
+            ("Codex", "52%", "5d 23h"),
+            ("Grok", "68%", "1d 6h"),
+            ("DeepSeek", "无余额", ""),
+            ("Kimi", "未运行", ""),
+        ]
+        scale = 1.5 * 0.85  # 150 % display with STRIP_DENSITY
+        none_border = getattr(FormBorderStyle, "None")
+        for available in (236, 320, None):
+            form = Form()
+            form.FormBorderStyle = none_border
+            used = []
+            for _name, _value, _reset in cells:
+                top, bottom, reset_label = Label(), Label(), Label()
+                for lab in (top, bottom, reset_label):
+                    form.Controls.Add(lab)
+                used.append((top, bottom, reset_label))
+            chosen_texts = None
+            chosen_factor = None
+            width = 0
+            for factor, level in FIT_PLAN:
+                self.assertEqual(level, 0)
+                for (_, value_label, reset_label), (_, value, reset_txt) in zip(used, cells):
+                    value_label.Text = value
+                    reset_label.Text = strip_reset_text(reset_txt)
+                    reset_label.Visible = bool(reset_label.Text)
+                    font = Font(
+                        "Segoe UI",
+                        max(1, round(13 * scale * factor)),
+                        FontStyle.Bold,
+                        GraphicsUnit.Pixel,
+                    )
+                    value_label.Font = reset_label.Font = font
+                for name_label, *_rest in used:
+                    name_label.Text = ""
+                    name_label.Size = Size(strip_icon_px(scale, factor), max(1, round(20 * scale)))
+                width = place_columns(used, scale, factor)
+                chosen_factor = factor
+                chosen_texts = [(c[1].Text, c[2].Text) for c in used]
+                if available is None or width <= available:
+                    break
+            self.assertIsNotNone(chosen_texts)
+            for value, reset in chosen_texts[:2]:
+                self.assertTrue(value.endswith("%"), msg=value)
+                self.assertTrue(
+                    reset,
+                    msg=(
+                        f"reset empty at factor={chosen_factor} available={available} "
+                        f"width={width} texts={chosen_texts}"
+                    ),
+                )
+            form.Dispose()
+
 
     def test_fit_choice(self):
         self.assertEqual(fit_choice([300, 280, 260], 325), 0)

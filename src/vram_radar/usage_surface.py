@@ -1198,9 +1198,13 @@ def windows_taskbar_palette(bar=None, exclude=None, near=None):
 # left gap.  Type never goes below 90 % of the normal strip font (12/13 px at
 # 100 %, i.e. the original two-app layout); after that content is compacted,
 # and as a last resort the strip is clipped to the gap.
-# Prefer smaller type while keeping the separate reset countdown; only drop
-# the countdown (level >= 1) after the 90 % floor still does not fit.
-FIT_PLAN = ((1.0, 0), (0.95, 0), (0.9, 0), (0.9, 1), (0.9, 2))
+# Fit the left-of-Start gap by shrinking type only. Known reset countdowns
+# ("1d 8h") stay visible: level never clears the separate reset label.
+# compact_value levels >= 1 remain available for value-only shortening, but
+# FIT_PLAN stays on level 0 so percentage quotas keep their Nd Nh text under
+# normal centered-taskbar + weather gaps (grow right from the left anchor
+# rather than clipping the countdown away).
+FIT_PLAN = ((1.0, 0), (0.95, 0), (0.9, 0))
 FIT_FACTORS = tuple(dict.fromkeys(factor for factor, _ in FIT_PLAN))
 
 
@@ -3026,7 +3030,7 @@ class CodexUsageSurface:
                 name_label.Text = "" if show_icons and multi and name_label.Image is not None else name
                 level = getattr(self, "_fit_level", 0)
                 value_label.Text = compact_value(value, level)
-                reset_label.Text = strip_reset_text(reset_txt) if level < 1 else ""
+                reset_label.Text = strip_reset_text(reset_txt)  # keep Nd Nh even when the gap is tight
                 # Quota and reset share one colour (same rule for every provider).
                 name_label.ForeColor, value_label.ForeColor, reset_label.ForeColor = muted, color, color
                 name_label.Visible = value_label.Visible = True
@@ -3077,7 +3081,7 @@ class CodexUsageSurface:
                         self._fit_level = level
                         for (_, value_label, reset_label), (_, value, reset_txt, _) in zip(used, cells):
                             value_label.Text = compact_value(value, level)
-                            reset_label.Text = strip_reset_text(reset_txt) if level < 1 else ""
+                            reset_label.Text = strip_reset_text(reset_txt)  # keep Nd Nh even when the gap is tight
                             reset_label.Visible = bool(reset_label.Text)
                         fonts = self._fit_fonts.get(factor)
                         if fonts is None:
@@ -3106,7 +3110,11 @@ class CodexUsageSurface:
                         if available is None or width <= available:
                             break
                     if available is not None and width > available:
-                        width = max(1, int(available))  # clip, never move sides or cover Start
+                        # Left anchor stays put; growing right keeps reset labels
+                        # readable. Only clip when no countdown is on the strip.
+                        has_reset = any(bool(cell[2].Text) for cell in used if len(cell) > 2)
+                        if not has_reset:
+                            width = max(1, int(available))  # clip, never cover Start
                     form.ClientSize = Size(width, scale(40))
             if reading != self._reading:
                 self._reading = reading

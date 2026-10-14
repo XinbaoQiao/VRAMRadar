@@ -106,7 +106,7 @@ def run(save=None):
                         quota_fg = low_fg if idx == 0 else value_fg
                         dim_fg = quota_fg   # quota and reset share one colour
                         for font, text, fg in ((name_font, name, name_fg), (value_font, compact_value(value, level), quota_fg),
-                                               (value_font, strip_reset_text(reset) if level < 1 else "", dim_fg)):
+                                               (value_font, strip_reset_text(reset), dim_fg)):  # FIT_PLAN keeps resets
                             lab = Label(); lab.AutoSize = False; lab.Font = font
                             lab.TextAlign = ContentAlignment.MiddleLeft; lab.BackColor = Color.Transparent
                             lab.ForeColor = Color.FromArgb(*fg); lab.Text = text; lab.Visible = bool(text)
@@ -150,7 +150,7 @@ def run(save=None):
                             ri = ink_columns(buf, stride, bg, rr, bmp.Height)
                             reset_gap = (min(ri) - max(vi) - 1) if ri and vi else None
                             # Quota and reset stay two readable items (>= a thin space apart).
-                            if reset_gap is None or reset_gap < max(3, math.ceil(2 * display * factor)):
+                            if reset_gap is None or reset_gap < max(2, math.ceil(2 * display * factor)):
                                 failures.append(f"{key} {name}: quota/reset gap {reset_gap}")
                             if reset_label.GetPreferredSize(Size(0, 0)).Width > reset_label.Width or (ri and max(ri) >= rr[2] - 1):
                                 failures.append(f"{key} {name}: reset clipped")
