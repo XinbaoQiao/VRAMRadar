@@ -134,7 +134,7 @@
     const importDetails = importFeedbackFixture.querySelector('details');
     assertions.import_primary_feedback_is_short_and_actionable =
       importFeedbackFixture.querySelector('.import-result').textContent === '找到 11 台服务器。还未保存，也未测试连接。'
-      && importFeedbackFixture.querySelector('.import-next-step').textContent.includes('保存并开始验证')
+      && importFeedbackFixture.querySelector('.import-next-step').textContent.includes('保存并验证')
       && !importFeedbackFixture.querySelector('.import-result').textContent.includes('OpenSSH');
     assertions.import_diagnostics_are_preserved_and_default_collapsed = Boolean(importDetails && !importDetails.open
       && [...importDetails.querySelectorAll('li')].some(item => item.textContent === importWarning)
@@ -144,7 +144,7 @@
     assertions.import_diagnostics_can_be_expanded = importDetails.open;
     const emptyImportFeedback = renderImportFeedback(0);
     assertions.empty_import_gives_a_manual_next_step = emptyImportFeedback.includes('没有找到可导入的服务器。')
-      && emptyImportFeedback.includes('手动添加服务器') && !emptyImportFeedback.includes('保存并开始验证');
+      && emptyImportFeedback.includes('手动添加服务器') && !emptyImportFeedback.includes('保存并验证');
     window.VRAMRadarI18n.setLanguage('en');
     const translationProbe = document.createElement('div');
     translationProbe.textContent = '已取消收藏 GPU';
@@ -216,7 +216,7 @@
     ui.extensionsSettings.open = true;
     const extensionBody = ui.extensionsSettings.querySelector('.quota-extension-body');
     assertions.quota_extension_is_single_switch =
-      ui.extensionsSettings.parentElement === ui.profileSettings.parentElement
+      ui.profileSettings.contains(ui.extensionsSettings)
       && extensionBody.querySelectorAll('input[type="checkbox"]').length === 1
       && !extensionBody.querySelector('details, button, [role="meter"], .quota-quota-card')
       && !document.getElementById('quota-usage-options') && !document.getElementById('refresh-quota-usage')

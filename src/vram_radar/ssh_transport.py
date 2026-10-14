@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import shlex
 import stat
+import sys
 
 from .models import ServerProfile
 
@@ -34,13 +35,20 @@ def _long_path(path: Path) -> Path:
 def regular_path(path):
     if not path.is_absolute():
         raise ValueError("relative path")
-    for part in (path, *path.parents):
-        info = part.lstat()
-        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-            raise ValueError("linked path")
-    if not path.is_file():
+    if sys.platform.startswith("win"):
+        # Windows: reject any reparse/symlink in the path chain (junctions, etc.).
+        for part in (path, *path.parents):
+            info = part.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("linked path")
+        if not path.is_file():
+            raise ValueError("not a regular file")
+        return _long_path(path.resolve(strict=True))
+    # POSIX: /tmp and /var commonly symlink; require a resolved regular file.
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file() or resolved.is_symlink():
         raise ValueError("not a regular file")
-    return _long_path(path.resolve(strict=True))
+    return resolved
 
 
 @dataclass(frozen=True)

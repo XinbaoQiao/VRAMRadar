@@ -109,7 +109,10 @@ class StripFitTests(unittest.TestCase):
 
     def test_typical_left_gap_keeps_icon_reset_labels(self):
         """Centered-taskbar gap (weather capped) + 4 icon cells keeps resets."""
-        import clr
+        try:
+            import clr
+        except ImportError:
+            self.skipTest("pythonnet (clr) unavailable")
         clr.AddReference("System.Drawing")
         clr.AddReference("System.Windows.Forms")
         from System.Drawing import Font, FontStyle, GraphicsUnit, Size
