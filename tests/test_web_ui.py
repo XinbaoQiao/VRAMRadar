@@ -962,6 +962,14 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("settings-layout--flat", self.javascript)
         self.assertIn("showSettingsPane('servers'", self.javascript)
         self.assertIn("if (firstEditor) firstEditor.open = true", self.javascript)
+        # After onboarding step 3, reopening Settings must leave the flat review
+        # stack and restore the left category nav.
+        self.assertIn("classList.remove('settings-layout--flat')", self.javascript)
+        self.assertIn("ui.settingsNav.hidden = false", self.javascript)
+        self.assertLess(
+            self.javascript.index("classList.remove('settings-layout--flat')"),
+            self.javascript.index("function openSettings"),
+        )
         self.assertIn(".settings-pane-head", self.styles)
         self.assertIn(".settings-nav-item", self.styles)
         self.assertIn(".settings-pref", self.styles)

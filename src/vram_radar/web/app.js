@@ -4821,6 +4821,10 @@ function setSettingsMode(mode) {
     ui.onboardingProgress.hidden = true;
     ui.onboardingWelcome.hidden = true;
     ui.profileSettings.hidden = false;
+    // Leaving onboarding must drop the step-3 flat stack; otherwise the next
+    // normal Settings open keeps every pane visible and hides the left nav.
+    ui.profileSettings.classList.remove('settings-layout--flat');
+    if (ui.settingsNav) ui.settingsNav.hidden = false;
     ui.extensionsSettings.hidden = false;
     ui.importPanel.hidden = false;
     ui.serverSettingsHeading.hidden = false;
@@ -5964,6 +5968,8 @@ ui.dialog.addEventListener('close', () => {
   stopQuotaMonitor();
   window.VRAMRadarI18n?.setLanguage(currentProfile?.ui_language || 'zh-CN');
   invalidateServerDiscovery();
+  ui.profileSettings?.classList.remove('settings-layout--flat');
+  if (ui.settingsNav) ui.settingsNav.hidden = false;
   ui.editorList.replaceChildren();
   settingsServerDrafts = [];
   settingsServerQuery = '';
