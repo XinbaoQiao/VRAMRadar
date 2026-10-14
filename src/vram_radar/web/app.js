@@ -5178,9 +5178,9 @@ function openWhatsNewDialog(notes) {
     ui.whatsNewTitle.textContent = localizedText('新功能');
   }
   if (ui.whatsNewDescription) {
-    ui.whatsNewDescription.textContent = localizedText(
-      `VRAM Radar ${normalized.version}：此版本的主要变化。`
-    );
+    ui.whatsNewDescription.textContent = normalized.version
+      ? `VRAM Radar ${normalized.version}`
+      : 'VRAM Radar';
   }
   if (ui.whatsNewList) {
     ui.whatsNewList.replaceChildren(

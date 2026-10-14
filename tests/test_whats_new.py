@@ -20,7 +20,7 @@ FEATURE_BODY = """
 <!-- vram-radar:whats-new
 {"show_whats_new": true,
  "en": ["Pin the AI quota strip on the left.", "Show reset countdowns beside quotas."],
- "zh": ["可将 AI 额度条固定在任务栏左侧。", "额度百分比旁显示重置倒计时。"]}
+ "zh": ["额度条可固定在任务栏左侧。", "额度旁显示重置倒计时。"]}
 -->
 """
 

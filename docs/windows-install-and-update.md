@@ -107,16 +107,17 @@ release is detected as available):
 ```text
 <!-- vram-radar:whats-new
 {"show_whats_new": true,
- "en": ["Pin the AI quota strip on the left of the taskbar.",
-        "Reset countdowns appear beside each quota percentage."],
- "zh": ["可将 AI 额度条固定在任务栏左侧。",
-        "额度百分比旁显示重置倒计时。"]}
+ "en": ["Pin the AI quota strip on the left.",
+        "Show reset countdowns beside quotas."],
+ "zh": ["额度条可固定在任务栏左侧。",
+        "额度旁显示重置倒计时。"]}
 -->
 ```
 
 2. Requirements:
    - `show_whats_new` must be the boolean `true` (default is off).
    - Both `en` and `zh` must be non-empty string arrays (max 6 items, 120 chars each).
+   - Prefer short one-line bullets (same count and length feel in en/zh).
    - English lines must not contain Chinese characters.
    - Keep bullets to product language — no bug-fix laundry lists.
 
