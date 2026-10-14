@@ -203,11 +203,11 @@
               </header>
               <div class="settings-pref-list">
                 <div class="favorite-alert-setting">
-                  <label class="settings-pref check-label"><input id="favorite-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>收藏 GPU 空闲提醒</strong><small>整卡空闲或达到显存阈值时通知</small></span></label>
+                  <label class="settings-pref check-label"><input id="favorite-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>收藏 GPU 空闲提醒</strong><small>整卡空闲或达到显存阈值时</small></span></label>
                   <label class="settings-field settings-field-follow"><span>最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：仅提醒整卡空闲"></label>
                 </div>
                 <div class="task-completion-setting">
-                  <label class="settings-pref check-label"><input id="task-completion-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>本人任务结束提醒</strong><small>默认关注本人任务；他人任务需手动关注</small></span></label>
+                  <label class="settings-pref check-label"><input id="task-completion-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>本人任务结束提醒</strong><small>默认关注本人任务</small></span></label>
                 </div>
               </div>
             </section>
@@ -215,10 +215,10 @@
             <section id="settings-pane-cache" class="settings-pane" data-settings-pane="cache" aria-labelledby="settings-cache-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-cache-title">缓存清理</h3>
-                <p>清理临时文件与缓存，保留服务器与凭据</p>
+                <p>清理缓存；保留服务器与凭据</p>
               </header>
               <div class="settings-pref-list cache-cleanup-setting">
-                <label class="settings-pref check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span class="settings-pref-text"><strong>定期清理缓存</strong><small>不删除服务器、凭据与配置</small></span></label>
+                <label class="settings-pref check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span class="settings-pref-text"><strong>定期清理缓存</strong><small>不删除服务器与凭据</small></span></label>
                 <label class="settings-field settings-field-follow"><span>清理间隔</span><select id="cache-cleanup-interval">
                   <option value="6">每 6 小时</option>
                   <option value="12">每 12 小时</option>
@@ -227,7 +227,7 @@
                   <option value="168">每周</option>
                 </select></label>
                 <div class="settings-pref settings-pref-action cache-cleanup-actions update-settings-row">
-                  <div class="settings-pref-text"><strong>立即清理</strong><small id="cache-cleanup-status">立即清理一次缓存</small></div>
+                  <div class="settings-pref-text"><strong>立即清理</strong><small id="cache-cleanup-status">手动清理一次</small></div>
                   <button id="run-cache-cleanup" class="button" type="button">立即清理</button>
                 </div>
               </div>
@@ -239,7 +239,7 @@
                 <p>检查正式发布版本</p>
               </header>
               <div class="settings-pref settings-pref-action update-settings-row">
-                <div class="settings-pref-text"><strong>检查更新</strong><small id="update-check-status">新版本会出现在通知中心</small></div>
+                <div class="settings-pref-text"><strong>检查更新</strong><small id="update-check-status">新版本进入通知中心</small></div>
                 <button id="check-for-updates" class="button" type="button">检查更新</button>
               </div>
             </section>
@@ -247,7 +247,7 @@
             <section id="settings-pane-diagnostics" class="settings-pane" data-settings-pane="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-diagnostics-title">诊断与日志</h3>
-                <p>排查连接问题；复制时隐藏敏感信息</p>
+                <p>排查连接；复制时隐藏敏感信息</p>
               </header>
               <div class="settings-inline-actions local-tools-actions">
                 <button id="copy-diagnostics" class="button" type="button">复制诊断</button>
@@ -262,7 +262,7 @@
               </header>
               <div class="quota-extension-body">
                 <div class="quota-extension-row">
-                  <label class="settings-pref check-label"><input id="quota-usage-enabled" type="checkbox"><span class="settings-pref-text"><strong>额度监控</strong><small>读取本机 AI 应用额度并显示于任务栏</small></span></label>
+                  <label class="settings-pref check-label"><input id="quota-usage-enabled" type="checkbox"><span class="settings-pref-text"><strong>额度监控</strong><small>在任务栏显示本机 AI 应用额度</small></span></label>
                 </div>
                 <p id="quota-usage-status" role="status" aria-live="polite"></p>
               </div>
@@ -275,14 +275,14 @@
               </header>
 <details id="import-panel" class="import-panel settings-group">
           <summary class="settings-section-heading import-intro">
-            <div><h3>服务器发现与导入</h3><p>从本机 SSH 配置添加服务器</p></div>
+            <div><h3>服务器发现与导入</h3><p>从本机 SSH 配置导入</p></div>
             <span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span>
           </summary>
           <div class="settings-group-body import-panel-body">
           <ol class="import-steps" aria-label="服务器导入步骤">
-            <li><span>1</span><div><strong>自动发现</strong><small>本地扫描 SSH 配置，不连接服务器</small></div></li>
-            <li><span>2</span><div><strong>检查连接信息</strong><small>确认服务器名称和登录方式</small></div></li>
-            <li><span>3</span><div><strong>保存并查看</strong><small>密码可选，只保存在系统凭据库</small></div></li>
+            <li><span>1</span><div><strong>自动发现</strong><small>扫描本机 SSH 配置，不连接</small></div></li>
+            <li><span>2</span><div><strong>检查连接信息</strong><small>确认名称与登录方式</small></div></li>
+            <li><span>3</span><div><strong>保存并查看</strong><small>密码可选，存于系统凭据库</small></div></li>
           </ol>
           <label><span>服务器设置文件路径</span><input id="server-config-path" placeholder="servers.toml 或 ~/.ssh/config"></label>
           <div class="import-actions">
@@ -291,50 +291,50 @@
             <button id="import-server-config" class="button primary" type="button">导入并替换列表</button>
           </div>
           <div id="import-status" class="import-status" aria-live="polite" hidden></div>
-          <div class="import-privacy">只在本机读取服务器配置，不执行配置命令或连接服务器。不读取私钥、密码或 <code>known_hosts</code>。</div>
+          <div class="import-privacy">仅本机读取配置；不连接服务器，不读取私钥、密码或 <code>known_hosts</code>。</div>
           <details class="import-help">
-            <summary><span><strong>自动检测不到？</strong><small>按 Windows 或 macOS 教程找到 SSH 配置，命令可一键复制</small></span><span class="summary-action"><span class="when-closed">展开教程</span><span class="when-open">收起</span></span></summary>
+            <summary><span><strong>自动检测不到？</strong><small>Windows / macOS 教程；命令可复制</small></span><span class="summary-action"><span class="when-closed">展开教程</span><span class="when-open">收起</span></span></summary>
             <div class="import-help-body">
-              <div class="guide-callout"><strong>先确认要找的文件</strong><p>SSH 配置通常是一个名为 <code>config</code>、没有扩展名的文本文件。终端命令中的 <code>ssh gpu-lab</code> 里，<code>gpu-lab</code> 就是显存雷达要导入的服务器别名。</p></div>
+              <div class="guide-callout"><strong>先确认要找的文件</strong><p>SSH 配置多为无扩展名的 <code>config</code> 文件。<code>ssh gpu-lab</code> 中的 <code>gpu-lab</code> 即导入别名。</p></div>
 
               <details class="platform-guide" open data-default-open>
-                <summary><span><strong>Windows 教程</strong><small>PowerShell 是 Windows 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
+                <summary><span><strong>Windows 教程</strong><small>Windows 自带命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
                 <div class="platform-guide-body">
-                  <div class="guide-launcher"><div><strong>先打开 PowerShell</strong><p>点击右侧按钮打开，或按 Windows 键搜索 <b>PowerShell</b>。这里只打开窗口，不会自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="windows">一键打开 PowerShell</button></div>
-                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的 PowerShell，再按 Enter。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-find-config" aria-label="复制 Windows 查找 SSH 配置命令">复制</button><pre><code id="windows-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | Select-String "Reading configuration data"</code></pre></div></div></section>
-                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>如果上一步没有显示用户配置，检查 <code>%USERPROFILE%\.ssh\config</code> 或 <code>%HOME%\.ssh\config</code>。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-list-ssh" aria-label="复制 Windows 查看 SSH 目录命令">复制</button><pre><code id="windows-list-ssh">Get-ChildItem -Force "$HOME\.ssh"</code></pre></div></div></section>
-                  <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令只会确保 <code>.ssh</code> 目录存在，然后用记事本打开配置文件；已有文件不会被清空。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-open-config" aria-label="复制 Windows 创建 SSH 配置命令">复制</button><pre><code id="windows-open-config">New-Item -ItemType Directory -Force "$HOME\.ssh" | Out-Null; notepad "$HOME\.ssh\config"</code></pre></div></div></details>
+                  <div class="guide-launcher"><div><strong>先打开 PowerShell</strong><p>右侧打开，或按 Windows 键搜索 <b>PowerShell</b>。仅打开窗口，不执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="windows">一键打开 PowerShell</button></div>
+                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>查找 OpenSSH 读取的配置文件</h4><p>复制命令到 PowerShell 并回车。<code>Reading configuration data</code> 后即为路径。不连接服务器；含 <code>Match exec</code> 时仍可能运行本地判断。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-find-config" aria-label="复制 Windows 查找 SSH 配置命令">复制</button><pre><code id="windows-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | Select-String "Reading configuration data"</code></pre></div></div></section>
+                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>若未显示路径，检查 <code>%USERPROFILE%\.ssh\config</code> 或 <code>%HOME%\.ssh\config</code>。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-list-ssh" aria-label="复制 Windows 查看 SSH 目录命令">复制</button><pre><code id="windows-list-ssh">Get-ChildItem -Force "$HOME\.ssh"</code></pre></div></div></section>
+                  <details class="guide-more"><summary>没有 config？创建并打开</summary><div class="guide-more-body"><p>确保 <code>.ssh</code> 存在并用记事本打开；已有文件不会清空。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="windows-open-config" aria-label="复制 Windows 创建 SSH 配置命令">复制</button><pre><code id="windows-open-config">New-Item -ItemType Directory -Force "$HOME\.ssh" | Out-Null; notepad "$HOME\.ssh\config"</code></pre></div></div></details>
                 </div>
               </details>
 
               <details class="platform-guide">
-                <summary><span><strong>macOS 教程</strong><small>“终端”是 macOS 自带的命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
+                <summary><span><strong>macOS 教程</strong><small>macOS 自带命令窗口</small></span><span class="summary-action"><span class="when-closed">查看步骤</span><span class="when-open">收起</span></span></summary>
                 <div class="platform-guide-body">
-                  <div class="guide-launcher"><div><strong>先打开“终端”</strong><p>点击右侧按钮打开终端，或按 Command + 空格搜索“终端”。仅打开窗口，不自动执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="macos">一键打开终端</button></div>
-                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>让 OpenSSH 告诉你它读取了哪个文件</h4><p>点击命令右侧的“复制”，粘贴到刚打开的终端，再按 Return。输出中的 <code>Reading configuration data</code> 后面就是配置文件路径。命令不连接服务器；若配置含 <code>Match exec</code>，OpenSSH 仍可能运行其中的本地判断命令。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-find-config" aria-label="复制 macOS 查找 SSH 配置命令">复制</button><pre><code id="macos-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | grep "Reading configuration data"</code></pre></div></div></section>
-                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>通常是 <code>~/.ssh/config</code>；也可能是 <code>~/.config/ssh/config</code>、Colima 或 OrbStack 的配置。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-list-ssh" aria-label="复制 macOS 查看 SSH 目录命令">复制</button><pre><code id="macos-list-ssh">ls -la ~/.ssh</code></pre></div></div></section>
-                  <details class="guide-more"><summary>还没有 config 文件？创建并打开一个</summary><div class="guide-more-body"><p>下面的命令会创建标准目录和文件、设置推荐权限，再用文本编辑器打开。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-open-config" aria-label="复制 macOS 创建 SSH 配置命令">复制</button><pre><code id="macos-open-config">mkdir -p ~/.ssh &amp;&amp; touch ~/.ssh/config &amp;&amp; chmod 600 ~/.ssh/config &amp;&amp; open -e ~/.ssh/config</code></pre></div></div></details>
+                  <div class="guide-launcher"><div><strong>先打开“终端”</strong><p>右侧打开，或按 Command + 空格搜索“终端”。仅打开窗口，不执行命令。</p></div><button class="button primary open-setup-terminal" type="button" data-platform="macos">一键打开终端</button></div>
+                  <section class="guide-step"><span class="guide-step-number">1</span><div><h4>查找 OpenSSH 读取的配置文件</h4><p>复制命令到终端并回车。<code>Reading configuration data</code> 后即为路径。不连接服务器；含 <code>Match exec</code> 时仍可能运行本地判断。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-find-config" aria-label="复制 macOS 查找 SSH 配置命令">复制</button><pre><code id="macos-find-config">ssh -G -v any-host-name 2&gt;&amp;1 | grep "Reading configuration data"</code></pre></div></div></section>
+                  <section class="guide-step"><span class="guide-step-number">2</span><div><h4>查看常用目录</h4><p>常见路径：<code>~/.ssh/config</code>；也可能是 <code>~/.config/ssh/config</code> 或 Colima / OrbStack。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-list-ssh" aria-label="复制 macOS 查看 SSH 目录命令">复制</button><pre><code id="macos-list-ssh">ls -la ~/.ssh</code></pre></div></div></section>
+                  <details class="guide-more"><summary>没有 config？创建并打开</summary><div class="guide-more-body"><p>创建目录与文件、设置权限，并用文本编辑器打开。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="macos-open-config" aria-label="复制 macOS 创建 SSH 配置命令">复制</button><pre><code id="macos-open-config">mkdir -p ~/.ssh &amp;&amp; touch ~/.ssh/config &amp;&amp; chmod 600 ~/.ssh/config &amp;&amp; open -e ~/.ssh/config</code></pre></div></div></details>
                 </div>
               </details>
 
               <details class="guide-more">
                 <summary>查看最小配置示例</summary>
-                <div class="guide-more-body"><p>把示例中的地址和用户名替换为自己的信息。<code>gpu-lab</code> 是以后在终端和显存雷达中看到的别名。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="ssh-config-example" aria-label="复制 SSH 配置示例">复制</button><pre><code id="ssh-config-example">Host gpu-lab
+                <div class="guide-more-body"><p>替换为你的地址与用户名。<code>gpu-lab</code> 为终端与本应用中的别名。</p><div class="command-box"><button class="copy-command" type="button" data-copy-target="ssh-config-example" aria-label="复制 SSH 配置示例">复制</button><pre><code id="ssh-config-example">Host gpu-lab
     HostName gpu.example.org
     User researcher</code></pre></div></div>
               </details>
 
               <details class="guide-more">
-                <summary>使用 VS Code / Cursor Remote-SSH 或其他工具？</summary>
-                <div class="guide-more-body"><p>在 VS Code、Cursor、VSCodium 或 Windsurf 的设置中搜索 <code>Remote.SSH: Config File</code> 或 <code>remote.SSH.configFile</code>。复制显示的完整路径，粘贴到上方“服务器设置文件路径”，再点击“导入并替换列表”。</p><p>PuTTY Session 不是 OpenSSH 配置；WSL 中的 <code>~/.ssh/config</code> 也属于 Linux 环境。请先把所需别名转换或复制到当前 Windows/macOS 系统能读取的 OpenSSH config。</p></div>
+                <summary>使用 VS Code / Cursor Remote-SSH？</summary>
+                <div class="guide-more-body"><p>在编辑器设置中搜索 <code>Remote.SSH: Config File</code> 或 <code>remote.SSH.configFile</code>，将完整路径粘贴到上方并导入。</p><p>PuTTY Session 与 WSL 中的 <code>~/.ssh/config</code> 不可直接使用。请先复制到当前系统可读的 OpenSSH config。</p></div>
               </details>
 
-              <div class="guide-finish"><strong>找到路径以后</strong><ol><li>把完整路径粘贴到上方输入框。</li><li>点击“导入并替换列表”。</li><li>检查服务器类型和登录方式，最后点击“保存并开始验证”。</li></ol></div>
+              <div class="guide-finish"><strong>找到路径后</strong><ol><li>粘贴完整路径到上方。</li><li>点击“导入并替换列表”。</li><li>确认类型与登录方式后保存。</li></ol></div>
             </div>
           </details>
           </div>
         </details>
-        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动以调整服务器顺序</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
+        <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动调整顺序</p></div><button id="add-server" class="button" type="button">手动添加</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
           <span id="server-editor-page-status" class="server-editor-page-status" aria-live="polite"></span>

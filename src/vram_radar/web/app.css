@@ -1205,6 +1205,104 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   justify-content: flex-start;
   gap: 10px;
 }
+
+/* Settings pane help / tips: clearer scan hierarchy */
+.settings-pane-head p {
+  max-width: 42em;
+}
+.settings-pref-text small {
+  max-width: 36em;
+}
+.settings-pane-servers .import-privacy {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+.settings-pane-servers .import-help > summary {
+  gap: 10px;
+}
+.settings-pane-servers .import-help > summary small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-weight: 400;
+  line-height: 1.4;
+}
+.settings-pane-servers .import-help-body {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+.settings-pane-servers .guide-callout {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--instrument) 55%, var(--surface));
+}
+.settings-pane-servers .guide-callout p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+.settings-pane-servers .guide-step {
+  gap: 10px;
+}
+.settings-pane-servers .guide-step h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.settings-pane-servers .guide-step p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+  max-width: 52em;
+}
+.settings-pane-servers .guide-launcher {
+  gap: 12px;
+  align-items: flex-start;
+}
+.settings-pane-servers .guide-launcher p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.45;
+}
+.settings-pane-servers .guide-finish {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+}
+.settings-pane-servers .guide-finish ol {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+  color: var(--muted);
+  font-size: var(--font-caption);
+  line-height: 1.5;
+}
+.settings-pane-servers .import-steps {
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.settings-pane-servers .import-steps small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+.settings-pane-servers .section-heading p {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
 /* Legacy names kept for older tests / flat onboarding cards */
 .settings-prefs { display: contents; }
 .settings-prefs-note { display: none; }

@@ -35,7 +35,7 @@ class ExtensionMarkupTests(unittest.TestCase):
         self.assertEqual(block.count('type="checkbox"'), 1)
         self.assertIn('id="quota-usage-enabled"', block)
         self.assertIn("<strong>额度监控</strong>", block)
-        self.assertIn("读取本机 AI 应用额度并显示于任务栏", block)
+        self.assertIn("在任务栏显示本机 AI 应用额度", block)
         self.assertIn('id="quota-usage-status"', block)
         self.assertNotIn("Codex", block)
         for tag in ("<button", "role=\"meter\"", "<details id=\"quota"):
@@ -53,8 +53,8 @@ class ExtensionMarkupTests(unittest.TestCase):
     def test_english_strings_are_english(self):
         pairs = {
             "额度监控": "Quota monitoring",
-            "读取本机 AI 应用额度并显示于任务栏":
-                "Read AI app quotas on this computer and show them on the taskbar",
+            "在任务栏显示本机 AI 应用额度":
+                "Show AI app quotas on this computer in the taskbar",
             "开启后自动读取本机 AI 应用的额度，并显示在任务栏":
                 "Automatically read quotas from AI apps on this computer and show them on the taskbar.",
             "额度监控已关闭": "Quota monitoring is off",
