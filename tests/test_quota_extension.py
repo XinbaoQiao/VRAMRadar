@@ -18,7 +18,9 @@ CJK = re.compile(r"[\u3400-\u9fff]")
 
 
 def extension_block(markup: str) -> str:
-    start = markup.index('<details id="extensions-settings"')
+    start = markup.index('id="extensions-settings"')
+    # Walk back to the opening tag of the section/panel.
+    start = markup.rfind("<", 0, start)
     return markup[start:markup.index('<details id="import-panel"', start)]
 
 

@@ -53,6 +53,10 @@
 /* Quota monitoring: one compact switch row. The checkbox sits on the title's line and
    the status line hangs under the label text (checkbox 14px + gap 8px = 22px indent). */
 .quota-extension-body { padding: 14px 16px; }
+.settings-panel-body.quota-extension-body {
+  gap: 0;
+  padding: 14px 16px;
+}
 .quota-extension-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .quota-extension-row .check-label { align-items: flex-start; gap: 8px; margin: 0; }
 .quota-extension-row .check-label input { flex: none; width: 14px; height: 14px; min-height: 0; margin: 2px 0 0; padding: 0; }
@@ -911,6 +915,52 @@ label { display: grid; gap: 5px; color: var(--muted); font-size: var(--font-smal
 label > span:first-child { font-weight: 620; }
 label small { color: var(--muted); font-size: var(--font-caption); font-weight: 500; line-height: 1.5; }
 input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: var(--radius-sm); padding: 8px 9px; }
+.settings-stack {
+  display: grid;
+  gap: 14px;
+}
+.settings-stack-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: var(--font-small);
+}
+.settings-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 72%, var(--surface));
+  overflow: hidden;
+}
+.settings-panel-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, var(--shell));
+}
+.settings-panel-header h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 680;
+}
+.settings-panel-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.4;
+}
+.settings-panel-body {
+  padding: 14px 16px 16px;
+  display: grid;
+  gap: 12px;
+}
+.settings-panel-stack { gap: 14px; }
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .settings-section { border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--surface-2) 72%, var(--surface)); }
 .settings-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .settings-section-heading h3 { margin: 0; font-size: 17px; line-height: 1.35; }
@@ -921,19 +971,19 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .settings-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -3px; }
 .settings-group[open] > summary { background: color-mix(in srgb, var(--cyan) 3%, var(--surface)); border-bottom: 1px solid var(--border); }
 .settings-group-body { padding: 18px; }
-.task-completion-setting, 
+.favorite-alert-setting,
+.task-completion-setting,
 .cache-cleanup-setting {
   display: grid;
   gap: 10px;
-  margin: 12px 0;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--surface) 96%, var(--shell));
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .cache-cleanup-setting > label > span:first-child { font-weight: 600; }
 .cache-cleanup-actions { margin: 0; padding: 0; border: 0; background: transparent; }
-.update-settings-row { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.update-settings-row { margin-top: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .update-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .update-settings-row > div { display: grid; gap: 3px; }
 .update-settings-row small, .task-watch-item small { color: var(--muted); }

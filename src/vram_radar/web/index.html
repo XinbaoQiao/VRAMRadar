@@ -172,48 +172,92 @@
             <article><strong>本机配置</strong><span>密码保存在系统凭据库</span></article>
           </div>
         </section>
-        <details id="profile-settings" class="settings-section settings-group profile-settings" aria-labelledby="profile-settings-title">
-          <summary class="settings-section-heading"><div><h3 id="profile-settings-title">界面、提醒与更新</h3><p>语言、刷新、任务提醒、缓存清理和版本检查</p></div><span class="settings-summary-side"><span class="local-only-badge">仅本机</span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></span></summary>
-          <div class="settings-group-body">
-          <div class="field-grid profile-fields">
-            <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
-            <label><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
-            <label><span>界面语言</span><select id="ui-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
-            <label><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
-          </div>
-          <div class="favorite-alert-setting">
-            <label class="check-label"><input id="favorite-alert-enabled" type="checkbox"><span><strong>收藏的服务器或指定 GPU 空闲时提醒我</strong><small>整卡空闲或达到设定显存时发送系统通知</small></span></label>
-            <label><span>单卡最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：只提醒整卡空闲"></label>
-          </div>
-          <div class="task-completion-setting">
-            <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong></span></label>
-            <p class="task-watch-policy"><span>默认提醒我的 GPU 任务结束。</span><br><span>其他用户的任务需在任务表中手动关注。</span></p>
-          </div>
-          <div class="cache-cleanup-setting">
-            <label class="check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span><strong>定期清理缓存</strong><small>仅清理过期临时文件与缓存，不删除服务器、凭据或个人配置</small></span></label>
-            <label><span>清理间隔</span><select id="cache-cleanup-interval">
-              <option value="6">每 6 小时</option>
-              <option value="12">每 12 小时</option>
-              <option value="24" selected>每天</option>
-              <option value="48">每 2 天</option>
-              <option value="168">每周</option>
-            </select></label>
-            <div class="update-settings-row cache-cleanup-actions"><div><strong>立即清理</strong><small id="cache-cleanup-status">可随时手动清理一次</small></div><button id="run-cache-cleanup" class="button" type="button">立即清理</button></div>
-          </div>
-          <div class="update-settings-row"><div><strong>应用更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
-          <details class="local-tools">
-            <summary><span><strong>诊断与日志</strong><small>连接异常时使用；复制时会自动隐藏敏感信息</small></span><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
-            <div class="local-tools-actions"><button id="copy-diagnostics" class="button" type="button">复制诊断信息</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
-          </details>
-          </div>
-        </details>
-        <details id="extensions-settings" class="settings-section settings-group" aria-labelledby="extensions-title">
-          <summary class="settings-section-heading"><div><h3 id="extensions-title">扩展功能</h3><p>按需开启，让常用工具的状态一目了然</p></div><span class="summary-action"><span class="when-closed">展开</span><span class="when-open">收起</span></span></summary>
-          <div class="settings-group-body quota-extension-body">
-            <div class="quota-extension-row"><label class="check-label"><input id="quota-usage-enabled" type="checkbox"><span><strong>额度监控</strong><small>开启后自动读取本机 AI 应用的额度，并显示在任务栏</small></span></label></div>
-            <p id="quota-usage-status" role="status" aria-live="polite"></p>
-          </div>
-        </details>
+        <div id="profile-settings" class="settings-stack" aria-label="本机偏好">
+          <div class="settings-stack-banner"><span class="local-only-badge">仅本机</span><span>以下偏好只保存在本机，不会上传。</span></div>
+
+          <section id="settings-appearance" class="settings-panel" aria-labelledby="settings-appearance-title">
+            <header class="settings-panel-header">
+              <h3 id="settings-appearance-title">显示与语言</h3>
+              <p>配置名称、刷新间隔、界面语言与关闭行为</p>
+            </header>
+            <div class="settings-panel-body">
+              <div class="field-grid profile-fields">
+                <label><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
+                <label><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
+                <label><span>界面语言</span><select id="ui-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
+                <label><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-notifications" class="settings-panel" aria-labelledby="settings-notifications-title">
+            <header class="settings-panel-header">
+              <h3 id="settings-notifications-title">通知</h3>
+              <p>GPU 空闲与任务结束时的提醒</p>
+            </header>
+            <div class="settings-panel-body settings-panel-stack">
+              <div class="favorite-alert-setting">
+                <label class="check-label"><input id="favorite-alert-enabled" type="checkbox"><span><strong>收藏的服务器或指定 GPU 空闲时提醒我</strong><small>整卡空闲或达到设定显存时发送系统通知</small></span></label>
+                <label><span>单卡最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：只提醒整卡空闲"></label>
+              </div>
+              <div class="task-completion-setting">
+                <label class="check-label"><input id="task-completion-alert-enabled" type="checkbox"><span><strong>我的任务结束时提醒</strong></span></label>
+                <p class="task-watch-policy"><span>默认提醒我的 GPU 任务结束。</span><br><span>其他用户的任务需在任务表中手动关注。</span></p>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-cache" class="settings-panel" aria-labelledby="settings-cache-title">
+            <header class="settings-panel-header">
+              <h3 id="settings-cache-title">缓存清理</h3>
+              <p>清理过期临时文件与缓存，不删除服务器或凭据</p>
+            </header>
+            <div class="settings-panel-body">
+              <div class="cache-cleanup-setting">
+                <label class="check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span><strong>定期清理缓存</strong><small>仅清理过期临时文件与缓存，不删除服务器、凭据或个人配置</small></span></label>
+                <label><span>清理间隔</span><select id="cache-cleanup-interval">
+                  <option value="6">每 6 小时</option>
+                  <option value="12">每 12 小时</option>
+                  <option value="24" selected>每天</option>
+                  <option value="48">每 2 天</option>
+                  <option value="168">每周</option>
+                </select></label>
+                <div class="update-settings-row cache-cleanup-actions"><div><strong>立即清理</strong><small id="cache-cleanup-status">可随时手动清理一次</small></div><button id="run-cache-cleanup" class="button" type="button">立即清理</button></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="settings-updates" class="settings-panel" aria-labelledby="settings-updates-title">
+            <header class="settings-panel-header">
+              <h3 id="settings-updates-title">应用更新</h3>
+              <p>检查 GitHub 上的正式版本</p>
+            </header>
+            <div class="settings-panel-body">
+              <div class="update-settings-row"><div><strong>检查更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div><button id="check-for-updates" class="button" type="button">检查更新</button></div>
+            </div>
+          </section>
+
+          <section id="settings-diagnostics" class="settings-panel" aria-labelledby="settings-diagnostics-title">
+            <header class="settings-panel-header">
+              <h3 id="settings-diagnostics-title">诊断与日志</h3>
+              <p>连接异常时使用；复制时会自动隐藏敏感信息</p>
+            </header>
+            <div class="settings-panel-body">
+              <div class="local-tools-actions settings-inline-actions"><button id="copy-diagnostics" class="button" type="button">复制诊断信息</button><button id="open-logs-directory" class="button" type="button">打开日志目录</button></div>
+            </div>
+          </section>
+
+          <section id="extensions-settings" class="settings-panel" aria-labelledby="extensions-title">
+            <header class="settings-panel-header">
+              <h3 id="extensions-title">扩展功能</h3>
+              <p>按需开启，让常用工具的状态一目了然</p>
+            </header>
+            <div class="settings-panel-body quota-extension-body">
+              <div class="quota-extension-row"><label class="check-label"><input id="quota-usage-enabled" type="checkbox"><span><strong>额度监控</strong><small>开启后自动读取本机 AI 应用的额度，并显示在任务栏</small></span></label></div>
+              <p id="quota-usage-status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+        </div>
         <details id="import-panel" class="import-panel settings-group">
           <summary class="settings-section-heading import-intro">
             <div><h3>服务器发现与导入</h3><p>从本机 SSH 配置添加服务器</p></div>

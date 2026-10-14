@@ -943,14 +943,21 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("function trustServerHostKey", self.javascript)
 
     def test_settings_primary_groups_are_collapsed_progressive_disclosures(self):
-        self.assertIn('<details id="profile-settings"', self.markup)
+        self.assertIn('id="profile-settings"', self.markup)
+        self.assertIn('class="settings-stack"', self.markup)
+        self.assertIn("显示与语言", self.markup)
+        self.assertIn("通知", self.markup)
+        self.assertIn("缓存清理", self.markup)
+        self.assertIn("应用更新", self.markup)
+        self.assertIn("诊断与日志", self.markup)
+        self.assertIn("扩展功能", self.markup)
         self.assertIn('<details id="import-panel"', self.markup)
-        self.assertIn("界面、提醒与更新", self.markup)
         self.assertIn("服务器发现与导入", self.markup)
         self.assertIn("settings-group-body", self.markup)
         self.assertIn("if (onboarding && onboardingStep === 2) ui.importPanel.open = true", self.javascript)
-        self.assertIn("ui.profileSettings.open = true", self.javascript)
+        self.assertIn("ui.profileSettings.hidden = false", self.javascript)
         self.assertIn("if (firstEditor) firstEditor.open = true", self.javascript)
+        self.assertIn(".settings-panel-header", self.styles)
         self.assertIn(".settings-group > summary", self.styles)
 
     def test_slurm_environment_fallbacks_are_editable_and_safely_validated(self):

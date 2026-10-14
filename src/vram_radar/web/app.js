@@ -4742,7 +4742,7 @@ function setOnboardingStep(step) {
   ui.onboardingNext.textContent = onboardingStep === 1 ? '开始设置' : '手动填写或检查';
   if (onboarding && onboardingStep === 2) ui.importPanel.open = true;
   if (onboarding && onboardingStep === 3) {
-    ui.profileSettings.open = true;
+    if (ui.profileSettings) ui.profileSettings.hidden = false;
     const firstEditor = ui.editorList.querySelector('.server-editor');
     if (firstEditor) firstEditor.open = true;
   }
