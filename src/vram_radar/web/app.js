@@ -4719,7 +4719,7 @@ function invalidateServerDiscovery() {
 }
 
 
-let activeSettingsPane = 'appearance';
+let activeSettingsPane = 'servers';
 
 function showSettingsPane(paneId, options = {}) {
   const next = String(paneId || 'appearance');
@@ -4775,7 +4775,7 @@ function setOnboardingStep(step) {
     const firstEditor = ui.editorList.querySelector('.server-editor');
     if (firstEditor) firstEditor.open = true;
   } else if (!onboarding) {
-    showSettingsPane(activeSettingsPane || 'appearance', { scroll: false });
+    showSettingsPane(activeSettingsPane || 'servers', { scroll: false });
   }
   ui.importPanel.hidden = onboarding && onboardingStep !== 2 && onboardingStep !== 3;
   ui.serverSettingsHeading.hidden = onboarding && onboardingStep !== 3;
@@ -4878,7 +4878,7 @@ function openSettings(options = {}) {
   ui.importStatus.hidden = true;
   populateServerEditors(currentProfile?.servers || []);
   setSettingsMode(onboarding ? 'onboarding' : 'settings');
-  if (!onboarding) showSettingsPane('appearance', { scroll: false });
+  if (!onboarding) showSettingsPane('servers', { scroll: false });
   ui.dialog.showModal();
   void pollQuotaMonitor();
 }

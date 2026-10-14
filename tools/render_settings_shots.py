@@ -27,7 +27,7 @@ window.addEventListener('load', () => setTimeout(() => {
     servers: currentProfile?.servers || [{id: 'lab', display_name: 'lab'}],
   };
   openSettings({forceNormal: true});
-  if (typeof showSettingsPane === 'function') showSettingsPane('appearance', {scroll: false});
+  if (typeof showSettingsPane === 'function') showSettingsPane('servers', {scroll: false});
   document.querySelectorAll('details.settings-group').forEach((node) => { node.open = false; });
   const stack = document.getElementById('profile-settings');
   stack?.scrollIntoView({block: 'start'});

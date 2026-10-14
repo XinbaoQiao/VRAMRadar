@@ -174,16 +174,16 @@
         </section>
                 <div id="profile-settings" class="settings-layout" aria-label="本机偏好">
           <nav id="settings-nav" class="settings-nav" aria-label="设置分类">
-            <button type="button" class="settings-nav-item" data-settings-pane="appearance" aria-current="page">显示与语言</button>
+            <button type="button" class="settings-nav-item" data-settings-pane="servers" aria-current="page">服务器</button>
+            <button type="button" class="settings-nav-item" data-settings-pane="appearance">显示与语言</button>
             <button type="button" class="settings-nav-item" data-settings-pane="notifications">通知</button>
+            <button type="button" class="settings-nav-item" data-settings-pane="extensions">扩展功能</button>
             <button type="button" class="settings-nav-item" data-settings-pane="cache">缓存清理</button>
             <button type="button" class="settings-nav-item" data-settings-pane="updates">应用更新</button>
             <button type="button" class="settings-nav-item" data-settings-pane="diagnostics">诊断与日志</button>
-            <button type="button" class="settings-nav-item" data-settings-pane="extensions">扩展功能</button>
-            <button type="button" class="settings-nav-item" data-settings-pane="servers">服务器</button>
           </nav>
           <div class="settings-panes">
-            <section id="settings-pane-appearance" class="settings-pane" data-settings-pane="appearance" aria-labelledby="settings-appearance-title">
+            <section id="settings-pane-appearance" class="settings-pane" data-settings-pane="appearance" hidden aria-labelledby="settings-appearance-title">
               <header class="settings-pane-head">
                 <h3 id="settings-appearance-title">显示与语言</h3>
                 <p>名称、语言、刷新与关闭</p>
@@ -268,7 +268,7 @@
               </div>
             </section>
 
-            <section id="settings-pane-servers" class="settings-pane settings-pane-servers" data-settings-pane="servers" aria-labelledby="settings-servers-title" hidden>
+            <section id="settings-pane-servers" class="settings-pane settings-pane-servers" data-settings-pane="servers" aria-labelledby="settings-servers-title">
               <header class="settings-pane-head">
                 <h3 id="settings-servers-title">服务器</h3>
                 <p>导入与管理服务器</p>
