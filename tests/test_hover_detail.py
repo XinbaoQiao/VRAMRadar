@@ -160,6 +160,23 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(row["name"], long_name)
         self.assertGreater(len(row["lines"][0]["text"]), 10)
 
+
+    def test_provider_reset_shown_without_quota_line(self):
+        """Reset-only readings still surface the countdown on the hover card."""
+        from vram_radar.hover_detail import provider_hover_row
+        now = 1_800_000_000.0
+        state = {
+            "installed": True,
+            "headline": {"en": "Available", "zh": "可用"},
+            "quota": {"en": "", "zh": ""},
+            "reset_at": now + 5 * 3600,
+            "facts": [],
+        }
+        row = provider_hover_row(state, provider_id="kimi", name="Kimi", language="en", now=now)
+        texts = [line["text"] for line in row["lines"]]
+        self.assertTrue(any("5h" in t or "Resets" in t for t in texts), texts)
+
+
     def test_english_has_no_cjk(self):
         import re
         cjk = re.compile(r"[　-鿿＀-￯]")

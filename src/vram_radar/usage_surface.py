@@ -205,6 +205,26 @@ def strip_reset_text(text: str) -> str:
     return (text or "").replace(" ", "\u200a")
 
 
+def fit_client_width(natural: int, available, has_reset: bool, *, overflow_budget: int = 0) -> int:
+    """Final strip client width after a fit pass.
+
+    Known reset countdowns grow the strip to the right of the left anchor
+    instead of being clipped away.  ``overflow_budget`` soft-caps how far
+    past ``available`` that growth may go (0 = no soft cap), so a wide
+    reading cannot cover the whole Start button.
+    """
+    natural = max(1, int(natural or 0))
+    if available is None:
+        return natural
+    available = int(available)
+    if natural <= available:
+        return natural
+    if not has_reset:
+        return max(1, available)
+    budget = max(0, int(overflow_budget or 0))
+    return min(natural, available + budget) if budget else natural
+
+
 SINGLE_FIT_FACTORS = (1.0, 0.95, 0.9)  # same 90 % floor as FIT_PLAN
 
 
@@ -235,6 +255,8 @@ def place_single(labels, fonts_for, pick, strip_scale: float, available=None) ->
             width = min(width, int(available))
             break
     if available is not None and width > available:
+        # Stacked value/countdown share one width: clipping shortens both lines
+        # but keeps the countdown on screen (unlike multi-column side resets).
         width = max(1, int(available))  # clip, never move sides or cover Start
     for y, label in zip((0, 20), labels):
         label.Size = Size(max(1, width - left - right), scale(20))
@@ -3038,7 +3060,7 @@ class CodexUsageSurface:
             for name_label, value_label, reset_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = reset_label.Visible = False
             # Width of the empty taskbar area left of Start (None: free placement
-            # or tray side); both layouts are compacted, then clipped, to fit it.
+            # or tray side). Compact type to fit; known resets may grow right.
             available = None
             if self._placement == "taskbar" and geometry:
                 elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
@@ -3079,6 +3101,7 @@ class CodexUsageSurface:
                     self._fit_key = fit_key
                     for factor, level in FIT_PLAN:
                         self._fit_level = level
+                        self._fit_factor = factor
                         for (_, value_label, reset_label), (_, value, reset_txt, _) in zip(used, cells):
                             value_label.Text = compact_value(value, level)
                             reset_label.Text = strip_reset_text(reset_txt)  # keep Nd Nh even when the gap is tight
@@ -3109,13 +3132,23 @@ class CodexUsageSurface:
                         width = place_columns(used, self._scale, factor)
                         if available is None or width <= available:
                             break
-                    if available is not None and width > available:
-                        # Left anchor stays put; growing right keeps reset labels
-                        # readable. Only clip when no countdown is on the strip.
-                        has_reset = any(bool(cell[2].Text) for cell in used if len(cell) > 2)
-                        if not has_reset:
-                            width = max(1, int(available))  # clip, never cover Start
+                    has_reset = any(bool(cell[2].Text) for cell in used if len(cell) > 2)
+                    # Left anchor stays put; grow right for countdowns (soft-capped).
+                    width = fit_client_width(
+                        width, available, has_reset,
+                        overflow_budget=max(1, scale(80)) if has_reset else 0,
+                    )
                     form.ClientSize = Size(width, scale(40))
+                elif any(bool(cell[2].Text) for cell in used if len(cell) > 2):
+                    # Recurrence guard: a cached fit must not leave Nd Nh clipped
+                    # under a stale narrow ClientSize (e.g. after weather flicker).
+                    factor = float(getattr(self, "_fit_factor", 1.0) or 1.0)
+                    need = place_columns(used, self._scale, factor)
+                    want = fit_client_width(
+                        need, available, True, overflow_budget=max(1, scale(80)),
+                    )
+                    if form.ClientSize.Width < want:
+                        form.ClientSize = Size(want, scale(40))
             if reading != self._reading:
                 self._reading = reading
                 form.Invalidate()

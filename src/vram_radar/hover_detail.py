@@ -214,7 +214,9 @@ def provider_hover_row(state: dict | None, *, provider_id: str, name: str,
             lines.append({"text": label, "tone": "body"})
             has_quota = True
         reset_text = _reset_line(state.get("reset_at"), now, english)
-        if reset_text and has_quota:
+        # Match the strip: a verified reset_at is shown even when the quota
+        # line is a status word (reset-only / used-up with countdown).
+        if reset_text:
             lines.append({"text": reset_text, "tone": "secondary"})
         if state.get("stale") and has_quota:
             lines.append({"text": "Stale" if english else "过期", "tone": "status"})

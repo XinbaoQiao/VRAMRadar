@@ -1,7 +1,7 @@
 import unittest
 
 from vram_radar.usage_surface import (FIT_PLAN, compact_value, content_right, docked_point, docked_target,
-                                      fit_choice, left_gap, trim_widgets)
+                                      fit_choice, fit_client_width, left_gap, trim_widgets)
 
 # The user's 150 % taskbar (physical px) as read by UI Automation on 10-01.
 BAR = (0, 1528, 2560, 1600)
@@ -89,6 +89,17 @@ class StripFitTests(unittest.TestCase):
     def test_font_never_below_ninety_percent(self):
         self.assertEqual(FIT_PLAN[0], (1.0, 0))
         self.assertGreaterEqual(min(factor for factor, _ in FIT_PLAN), 0.9)
+
+
+    def test_fit_client_width_keeps_reset_without_unbounded_growth(self):
+        """Tight gaps keep resets by growing right; soft-cap avoids covering Start."""
+        self.assertEqual(fit_client_width(200, None, True), 200)
+        self.assertEqual(fit_client_width(200, 240, True), 200)
+        self.assertEqual(fit_client_width(200, 160, False), 160)  # no reset: clip
+        self.assertEqual(fit_client_width(200, 160, True, overflow_budget=0), 200)  # full grow
+        self.assertEqual(fit_client_width(200, 160, True, overflow_budget=80), 200)
+        self.assertEqual(fit_client_width(400, 160, True, overflow_budget=80), 240)
+        self.assertEqual(fit_client_width(0, 100, False), 1)
 
     def test_fit_plan_never_drops_reset_countdown(self):
         """FIT_PLAN only shrinks type; known Nd Nh resets stay on the strip."""
