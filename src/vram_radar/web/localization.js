@@ -1500,11 +1500,20 @@
     }
   }
 
-  function setLanguage(nextLanguage) {
-    language = nextLanguage === 'en' ? 'en' : 'zh-CN';
+  function setLanguage(nextLanguage, options = {}) {
+    const next = nextLanguage === 'en' ? 'en' : 'zh-CN';
+    const root = options.root || document.documentElement;
+    const changed = language !== next;
+    language = next;
     document.documentElement.lang = language;
-    localizeTree(document.documentElement);
-    document.dispatchEvent(new CustomEvent('vram-radar-language-changed', {detail: {language}}));
+    // Skip a no-op full-document walk (closing Settings without a language preview).
+    // Scoped roots (Settings dialog preview) always localize that subtree only.
+    if (changed || options.force === true || options.root) {
+      localizeTree(root);
+    }
+    if (changed || options.force === true) {
+      document.dispatchEvent(new CustomEvent('vram-radar-language-changed', {detail: {language}}));
+    }
     return language;
   }
 

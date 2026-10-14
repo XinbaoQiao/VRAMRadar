@@ -446,6 +446,11 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("position: sticky; top: var(--titlebar-height, 62px)", self.styles)
         self.assertIn(".server-head.is-stuck", self.styles)
         self.assertIn("function updateStuckChrome", self.javascript)
+        # Settings open must not fight live card reconcile / sticky chrome (smoothness).
+        self.assertIn("deferredSnapshotWhileSettings", self.javascript)
+        self.assertIn("if (ui.dialog?.open) return;", self.javascript)
+        self.assertIn("wasStuck === wantStuck", self.javascript)
+        self.assertIn("{root: ui.dialog}", self.javascript)
         self.assertIn("function patchDirectoryNodeChildren", self.javascript)
         self.assertIn("server-head-sentinel", self.javascript)
         self.assertIn("shouldScrollClusterIntoView", self.javascript)

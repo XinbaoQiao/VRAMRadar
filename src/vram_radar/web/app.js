@@ -174,10 +174,15 @@ const lastServerHeadHeightByCard = new WeakMap();
 const expandedServerHeadHeight = new WeakMap();
 
 function reserveServerHeadSpace(card, head, stuck) {
-  if (!head.classList.contains('is-stuck')) {
+  const wantStuck = Boolean(stuck);
+  const wasStuck = head.classList.contains('is-stuck');
+  // Capture expanded height only while unstuck; once sticky, stay out of the
+  // scroll-path measure loop so unchanged frames skip forced reflows.
+  if (!wasStuck) {
     expandedServerHeadHeight.set(card, head.getBoundingClientRect().height);
   }
-  head.classList.toggle('is-stuck', stuck);
+  if (wasStuck === wantStuck) return;
+  head.classList.toggle('is-stuck', wantStuck);
   let spacer = card.querySelector('.server-head-spacer');
   if (!spacer) {
     spacer = document.createElement('div');
@@ -185,10 +190,11 @@ function reserveServerHeadSpace(card, head, stuck) {
     spacer.setAttribute('aria-hidden', 'true');
     head.after(spacer);
   }
-  const delta = stuck ? Math.max(0, (expandedServerHeadHeight.get(card) || head.getBoundingClientRect().height)
+  const delta = wantStuck ? Math.max(0, (expandedServerHeadHeight.get(card) || head.getBoundingClientRect().height)
     - head.getBoundingClientRect().height) : 0;
   spacer.style.height = `${layoutPxFromViewportRect(delta)}px`;
 }
+
 const lastStuckServerHeadHeightByCard = new WeakMap();
 let serverNavigationCards = [];
 let serverNavigationCardsById = new Map();
@@ -257,8 +263,12 @@ const uiRenderMetrics = Object.seal({
   serverCardCreates: 0,
   directoryRepaints: 0,
   navigatorBuilds: 0,
+  deferredWhileSettings: 0,
 });
 window.__VRAM_RADAR_PERF__ = uiRenderMetrics;
+// Live snapshot arrived while Settings was open; flush on close so pane switches
+// are not fighting card reconcile / sticky chrome on the UI thread.
+let deferredSnapshotWhileSettings = null;
 
 function profileServerFor(serverId) {
   const servers = currentProfile?.servers || [];
@@ -1554,6 +1564,8 @@ function clearStuckServerHead(serverId) {
 }
 
 function updateStuckChrome() {
+  // Settings owns the viewport interaction; skip sticky measurements until it closes.
+  if (ui.dialog?.open) return;
   const titlebar = cachedTitlebarHeightPx || 62;
   const cards = serverNavigationCards.length
     ? serverNavigationCards
@@ -3524,6 +3536,30 @@ function syncUnchangedSnapshotStatus(snapshot) {
 }
 
 function render(snapshot) {
+  if (ui.dialog?.open) {
+    // Keep clocks/alerts current, but defer card reconcile and sticky chrome so
+    // left-nav pane switches and language preview stay on the UI thread.
+    // Do not advance lastRenderedRevision here: unchanged-revision polls must
+    // still refresh the deferred buffer when a later in-flight snapshot lands,
+    // and closing Settings must be able to tell a full paint has not happened yet.
+    deferredSnapshotWhileSettings = snapshot;
+    uiRenderMetrics.deferredWhileSettings += 1;
+    currentSnapshot = snapshot;
+    renderTaskAlertIndicator(snapshot);
+    const paused = snapshot.monitoring?.paused ?? snapshot.profile?.monitoring?.paused ?? currentProfile?.monitoring_paused;
+    const inFlight = Boolean(snapshot.monitoring?.in_flight);
+    updateMonitoringControls(paused);
+    if (!paused) {
+      setRefreshClock(
+        inFlight
+          ? '后台读取中…界面仍可操作'
+          : `状态更新于 ${new Date(snapshotDataUpdatedAt(snapshot)).toLocaleTimeString(activeLocale())} · 每 ${snapshot.profile.refresh_seconds} 秒`,
+        inFlight,
+      );
+    }
+    return;
+  }
+  deferredSnapshotWhileSettings = null;
   uiRenderMetrics.fullRenders += 1;
   if (snapshot.profile_update) acceptProfile(snapshot.profile_update);
   currentSnapshot = snapshot;
@@ -3922,8 +3958,11 @@ async function refresh(force = false, serverId = null) {
     const snapshot = await api.get_status(force, serverId);
     if (generation !== refreshPollGeneration) return;
     const revision = snapshotRevision(snapshot);
-    if (snapshot.profile_update || revision == null || revision !== lastRenderedRevision) render(snapshot);
-    else syncUnchangedSnapshotStatus(snapshot);
+    if (snapshot.profile_update || revision == null || revision !== lastRenderedRevision || ui.dialog?.open) {
+      render(snapshot);
+    } else {
+      syncUnchangedSnapshotStatus(snapshot);
+    }
     if (snapshot.monitoring?.in_flight && api?.get_snapshot) {
       scheduleRefreshCompletion(generation);
     } else {
@@ -5179,6 +5218,9 @@ async function saveSettings(event) {
       importPanel.remove();
     }
     renderSavedViews();
+    // Drop any deferred live snapshot before close so the close-handler rAF
+    // cannot paint a pre-save dashboard over the forced refresh below.
+    deferredSnapshotWhileSettings = null;
     ui.dialog.close();
     const syncWarning = (result.warnings || [])[0];
     showToast(syncWarning ? `配置已保存并同步；${syncWarning}` : '配置已保存，正在连接服务器');
@@ -5913,7 +5955,10 @@ document.addEventListener('wheel', event => {
   nudgeUiZoom(event.deltaY < 0 ? UI_ZOOM_STEP : -UI_ZOOM_STEP);
 }, {passive: false});
 ui.language.addEventListener('change', () => {
-  window.VRAMRadarI18n?.setLanguage(ui.language.value);
+  // Preview only the open Settings dialog; a full document TreeWalker janks the
+  // main dashboard behind the modal. Closing (or saving) applies the real language.
+  if (ui.dialog?.open) window.VRAMRadarI18n?.setLanguage(ui.language.value, {root: ui.dialog});
+  else window.VRAMRadarI18n?.setLanguage(ui.language.value);
   if (currentSnapshot) renderNotificationCenter(currentSnapshot);
 });
 ui.favoriteAlertEnabled.addEventListener('change', () => {
@@ -5974,6 +6019,13 @@ ui.dialog.addEventListener('close', () => {
   settingsServerDrafts = [];
   settingsServerQuery = '';
   settingsServerPageOffset = 0;
+  const pending = deferredSnapshotWhileSettings;
+  deferredSnapshotWhileSettings = null;
+  if (pending) {
+    requestAnimationFrame(() => {
+      if (!ui.dialog.open) render(pending);
+    });
+  }
 });
 ui.onboardingBack.addEventListener('click', () => setOnboardingStep(onboardingStep - 1));
 ui.onboardingNext.addEventListener('click', () => setOnboardingStep(onboardingStep + 1));
