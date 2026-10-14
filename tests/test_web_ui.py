@@ -211,7 +211,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("resource_available", self.javascript)
         self.assertIn("update_available", self.javascript)
         self.assertIn("notification-update-action install-latest-update", self.javascript)
-        self.assertIn("发现新版本后会进入通知中心", self.markup)
+        self.assertIn("新版本会出现在通知中心", self.markup)
         self.assertIn("任务完成、版本更新与 GPU 可用消息", self.markup)
 
     def test_english_translation_covers_stale_error_and_process_details(self):
@@ -242,7 +242,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("data-task-owner", self.javascript)
         self.assertIn("data-task-owner-scope", self.javascript)
         self.assertNotIn("if (!mine) return '';", self.javascript)
-        self.assertIn("默认关注自己的 GPU 任务；其他人的任务需手动关注", self.markup)
+        self.assertIn("默认关注本人任务；他人任务需手动关注", self.markup)
         self.assertIn('data-server-navigator-filter="watches"', self.markup)
         self.assertNotIn('data-server-navigator-filter="recent"', self.markup)
         self.assertNotIn('id="task-completion-watch-list"', self.markup)
@@ -1743,7 +1743,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("latestUpdateAction === 'browser'", self.javascript)
         self.assertIn("open_latest_release", self.javascript)
         self.assertIn(".update-notice", self.styles)
-        self.assertIn("发现新版本后会进入通知中心", self.markup)
+        self.assertIn("新版本会出现在通知中心", self.markup)
         self.assertIn("下载并校验安装包", self.javascript)
         self.assertIn("notification-update-action", self.javascript)
         self.assertIn("update-download-progress", self.javascript)

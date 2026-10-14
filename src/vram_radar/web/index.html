@@ -174,7 +174,6 @@
         </section>
                 <div id="profile-settings" class="settings-layout" aria-label="本机偏好">
           <nav id="settings-nav" class="settings-nav" aria-label="设置分类">
-            <p class="settings-nav-note"><span class="local-only-badge">仅本机</span></p>
             <button type="button" class="settings-nav-item" data-settings-pane="appearance" aria-current="page">显示与语言</button>
             <button type="button" class="settings-nav-item" data-settings-pane="notifications">通知</button>
             <button type="button" class="settings-nav-item" data-settings-pane="cache">缓存清理</button>
@@ -187,28 +186,28 @@
             <section id="settings-pane-appearance" class="settings-pane" data-settings-pane="appearance" aria-labelledby="settings-appearance-title">
               <header class="settings-pane-head">
                 <h3 id="settings-appearance-title">显示与语言</h3>
-                <p>配置名称、刷新、语言与关闭行为</p>
+                <p>名称、语言、刷新与关闭</p>
               </header>
               <div class="settings-form-grid">
                 <label class="settings-field"><span>配置名称</span><input id="profile-name" required maxlength="80"></label>
-                <label class="settings-field"><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
                 <label class="settings-field"><span>界面语言</span><select id="ui-language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label>
-                <label class="settings-field"><span>点击关闭按钮时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
+                <label class="settings-field"><span>刷新间隔（秒）</span><input id="refresh-seconds" type="number" min="5" max="300" required></label>
+                <label class="settings-field"><span>关闭窗口时</span><select id="close-behavior"><option value="tray">收起到通知区域</option><option value="exit">直接退出应用</option></select></label>
               </div>
             </section>
 
             <section id="settings-pane-notifications" class="settings-pane" data-settings-pane="notifications" aria-labelledby="settings-notifications-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-notifications-title">通知</h3>
-                <p>GPU 空闲与任务结束提醒</p>
+                <p>空闲与任务提醒</p>
               </header>
               <div class="settings-pref-list">
                 <div class="favorite-alert-setting">
-                  <label class="settings-pref check-label"><input id="favorite-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>收藏 GPU 空闲时提醒</strong><small>整卡空闲或达到设定显存时通知</small></span></label>
-                  <label class="settings-field settings-field-follow"><span>单卡最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：只提醒整卡空闲"></label>
+                  <label class="settings-pref check-label"><input id="favorite-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>收藏 GPU 空闲提醒</strong><small>整卡空闲或达到显存阈值时通知</small></span></label>
+                  <label class="settings-field settings-field-follow"><span>最低空闲显存（GiB，可选）</span><input id="favorite-alert-min-memory" type="number" min="0" max="1000" step="0.5" placeholder="留空：仅提醒整卡空闲"></label>
                 </div>
                 <div class="task-completion-setting">
-                  <label class="settings-pref check-label"><input id="task-completion-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>我的任务结束时提醒</strong><small>默认关注自己的 GPU 任务；其他人的任务需手动关注</small></span></label>
+                  <label class="settings-pref check-label"><input id="task-completion-alert-enabled" type="checkbox"><span class="settings-pref-text"><strong>本人任务结束提醒</strong><small>默认关注本人任务；他人任务需手动关注</small></span></label>
                 </div>
               </div>
             </section>
@@ -216,10 +215,10 @@
             <section id="settings-pane-cache" class="settings-pane" data-settings-pane="cache" aria-labelledby="settings-cache-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-cache-title">缓存清理</h3>
-                <p>过期临时文件与缓存；不删除服务器或凭据</p>
+                <p>清理临时文件与缓存，保留服务器与凭据</p>
               </header>
               <div class="settings-pref-list cache-cleanup-setting">
-                <label class="settings-pref check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span class="settings-pref-text"><strong>定期清理缓存</strong><small>不删除服务器、凭据或个人配置</small></span></label>
+                <label class="settings-pref check-label"><input id="cache-cleanup-enabled" type="checkbox" checked><span class="settings-pref-text"><strong>定期清理缓存</strong><small>不删除服务器、凭据与配置</small></span></label>
                 <label class="settings-field settings-field-follow"><span>清理间隔</span><select id="cache-cleanup-interval">
                   <option value="6">每 6 小时</option>
                   <option value="12">每 12 小时</option>
@@ -228,7 +227,7 @@
                   <option value="168">每周</option>
                 </select></label>
                 <div class="settings-pref settings-pref-action cache-cleanup-actions update-settings-row">
-                  <div class="settings-pref-text"><strong>立即清理</strong><small id="cache-cleanup-status">可随时手动清理一次</small></div>
+                  <div class="settings-pref-text"><strong>立即清理</strong><small id="cache-cleanup-status">立即清理一次缓存</small></div>
                   <button id="run-cache-cleanup" class="button" type="button">立即清理</button>
                 </div>
               </div>
@@ -237,10 +236,10 @@
             <section id="settings-pane-updates" class="settings-pane" data-settings-pane="updates" aria-labelledby="settings-updates-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-updates-title">应用更新</h3>
-                <p>检查 GitHub 正式版本</p>
+                <p>检查正式发布版本</p>
               </header>
               <div class="settings-pref settings-pref-action update-settings-row">
-                <div class="settings-pref-text"><strong>检查更新</strong><small id="update-check-status">发现新版本后会进入通知中心</small></div>
+                <div class="settings-pref-text"><strong>检查更新</strong><small id="update-check-status">新版本会出现在通知中心</small></div>
                 <button id="check-for-updates" class="button" type="button">检查更新</button>
               </div>
             </section>
@@ -248,22 +247,22 @@
             <section id="settings-pane-diagnostics" class="settings-pane" data-settings-pane="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-diagnostics-title">诊断与日志</h3>
-                <p>连接异常时使用；复制时隐藏敏感信息</p>
+                <p>排查连接问题；复制时隐藏敏感信息</p>
               </header>
               <div class="settings-inline-actions local-tools-actions">
-                <button id="copy-diagnostics" class="button" type="button">复制诊断信息</button>
-                <button id="open-logs-directory" class="button" type="button">打开日志目录</button>
+                <button id="copy-diagnostics" class="button" type="button">复制诊断</button>
+                <button id="open-logs-directory" class="button" type="button">打开日志</button>
               </div>
             </section>
 
             <section id="extensions-settings" class="settings-pane" data-settings-pane="extensions" aria-labelledby="extensions-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="extensions-title">扩展功能</h3>
-                <p>按需开启常用工具状态</p>
+                <p>可选工具状态</p>
               </header>
               <div class="quota-extension-body">
                 <div class="quota-extension-row">
-                  <label class="settings-pref check-label"><input id="quota-usage-enabled" type="checkbox"><span class="settings-pref-text"><strong>额度监控</strong><small>读取本机 AI 应用额度并显示在任务栏</small></span></label>
+                  <label class="settings-pref check-label"><input id="quota-usage-enabled" type="checkbox"><span class="settings-pref-text"><strong>额度监控</strong><small>读取本机 AI 应用额度并显示于任务栏</small></span></label>
                 </div>
                 <p id="quota-usage-status" role="status" aria-live="polite"></p>
               </div>
@@ -272,7 +271,7 @@
             <section id="settings-pane-servers" class="settings-pane settings-pane-servers" data-settings-pane="servers" aria-labelledby="settings-servers-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-servers-title">服务器</h3>
-                <p>导入 SSH 配置并管理已添加的服务器</p>
+                <p>导入与管理服务器</p>
               </header>
 <details id="import-panel" class="import-panel settings-group">
           <summary class="settings-section-heading import-intro">

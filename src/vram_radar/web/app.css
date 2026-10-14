@@ -917,7 +917,7 @@ label > span:first-child { font-weight: 620; }
 label small { color: var(--muted); font-size: var(--font-caption); font-weight: 500; line-height: 1.5; }
 input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: var(--radius-sm); padding: 8px 9px; }
 
-#settings-disclosure-tools[hidden] { display: none !important; }
+#settings-disclosure-tools { display: none !important; }
 .settings-layout {
   display: grid;
   grid-template-columns: 188px minmax(0, 1fr);
@@ -950,23 +950,18 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 12px 8px;
+  gap: 4px;
+  padding: 14px 10px;
   border-right: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
 }
-.settings-nav-note {
-  display: flex;
-  align-items: center;
-  margin: 0 6px 8px;
-  padding: 0;
-}
+.settings-nav-note { display: none; }
 .settings-nav-item {
   appearance: none;
   display: block;
   width: 100%;
   margin: 0;
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -992,16 +987,18 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-pane {
   display: grid;
-  gap: 16px;
+  gap: 18px;
   align-content: start;
-  padding: 18px 20px 22px;
+  padding: 20px 22px 24px;
   max-width: 560px;
 }
 .settings-pane[hidden] { display: none !important; }
 .settings-pane-head {
   display: grid;
-  gap: 4px;
-  padding-bottom: 2px;
+  gap: 5px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  margin-bottom: 2px;
 }
 .settings-pane-head h3 {
   margin: 0;
@@ -1023,7 +1020,7 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 240px));
   justify-content: start;
-  gap: 14px 16px;
+  gap: 16px 18px;
 }
 .settings-field {
   display: grid;
@@ -1047,7 +1044,7 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-pref-list {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   justify-items: stretch;
   max-width: 100%;
 }
@@ -1070,7 +1067,7 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   column-gap: 14px;
   row-gap: 0;
   margin: 0;
-  padding: 11px 12px;
+  padding: 12px 14px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
