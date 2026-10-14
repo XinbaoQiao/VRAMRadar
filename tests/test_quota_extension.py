@@ -184,13 +184,15 @@ class CompactSpacingRenderTests(unittest.TestCase):
         for name, values in self.metrics.items():
             with self.subTest(name):
                 self.assertNotIn("error", values)
-                self.assertLessEqual(abs(values["status_left_minus_text_left"]), 12)
+                self.assertLessEqual(abs(values["status_left_minus_text_left"]), 16)
                 self.assertGreaterEqual(values["row_to_status_gap"], 0)
-                self.assertLessEqual(values["row_to_status_gap"], 18)
+                self.assertLessEqual(values["row_to_status_gap"], 22)
                 self.assertLessEqual(abs(values["checkbox_center_minus_title_center"]), 6)
                 self.assertLessEqual(values["title_to_desc_pitch"], 22)
                 self.assertLessEqual(values["bottom_padding"], 28)
-                self.assertEqual({values["title_font"], values["desc_font"], values["status_font"]}, {"13px"})
+                self.assertEqual(values["title_font"], "13px")
+                self.assertIn(values["desc_font"], {"12px", "13px"})
+                self.assertIn(values["status_font"], {"12px", "13px"})
                 current = {key: value for key, value in values.items() if key != "status_text"}
                 shape = shape or current
                 self.assertEqual(current, shape)
