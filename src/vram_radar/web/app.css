@@ -920,164 +920,139 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 #settings-disclosure-tools { display: none !important; }
 .settings-layout {
   display: grid;
-  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   align-items: stretch;
-  min-height: min(540px, 72vh);
+  min-height: min(520px, 70vh);
   border: 1px solid var(--border);
-  border-radius: calc(var(--radius-md) + 2px);
+  border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #ffffff 55%, transparent) inset,
-    0 10px 28px color-mix(in srgb, #00120e 6%, transparent);
   overflow: hidden;
 }
 .settings-layout--flat {
   display: block;
   border: 0;
   background: transparent;
-  box-shadow: none;
   overflow: visible;
   min-height: 0;
 }
 .settings-layout--flat .settings-nav { display: none; }
 .settings-layout--flat .settings-panes {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 .settings-layout--flat .settings-pane {
   display: grid !important;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
-  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 40%, transparent) inset;
-  padding: 18px 20px 20px;
+  padding: 16px 18px 18px;
   max-width: none;
 }
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 14px 10px;
+  gap: 2px;
+  padding: 12px 8px;
   border-right: 1px solid var(--border);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-2) 88%, var(--surface)) 0%,
-      color-mix(in srgb, var(--surface-2) 72%, var(--shell)) 100%
-    );
+  background: var(--surface-2);
 }
 .settings-nav-note { display: none; }
 .settings-nav-item {
   appearance: none;
-  position: relative;
   display: block;
   width: 100%;
   margin: 0;
-  padding: 9px 12px 9px 14px;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
-  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  color: var(--text);
   font: inherit;
   font-size: 13px;
-  font-weight: 550;
-  letter-spacing: 0.01em;
+  font-weight: 500;
   text-align: left;
   line-height: 1.35;
   cursor: pointer;
-  transition: background .14s ease, color .14s ease, box-shadow .14s ease;
 }
 .settings-nav-item:hover {
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, var(--surface-3));
 }
 .settings-nav-item[aria-current="page"] {
-  background: color-mix(in srgb, var(--cyan) 14%, var(--surface));
+  background: var(--surface);
   color: var(--text);
-  font-weight: 650;
-  box-shadow:
-    inset 3px 0 0 var(--cyan),
-    0 0 0 1px color-mix(in srgb, var(--cyan) 18%, transparent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .settings-nav-item:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--border-strong);
   outline-offset: 1px;
 }
 .settings-panes {
   min-width: 0;
-  background:
-    linear-gradient(
-      180deg,
-      var(--surface) 0%,
-      color-mix(in srgb, var(--surface) 94%, var(--shell)) 100%
-    );
+  background: var(--surface);
 }
 .settings-pane {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   align-content: start;
-  padding: 22px 24px 26px;
+  padding: 20px 22px 24px;
   max-width: 560px;
 }
 .settings-pane[hidden] { display: none !important; }
 .settings-pane-head {
   display: grid;
-  gap: 6px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
 }
 .settings-pane-head h3 {
   margin: 0;
-  font-family: var(--display-font);
-  font-size: 16px;
-  line-height: 1.25;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 650;
   color: var(--text);
 }
 .settings-pane-head p {
   margin: 0;
   color: var(--muted);
   font-size: var(--font-caption);
-  line-height: 1.45;
-  font-weight: 450;
+  line-height: 1.4;
+  font-weight: 400;
+  max-width: 42em;
 }
 .settings-pane-servers {
   max-width: none;
 }
 .settings-form-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 244px));
+  grid-template-columns: repeat(2, minmax(0, 240px));
   justify-content: start;
-  gap: 16px 18px;
+  gap: 14px 16px;
 }
 .settings-field {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
-  max-width: 244px;
+  max-width: 240px;
   color: var(--muted);
   font-size: var(--font-caption);
 }
 .settings-field > span {
-  font-weight: 600;
-  color: color-mix(in srgb, var(--muted) 92%, var(--text));
-  letter-spacing: 0.01em;
+  font-weight: 550;
+  color: var(--muted);
 }
 .settings-field input,
 .settings-field select {
-  min-height: 36px;
+  min-height: 34px;
   width: 100%;
-  max-width: 244px;
+  max-width: 240px;
   box-sizing: border-box;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border-radius: 6px;
+  background: var(--surface);
   color: var(--text);
-  box-shadow: inset 0 1px 1px color-mix(in srgb, #00100c 4%, transparent);
-  transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
 }
 .settings-field input:hover,
 .settings-field select:hover {
@@ -1085,19 +1060,17 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-field input:focus,
 .settings-field select:focus {
-  border-color: color-mix(in srgb, var(--cyan) 55%, var(--border-strong));
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--cyan) 18%, transparent),
-    inset 0 1px 1px color-mix(in srgb, #00100c 4%, transparent);
-  outline: none;
+  border-color: var(--border-strong);
+  outline: 2px solid color-mix(in srgb, var(--border-strong) 45%, transparent);
+  outline-offset: 0;
 }
 .settings-field-follow {
-  max-width: 244px;
+  max-width: 240px;
   margin-left: 0;
 }
 .settings-pref-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   justify-items: stretch;
   max-width: 100%;
 }
@@ -1105,7 +1078,7 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .task-completion-setting,
 .cache-cleanup-setting {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -1117,22 +1090,20 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 14px;
+  column-gap: 12px;
   row-gap: 0;
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-2) 42%, var(--surface));
-  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 35%, transparent) inset;
-  transition: border-color .14s ease, background .14s ease, box-shadow .14s ease;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
 }
 .settings-pref:hover {
   border-color: var(--border-strong);
-  background: color-mix(in srgb, var(--surface-2) 58%, var(--surface));
+  background: var(--surface-2);
 }
 .settings-pref.check-label {
   display: grid;
@@ -1148,34 +1119,34 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   margin: 1px 0 0;
   justify-self: end;
   align-self: start;
-  accent-color: var(--cyan);
+  accent-color: var(--text);
 }
 .settings-pref-text {
   grid-column: 1;
   grid-row: 1;
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
   color: var(--text);
+  max-width: 36em;
 }
 .settings-pref-text strong {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.35;
-  letter-spacing: 0.01em;
 }
 .settings-pref-text small {
   color: var(--muted);
   font-size: var(--font-caption);
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 .settings-pref-action {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px 14px;
+  gap: 10px 12px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -1187,44 +1158,30 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-pref-action .button,
 .settings-inline-actions .button {
-  min-height: 34px;
-  padding: 6px 12px;
-  border-radius: 8px;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  box-shadow: 0 1px 0 color-mix(in srgb, #ffffff 40%, transparent) inset;
-}
-.settings-pref-action .button:hover,
-.settings-inline-actions .button:hover {
-  border-color: color-mix(in srgb, var(--cyan) 28%, var(--border-strong));
+  font-weight: 550;
+  box-shadow: none;
 }
 .settings-inline-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* Settings pane help / tips: clearer scan hierarchy */
-.settings-pane-head p {
-  max-width: 42em;
-}
-.settings-pref-text small {
-  max-width: 36em;
-}
 .settings-pane-servers .import-privacy {
   margin: 10px 0 0;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
   color: var(--muted);
   font-size: var(--font-caption);
   line-height: 1.45;
-}
-.settings-pane-servers .import-help > summary {
-  gap: 10px;
 }
 .settings-pane-servers .import-help > summary small {
   display: block;
@@ -1235,14 +1192,14 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-pane-servers .import-help-body {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   padding-top: 4px;
 }
 .settings-pane-servers .guide-callout {
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background: color-mix(in srgb, var(--instrument) 55%, var(--surface));
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
 }
 .settings-pane-servers .guide-callout p {
   margin: 4px 0 0;
@@ -1250,13 +1207,10 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   font-size: var(--font-caption);
   line-height: 1.45;
 }
-.settings-pane-servers .guide-step {
-  gap: 10px;
-}
 .settings-pane-servers .guide-step h4 {
   margin: 0 0 4px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.35;
 }
 .settings-pane-servers .guide-step p {
@@ -1266,10 +1220,6 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   line-height: 1.45;
   max-width: 52em;
 }
-.settings-pane-servers .guide-launcher {
-  gap: 12px;
-  align-items: flex-start;
-}
 .settings-pane-servers .guide-launcher p {
   margin: 4px 0 0;
   color: var(--muted);
@@ -1278,10 +1228,10 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 }
 .settings-pane-servers .guide-finish {
   margin-top: 4px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
 }
 .settings-pane-servers .guide-finish ol {
   margin: 6px 0 0;
@@ -1291,8 +1241,8 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   line-height: 1.5;
 }
 .settings-pane-servers .import-steps {
-  gap: 10px;
-  margin: 0 0 12px;
+  gap: 8px;
+  margin: 0 0 10px;
 }
 .settings-pane-servers .import-steps small {
   color: var(--muted);
