@@ -22,6 +22,12 @@ const ui = {
   aliasChoiceConfirm: document.getElementById('alias-choice-confirm'),
   aliasChoiceLater: document.getElementById('alias-choice-later'),
   aliasChoiceClose: document.getElementById('alias-choice-close'),
+  whatsNewDialog: document.getElementById('whats-new-dialog'),
+  whatsNewList: document.getElementById('whats-new-list'),
+  whatsNewDescription: document.getElementById('whats-new-description'),
+  whatsNewTitle: document.getElementById('whats-new-title'),
+  whatsNewConfirm: document.getElementById('whats-new-confirm'),
+  whatsNewClose: document.getElementById('whats-new-close'),
   form: document.getElementById('settings-form'),
   editorList: document.getElementById('server-editor-list'),
   editorTemplate: document.getElementById('server-editor-template'),
@@ -122,6 +128,8 @@ let updateCheckInFlight = false;
 let updateAvailableShown = false;
 let latestUpdateAction = 'browser';
 let latestUpdateActionReason = '';
+let whatsNewPromptedVersion = '';
+let whatsNewActiveVersion = '';
 let latestUpdateProgress = {state: 'idle', phase: 'idle'};
 let updateProgressPollTimer = null;
 let lastUpdateCheckAt = 0;
@@ -5140,6 +5148,80 @@ async function loadApplication() {
   if (!hasServers) openSettings({onboarding: true});
 }
 
+
+function whatsNewLanguage() {
+  return (window.VRAMRadarI18n?.language || currentProfile?.ui_language || 'zh-CN') === 'en' ? 'en' : 'zh';
+}
+
+function normalizeWhatsNew(notes) {
+  if (!notes || typeof notes !== 'object' || !notes.show) return null;
+  const version = String(notes.version || '').replace(/^v/, '').trim();
+  if (!version) return null;
+  const en = Array.isArray(notes.en) ? notes.en.map(item => String(item || '').trim()).filter(Boolean) : [];
+  const zh = Array.isArray(notes.zh) ? notes.zh.map(item => String(item || '').trim()).filter(Boolean) : [];
+  if (!en.length || !zh.length) return null;
+  return {show: true, version, en, zh};
+}
+
+function openWhatsNewDialog(notes) {
+  const normalized = normalizeWhatsNew(notes);
+  if (!normalized || !ui.whatsNewDialog) return false;
+  if (ui.dialog?.open || ui.aliasChoiceDialog?.open) return false;
+  if (whatsNewPromptedVersion === normalized.version && ui.whatsNewDialog.open) return false;
+  if (whatsNewPromptedVersion === normalized.version && !ui.whatsNewDialog.open) {
+    // Already shown this session; wait for dismiss persistence on the next launch.
+    return false;
+  }
+  const lang = whatsNewLanguage();
+  const lines = lang === 'en' ? normalized.en : normalized.zh;
+  if (ui.whatsNewTitle) {
+    ui.whatsNewTitle.textContent = localizedText('新功能');
+  }
+  if (ui.whatsNewDescription) {
+    ui.whatsNewDescription.textContent = localizedText(
+      `VRAM Radar ${normalized.version}：此版本的主要变化。`
+    );
+  }
+  if (ui.whatsNewList) {
+    ui.whatsNewList.replaceChildren(
+      ...lines.map(text => {
+        const item = document.createElement('li');
+        item.textContent = text;
+        return item;
+      }),
+    );
+  }
+  whatsNewActiveVersion = normalized.version;
+  whatsNewPromptedVersion = normalized.version;
+  if (!ui.whatsNewDialog.open) ui.whatsNewDialog.showModal();
+  window.VRAMRadarI18n?.localizeTree?.(ui.whatsNewDialog);
+  return true;
+}
+
+async function dismissWhatsNewDialog() {
+  const version = whatsNewActiveVersion || whatsNewPromptedVersion;
+  if (ui.whatsNewDialog?.open) ui.whatsNewDialog.close();
+  whatsNewActiveVersion = '';
+  if (!version || !api?.dismiss_whats_new) return;
+  try {
+    await api.dismiss_whats_new(version);
+  } catch (_error) {
+    // Dismissal is best-effort; the next offer check still uses local session guard.
+  }
+}
+
+async function maybeShowPendingWhatsNew() {
+  if (!api?.pending_whats_new) return;
+  try {
+    const result = await api.pending_whats_new();
+    if (result?.ok && result.offer && result.whats_new) {
+      openWhatsNewDialog(result.whats_new);
+    }
+  } catch (_error) {
+    // Ignore; update checks remain independent.
+  }
+}
+
 function scheduleUpdateCheck(delayMilliseconds) {
   clearTimeout(updateCheckTimer);
   updateCheckTimer = setTimeout(() => {
@@ -5208,6 +5290,9 @@ async function checkForUpdates({interactive = false} = {}) {
     ui.updateNotice.replaceChildren();
     ui.updateNotice.hidden = true;
     if (interactive) ui.updateCheckStatus.textContent = `发现新版本 ${result.latest_version}`;
+    if (result.whats_new_offer && result.whats_new) {
+      openWhatsNewDialog(result.whats_new);
+    }
     updateCheckFailures = 0;
     scheduleUpdateCheck(UPDATE_CHECK_INTERVAL_MS);
   } catch (error) {
@@ -5376,6 +5461,9 @@ async function initialize() {
   api = window.pywebview.api;
   try {
     await loadApplication();
+    // Feature-release notes (if the installed build opted in) before the
+    // background update poll, so a post-install card is not raced away.
+    await maybeShowPendingWhatsNew();
     // Do not compete with first paint and the initial SSH snapshot for DNS,
     // TLS and bridge workers. Update transport is independent and may start
     // only after the dashboard has completed its local initialization path.
@@ -5787,6 +5875,12 @@ ui.importServerConfig.addEventListener('click', importServerConfig);
 ui.aliasChoiceConfirm?.addEventListener('click', () => { void confirmAliasChoices(); });
 ui.aliasChoiceLater?.addEventListener('click', deferAliasChoices);
 ui.aliasChoiceClose?.addEventListener('click', deferAliasChoices);
+ui.whatsNewConfirm?.addEventListener('click', () => { void dismissWhatsNewDialog(); });
+ui.whatsNewClose?.addEventListener('click', () => { void dismissWhatsNewDialog(); });
+ui.whatsNewDialog?.addEventListener('cancel', event => {
+  event.preventDefault();
+  void dismissWhatsNewDialog();
+});
 ui.form.addEventListener('invalid', event => {
   const collapsedSection = event.target.closest?.('details:not([open])');
   if (collapsedSection) collapsedSection.open = true;

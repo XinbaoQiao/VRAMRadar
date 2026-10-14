@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from . import __version__
 from .build_info import current_build_commit, current_release_tag
+from .whats_new import parse_whats_new
 
 
 LATEST_RELEASE_API = "https://api.github.com/repositories/1347320362/releases/latest"
@@ -282,6 +283,8 @@ def check_latest_release(
             and latest_commit is not None
             and latest_commit != installed_commit
         )
+        body = release_payload.get("body") if isinstance(release_payload, dict) else None
+        whats_new = parse_whats_new(body if isinstance(body, str) else None, version=tag_name)
         return {
             "ok": True,
             "update_available": latest > installed or replacement_available,
@@ -297,6 +300,7 @@ def check_latest_release(
                 tag_name,
                 platform_name=platform_name,
             ),
+            "whats_new": whats_new,
         }
     # http.client.HTTPException (IncompleteRead, BadStatusLine, RemoteDisconnected
     # on a flaky link) is not an OSError and used to escape the check.

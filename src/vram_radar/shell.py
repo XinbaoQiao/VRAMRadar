@@ -113,6 +113,7 @@ from .tray import (
     show_macos_notification,
 )
 from .updates import check_latest_release
+from .whats_new import WhatsNewStore
 from .updater import download_verified_asset, schedule_windows_update, windows_update_capability
 from .window_state import MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WindowGeometry, WindowStateController
 
@@ -1015,6 +1016,11 @@ class AppApi:
         self._notification_read_sequence = 0
         self._notification_store = (
             NotificationStateStore(paths, profile.id)
+            if isinstance(paths, StoragePaths)
+            else None
+        )
+        self._whats_new_store = (
+            WhatsNewStore(paths, profile.id)
             if isinstance(paths, StoragePaths)
             else None
         )
@@ -4214,6 +4220,18 @@ class AppApi:
             result["update_action"] = "verified_download"
         else:
             result["update_action"] = "browser"
+        whats_new = result.get("whats_new") if isinstance(result.get("whats_new"), dict) else None
+        store = getattr(self, "_whats_new_store", None)
+        offer = bool(
+            result.get("ok")
+            and result.get("update_available")
+            and store is not None
+            and store.should_offer(whats_new)
+        )
+        result["whats_new_offer"] = offer
+        if offer and whats_new is not None and store is not None:
+            # Remember for after install; the web UI shows the card.
+            store.set_pending(whats_new)
         try:
             if result.get("ok") and result.get("update_available"):
                 latest_version = str(result.get("latest_version") or "").strip()
@@ -4369,6 +4387,10 @@ class AppApi:
         result = check_latest_release()
         if not result.get("ok") or not result.get("update_available"):
             return {"ok": False, "error": result.get("error") or "当前没有可安装的新版本"}
+        whats_new = result.get("whats_new") if isinstance(result.get("whats_new"), dict) else None
+        store = getattr(self, "_whats_new_store", None)
+        if store is not None and whats_new:
+            store.set_pending(whats_new)
         asset = result.get("asset")
         release_url = result.get("release_url")
         if not isinstance(asset, dict):
@@ -4424,6 +4446,27 @@ class AppApi:
             # A truncated download (IncompleteRead) has no user-meaningful text.
             message = "" if isinstance(exc, http.client.HTTPException) else str(exc)
             return {"ok": False, "error": message or "更新失败，当前版本未被修改"}
+
+
+    def dismiss_whats_new(self, version: str = "") -> dict[str, Any]:
+        """Remember that the user closed the what's-new card for ``version``."""
+        store = getattr(self, "_whats_new_store", None)
+        if store is None:
+            return {"ok": False, "error": "what's-new state is unavailable"}
+        ver = str(version or "").removeprefix("v").strip()
+        if not ver:
+            return {"ok": False, "error": "version is required"}
+        store.dismiss(ver)
+        return {"ok": True, "version": ver}
+
+    def pending_whats_new(self) -> dict[str, Any]:
+        """Notes to show once after a feature update install (empty when none)."""
+        store = getattr(self, "_whats_new_store", None)
+        if store is None:
+            return {"ok": True, "whats_new": None, "offer": False}
+        notes = store.take_pending_for(current_release_tag())
+        offer = bool(notes) and store.should_offer(notes)
+        return {"ok": True, "whats_new": notes if offer else None, "offer": offer}
 
     def open_latest_release(self) -> dict[str, Any]:
         if self.latest_release_url is None:

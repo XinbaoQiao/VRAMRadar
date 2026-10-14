@@ -94,6 +94,39 @@ Later installer-managed releases can use the one-click path.
 Profiles, credentials, caches, logs, and locks live outside the install folder,
 so replacing the application bundle does not replace local user state.
 
+## Feature “What’s new” popup (maintainers)
+
+Bug-fix-only releases stay silent: the desktop app does **not** show a what’s-new
+card unless the GitHub Release body opts in.
+
+To show a short, user-facing feature summary after users update (and when that
+release is detected as available):
+
+1. In the Release **body**, add an HTML comment (Markdown renderers hide it):
+
+```text
+<!-- vram-radar:whats-new
+{"show_whats_new": true,
+ "en": ["Pin the AI quota strip on the left of the taskbar.",
+        "Reset countdowns appear beside each quota percentage."],
+ "zh": ["可将 AI 额度条固定在任务栏左侧。",
+        "额度百分比旁显示重置倒计时。"]}
+-->
+```
+
+2. Requirements:
+   - `show_whats_new` must be the boolean `true` (default is off).
+   - Both `en` and `zh` must be non-empty string arrays (max 6 items, 120 chars each).
+   - English lines must not contain Chinese characters.
+   - Keep bullets to product language — no bug-fix laundry lists.
+
+3. Behavior:
+   - Releases without this marker update silently (same as today).
+   - The card is offered at most once per version; dismiss remembers.
+   - Closing the card never blocks the app.
+
+Do not put secrets or internal checklist text in this marker.
+
 ## Maintainer validation
 
 Build the Windows bundle, then compile the installer:
