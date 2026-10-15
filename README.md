@@ -22,6 +22,7 @@
 
 <p align="center">
   <a href="../../releases/latest"><strong>Download v1.0.4</strong></a>
+  · <a href="#demo">Demo</a>
   · <a href="#installation">Installation</a>
   · <a href="#usage">Usage</a>
   · <a href="#troubleshooting">Troubleshooting</a>
@@ -38,7 +39,30 @@ shows the remaining quota and reset time of AI coding apps.
 It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 `nvidia-smi`, `nvtop` or Slurm.
 
+
+## Demo
+
+Short product walkthrough (~29s): GPU overview, the **expand morph** into server detail, the taskbar quota strip (left anchor, hover card, reset countdown), Settings left navigation, and cache cleanup.
+
+https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-demo.mp4
+
+[![VRAM Radar demo](docs/assets/readme/demo-poster.png)](docs/assets/readme/vram-radar-demo.mp4)
+
+Also available as [WebM](docs/assets/readme/vram-radar-demo.webm). Captions are sparse Chinese labels for each beat.
+
+
 ## Features
+
+### What’s new in 1.0.4
+
+- **Settings left category nav** — frequent panes first (Servers, Display & language, Notifications, Extensions); Cache cleanup, App updates, and Diagnostics follow.
+- **Cache cleanup** — configure an automatic interval, or clean in one click.
+- **Smoother settings** — opening Settings, switching categories, and language preview stay responsive.
+- **Left-anchored quota strip** — optionally pin the AI strip to a stable left taskbar anchor.
+- **Reset countdowns** — show time-until-reset beside quotas, kept visible when space is tight.
+
+![Settings left category nav](docs/assets/readme/settings-nav-zh.png)
+
 
 ### GPU monitoring
 
@@ -58,8 +82,10 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 ![Taskbar strip, icon labels](docs/assets/readme/taskbar-strip.png)
 
 - On Windows, a compact strip sits on the taskbar to the right of the Widgets
-  (weather) button, follows the weather widget's visible width, and samples the
-  taskbar colour so it blends in.
+  (weather) button by default, follows the weather widget's visible width, and
+  samples the taskbar colour so it blends in. You can instead **pin it to a
+  left taskbar anchor** for a more stable position across layouts.
+- **Reset countdowns** appear beside quotas and stay visible when the strip is narrow.
 - Up to **4** apps at a time (Windows). Codex, Grok and Kimi show the remaining
   quota and the time until reset; DeepSeek shows its wallet balance. Claude, GLM,
   Qwen and Tencent Yuanbao show install and sign-in status only (they keep no
@@ -86,6 +112,7 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 
 - Bilingual interface (Simplified Chinese and English); the first run follows the
   system language and can be changed under **Settings → Interface language**.
+- **Cache cleanup** under Settings: set an automatic interval or run a one-click clean.
 - Update checks against GitHub Releases. Nothing installs in the background:
   on Windows, **Safe one-click update** runs after you confirm it, checks the
   installer's SHA-256 digest and size, installs silently and restores the

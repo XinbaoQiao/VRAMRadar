@@ -22,6 +22,7 @@
 
 <p align="center">
   <a href="../../releases/latest"><strong>下载 v1.0.4</strong></a>
+  · <a href="#演示">演示</a>
   · <a href="#安装">安装</a>
   · <a href="#使用">使用</a>
   · <a href="#常见问题">常见问题</a>
@@ -36,7 +37,30 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 
 它不是调度器：不提交任务、不预留 GPU，也不替代 `nvidia-smi`、`nvtop` 或 Slurm。
 
+
+## 演示
+
+约 29 秒的产品演示：GPU 总览、**展开 Morphing** 到服务器详情、任务栏额度条（左侧固定、悬停详情、重置倒计时）、设置左侧分类，以及缓存清理。
+
+https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-demo.mp4
+
+[![VRAM Radar 演示](docs/assets/readme/demo-poster.png)](docs/assets/readme/vram-radar-demo.mp4)
+
+也可下载 [WebM](docs/assets/readme/vram-radar-demo.webm)。字幕每次只出现几个字，对应当前画面。
+
+
 ## 功能
+
+### 1.0.4 新变化
+
+- **设置左侧分类导航** — 常用项靠前（服务器、显示与语言、通知、扩展功能）；缓存清理、应用更新、诊断与日志在后。
+- **缓存清理** — 可配置自动清理间隔，也可一键清理。
+- **更顺畅的设置** — 打开设置、切换分类与语言预览更顺畅。
+- **额度条左侧固定** — 可将 AI 额度条固定在任务栏左侧锚点。
+- **重置倒计时** — 额度旁显示距重置时间，窄空间下也会尽量保留。
+
+![设置左侧分类导航](docs/assets/readme/settings-nav-zh.png)
+
 
 ### GPU 监控
 
@@ -55,8 +79,9 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 
 ![任务栏额度条：天气组件右侧，图标模式](docs/assets/readme/taskbar-weather-zh.png)
 
-- Windows 上，额度条位于任务栏小组件（天气）按钮右侧，跟随天气组件的可见宽度，
-  并采样任务栏颜色以融入背景。
+- Windows 上，额度条默认位于任务栏小组件（天气）按钮右侧，跟随天气组件的可见宽度，
+  并采样任务栏颜色以融入背景。也可改为 **固定到任务栏左侧锚点**，布局变化时更稳定。
+- **重置倒计时** 显示在额度旁；额度条较窄时也会尽量保留。
 - 最多同时显示 **4** 个应用（Windows）。Codex、Grok、Kimi 显示剩余额度和距重置的
   时间；DeepSeek 显示钱包余额。Claude、GLM 智谱清言、Qwen 通义、腾讯元宝只显示安装
   和登录状态（这些应用没有可读取的本地用量数据）。默认选中 Codex；已安装的应用在本机
@@ -80,6 +105,7 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 ### 通用
 
 - 中英文双语界面；首次启动跟随系统语言，可在 **设置 → 界面语言** 中切换。
+- **缓存清理**：在设置中配置自动清理间隔，或一键清理。
 - 通过 GitHub Releases 检查更新，不会在后台自动安装：Windows 上确认 **安全一键更新**
   后，按 SHA-256 摘要和大小校验安装程序，静默安装，安装失败时恢复旧版本；macOS 上会
   在 Finder 中显示已校验的 zip。同一版本号基于更新提交重新构建的发布，会作为修复更新
