@@ -1,0 +1,24 @@
+Demo captions (sparse Chinese, one beat at a time):
+1. 显存雷达
+2. 本地只读
+3. GPU 总览
+4. 多机一眼
+5. 展开过渡
+6. 详情展开
+7. 节点任务
+8. 任务栏额度
+9. 左侧固定
+10. 悬停详情
+11. 重置倒计时
+12. 左侧分类
+13. 常用在前
+14. 缓存清理
+15. 新功能
+16. v1.0.4
+
+Frames replaced vs previous demo:
+- settings / cache-cleanup: re-rendered from current web UI (title 「设置」, left nav). Old 「本地配置」 flat shots removed.
+- quota strip / hover: clean v12 live taskbar + product hover card. Debug left_anchor layout labels removed.
+- morph: still overview→detail expand transition (visual only; not a named product feature).
+
+QC: no 「本地配置」; no weather/AI slot debug overlays.

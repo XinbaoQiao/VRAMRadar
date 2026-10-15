@@ -42,7 +42,7 @@ It is not a scheduler: it does not submit jobs, reserve GPUs, or replace
 
 ## Demo
 
-Short product walkthrough (~29s): GPU overview, the **expand morph** into server detail, the taskbar quota strip (left anchor, hover card, reset countdown), Settings left navigation, and cache cleanup.
+Short product walkthrough (~29s): GPU overview, the smooth expand transition into server detail, the taskbar quota strip (left anchor, hover card, reset countdown), Settings left navigation, and cache cleanup.
 
 https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-demo.mp4
 

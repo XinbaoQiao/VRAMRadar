@@ -40,7 +40,7 @@ VRAM Radar 是一个本地、只读的桌面监控工具：集中显示 Direct S
 
 ## 演示
 
-约 29 秒的产品演示：GPU 总览、**展开 Morphing** 到服务器详情、任务栏额度条（左侧固定、悬停详情、重置倒计时）、设置左侧分类，以及缓存清理。
+约 29 秒的产品演示：GPU 总览、详情展开过渡 到服务器详情、任务栏额度条（左侧固定、悬停详情、重置倒计时）、设置左侧分类，以及缓存清理。
 
 https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-demo.mp4
 
