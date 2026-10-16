@@ -1779,14 +1779,14 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-panel-body {
   display: grid;
-  gap: 16px;
-  padding: 2px 0 0;
-  max-width: 420px;
+  gap: 18px;
+  padding: 4px 0 0;
+  max-width: 400px;
   justify-items: stretch;
 }
 .settings-pane-migrate .migrate-options {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
 }
 .settings-pane-migrate .migrate-check {
@@ -1798,10 +1798,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   gap: 10px;
   width: 100%;
   margin: 0;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 58%, var(--surface));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-2) 50%, var(--surface));
   box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-passphrase-grid {
@@ -1811,7 +1811,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-field {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
   max-width: none;
   font-size: var(--font-caption);
@@ -1839,10 +1839,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-secret-warn {
   margin: 0;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--amber, #c47d1a) 32%, var(--border));
-  background: color-mix(in srgb, var(--amber, #c47d1a) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--amber, #c47d1a) 28%, var(--border));
+  background: color-mix(in srgb, var(--amber, #c47d1a) 8%, var(--surface));
   color: var(--text);
   font-size: 12px;
   line-height: 1.45;
@@ -1850,9 +1850,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-qr-block {
   display: grid;
-  gap: 12px;
-  justify-items: stretch;
+  gap: 10px;
+  justify-items: center;
   width: 100%;
+  padding-top: 2px;
 }
 .settings-pane-migrate .migrate-qr-wrap {
   display: grid;
@@ -1862,33 +1863,37 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .settings-pane-migrate .migrate-qr-frame {
   display: grid;
   place-items: center;
-  padding: 14px;
-  border-radius: 12px;
+  padding: 12px;
+  border-radius: 10px;
   background: #fff;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 40%, transparent);
+  border: 1px solid var(--border);
 }
 .settings-pane-migrate .migrate-qr-wrap canvas {
-  width: 196px;
-  height: 196px;
+  width: 188px;
+  height: 188px;
   display: block;
   background: #fff;
-  border-radius: 4px;
+  border-radius: 2px;
   image-rendering: pixelated;
 }
 .settings-pane-migrate .migrate-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   align-items: stretch;
+}
+.settings-pane-migrate .migrate-actions-export {
+  width: min(100%, 212px); /* canvas 188 + frame pad 12*2 */
 }
 .settings-pane-migrate .migrate-actions .button,
 .settings-pane-migrate .migrate-actions .migrate-file-button {
   width: 100%;
   min-width: 0;
+  min-height: 34px;
   justify-content: center;
   text-align: center;
+  box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-actions-export #migrate-export-file {
   grid-column: 1 / -1;
@@ -1904,20 +1909,21 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   display: grid;
   gap: 10px;
   width: 100%;
-  padding-top: 4px;
+  margin-top: 2px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 .settings-pane-migrate .migrate-section-title {
   margin: 0;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--text);
   letter-spacing: 0;
   line-height: 1.35;
 }
 .settings-pane-migrate .migrate-import-block {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   justify-items: stretch;
 }
@@ -1935,7 +1941,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .settings-pane-migrate .migrate-status {
   margin: 0;
   width: 100%;
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
@@ -1944,6 +1950,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   line-height: 1.45;
   text-align: left;
   box-sizing: border-box;
+}
+.settings-pane-migrate .migrate-qr-block > .migrate-status {
+  width: min(100%, 212px);
+  text-align: center;
 }
 .settings-pane-migrate .migrate-status.is-error {
   border-color: color-mix(in srgb, var(--red) 35%, var(--border));
@@ -1968,25 +1978,34 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-qr-block {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 14px;
+  justify-items: stretch;
+  gap: 12px;
+  padding-top: 0;
 }
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-qr-wrap {
   justify-items: start;
+  width: auto;
 }
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-qr-frame {
   padding: 10px;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-qr-wrap canvas {
-  width: 148px;
-  height: 148px;
+  width: 144px;
+  height: 144px;
 }
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-actions-export {
+  width: 100%;
   grid-template-columns: 1fr;
   gap: 8px;
 }
+.settings-pane-migrate .migrate-panel-body.is-compact .migrate-qr-block > .migrate-status {
+  width: 100%;
+  grid-column: 1 / -1;
+  text-align: left;
+}
 .settings-pane-migrate .migrate-panel-body.is-compact .migrate-passphrase-fields {
-  padding: 10px;
+  padding: 10px 12px;
   gap: 8px;
 }
 
@@ -1994,4 +2013,8 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   .settings-pane-migrate .migrate-passphrase-grid {
     grid-template-columns: 1fr;
   }
+  .settings-pane-migrate .migrate-actions-export {
+    width: 100%;
+  }
+}
 }

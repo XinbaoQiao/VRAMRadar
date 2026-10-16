@@ -5362,7 +5362,7 @@ function drawMigrateQr(token) {
   }
   const modules = qr.getModuleCount();
   const quiet = 4; // modules of white border
-  const target = 196;
+  const target = 188;
   const cell = Math.max(3, Math.floor(target / (modules + quiet * 2)));
   const size = cell * (modules + quiet * 2);
   canvas.width = size;
