@@ -21,12 +21,12 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>Download v1.0.4</strong></a>
+  <a href="../../releases/latest"><strong>Download v1.0.5</strong></a>
   · <a href="#demo">Demo</a>
   · <a href="#installation">Installation</a>
   · <a href="#usage">Usage</a>
   · <a href="#troubleshooting">Troubleshooting</a>
-  · <a href="docs/release-notes-v1.0.4.md">Changelog</a>
+  · <a href="docs/release-notes-v1.0.5.md">Changelog</a>
 </p>
 
 ![VRAM Radar GPU overview (synthetic data)](docs/assets/readme/overview-en.png)
@@ -53,15 +53,13 @@ Also available as [WebM](docs/assets/readme/vram-radar-demo.webm). Captions are 
 
 ## Features
 
-### What’s new in 1.0.4
+### What’s new in 1.0.5
 
-- **Settings left category nav** — frequent panes first (Servers, Display & language, Notifications, Extensions); Cache cleanup, App updates, and Diagnostics follow.
-- **Cache cleanup** — configure an automatic interval, or clean in one click.
-- **Smoother settings** — opening Settings, switching categories, and language preview stay responsive.
-- **Left-anchored quota strip** — optionally pin the AI strip to a stable left taskbar anchor.
-- **Reset countdowns** — show time-until-reset beside quotas, kept visible when space is tight.
+- **Transfer config** — Settings → Transfer config generates a QR for this computer’s server list and preferences.
+- **Copy or save / paste or import** — copy or save the QR image here; paste or import it on a new computer.
+- **No passwords by default** — the QR does not include login passwords or private keys.
 
-![Settings left category nav](docs/assets/readme/settings-nav-zh.png)
+![Transfer config](docs/assets/readme/settings-migrate-zh.png)
 
 
 ### GPU monitoring
@@ -126,8 +124,8 @@ Download from the [latest release](../../releases/latest).
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.4.exe` | Per-user installer, no administrator rights. The installer is not code-signed, so SmartScreen may show "Windows protected your PC"; choose **More info → Run anyway** after verifying the file. |
-| macOS | `VRAMRadar-1.0.4-macos.zip` | Contains `VRAM Radar (Apple Silicon).app` (arm64, macOS 14+) and `VRAM Radar (Intel).app` (x86_64, macOS 15+). Unsigned and unnotarized; see below. |
+| Windows x64 | `VRAMRadar-Setup-1.0.5.exe` | Per-user installer, no administrator rights. The installer is not code-signed, so SmartScreen may show "Windows protected your PC"; choose **More info → Run anyway** after verifying the file. |
+| macOS | `VRAMRadar-1.0.5-macos.zip` | Contains `VRAM Radar (Apple Silicon).app` (arm64, macOS 14+) and `VRAM Radar (Intel).app` (x86_64, macOS 15+). Unsigned and unnotarized; see below. |
 
 The latest release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -236,7 +234,7 @@ Release validation should use an empty temporary Profile (`--home`, `--profile`,
 
 ## Documentation
 
-- [Changelog: v1.0.4 release notes](docs/release-notes-v1.0.4.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
+- [Changelog: v1.0.5 release notes](docs/release-notes-v1.0.5.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
 - [SSH configuration discovery](docs/server-config-discovery.md)
 - [Quota monitoring](docs/subscription-usage.md) · [AI app providers](docs/ai-app-providers.md)
 - [Windows installation and updates](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
