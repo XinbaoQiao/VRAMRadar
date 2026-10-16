@@ -117,6 +117,22 @@ const ui = {
   migratePrivacy: document.getElementById('migrate-privacy'),
   migrateSummary: document.getElementById('migrate-summary'),
   migrateImportStatus: document.getElementById('migrate-import-status'),
+  migrateIncludePrefs: document.getElementById('migrate-include-prefs'),
+  migrateServerList: document.getElementById('migrate-server-list'),
+  migrateSelectAll: document.getElementById('migrate-select-all'),
+  migrateSelectNone: document.getElementById('migrate-select-none'),
+  migrateTtl: document.getElementById('migrate-ttl'),
+  migrateLanStart: document.getElementById('migrate-lan-start'),
+  migrateLanStatus: document.getElementById('migrate-lan-status'),
+  migrateLanUrl: document.getElementById('migrate-lan-url'),
+  migrateLanFetch: document.getElementById('migrate-lan-fetch'),
+  migrateImportPreview: document.getElementById('migrate-import-preview'),
+  migrateImportModeWrap: document.getElementById('migrate-import-mode-wrap'),
+  migrateModeOverwrite: document.getElementById('migrate-mode-overwrite'),
+  migrateModeMerge: document.getElementById('migrate-mode-merge'),
+  migrateApplyPrefs: document.getElementById('migrate-apply-prefs'),
+  migrateImportConfirm: document.getElementById('migrate-import-confirm'),
+  migrateImportCheck: document.getElementById('migrate-import-check'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
   cancelSettings: document.getElementById('cancel-settings'),
@@ -5298,6 +5314,9 @@ let lastMigrateFileName = '';
 let lastMigrateQrReady = false;
 let lastMigrateIncludesSecrets = false;
 let lastMigratePreview = null;
+let pendingMigrateImportText = '';
+let migrateTargetsLoaded = false;
+let migrateLanPollTimer = 0;
 
 function setMigrateStatus(el, message, {error = false} = {}) {
   if (!el) return;
@@ -5321,6 +5340,22 @@ function migrateWantsKeys() {
   return Boolean(ui.migrateIncludeKeys?.checked);
 }
 
+function migrateWantsPrefs() {
+  return ui.migrateIncludePrefs ? Boolean(ui.migrateIncludePrefs.checked) : true;
+}
+
+function migrateSelectedServerIds() {
+  if (!ui.migrateServerList) return null;
+  const boxes = [...ui.migrateServerList.querySelectorAll('input[type="checkbox"][data-server-id]')];
+  if (!boxes.length) return null;
+  return boxes.filter((box) => box.checked).map((box) => String(box.dataset.serverId || '')).filter(Boolean);
+}
+
+function migrateTtlSeconds() {
+  const raw = Number(ui.migrateTtl?.value || 1800);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1800;
+}
+
 function syncMigrateSecretFields() {
   const on = migrateWantsSecrets();
   if (ui.migratePassphraseFields) ui.migratePassphraseFields.hidden = !on;
@@ -5340,7 +5375,7 @@ function readMigrateExportPassphrase() {
   if (!migrateWantsSecrets()) return '';
   const a = String(ui.migratePassphrase?.value || '');
   const b = String(ui.migratePassphraseConfirm?.value || '');
-  if (a.length < 8) throw new Error(localizedText('导出密码时，口令至少 8 位'));
+  if (a.length < 8) throw new Error(localizedText('导出密码时口令至少 8 位'));
   if (a !== b) throw new Error(localizedText('口令不一致'));
   return a;
 }
@@ -5348,7 +5383,6 @@ function readMigrateExportPassphrase() {
 function drawMigrateQr(token) {
   const canvas = ui.migrateQrCanvas;
   if (!canvas || typeof qrcode !== 'function') return false;
-  // Prefer low EC so the same payload uses fewer modules (cleaner look).
   let qr;
   try {
     qr = qrcode(0, 'L');
@@ -5364,7 +5398,7 @@ function drawMigrateQr(token) {
     }
   }
   const modules = qr.getModuleCount();
-  const quiet = 4; // modules of white border
+  const quiet = 4;
   const target = 240;
   const cell = Math.max(3, Math.floor(target / (modules + quiet * 2)));
   const size = cell * (modules + quiet * 2);
@@ -5437,7 +5471,6 @@ async function saveMigrateQrImage() {
   return true;
 }
 
-
 function updateMigrateSummary(preview) {
   if (!ui.migrateSummary) return;
   if (preview && typeof preview === 'object') {
@@ -5446,7 +5479,7 @@ function updateMigrateSummary(preview) {
   const p = lastMigratePreview;
   if (!p || typeof p !== 'object') {
     ui.migrateSummary.textContent = migrateWantsSecrets()
-      ? localizedText('设置口令后生成含密码二维码')
+      ? localizedText('设置口令后生成含密二维码')
       : localizedText('正在准备本机配置…');
     return;
   }
@@ -5456,7 +5489,10 @@ function updateMigrateSummary(preview) {
       ? localizedText('当前：含加密密码与私钥')
       : localizedText('当前：含加密密码'))
     : localizedText('当前：不含密码与私钥');
-  ui.migrateSummary.textContent = [line, mode].filter(Boolean).join(' · ');
+  const ttl = migrateWantsSecrets() && p.expires_in_seconds != null
+    ? `${localizedText('有效期剩余')} ${Math.max(0, Math.round(Number(p.expires_in_seconds) / 60))} ${localizedText('分钟')}`
+    : '';
+  ui.migrateSummary.textContent = [line, mode, ttl].filter(Boolean).join(' · ');
 }
 
 function formatMigratePreview(preview) {
@@ -5466,12 +5502,103 @@ function formatMigratePreview(preview) {
   if (name) parts.push(name);
   const serverCount = Number(preview.server_count) || 0;
   parts.push(`${localizedText('服务器')} ${serverCount}`);
+  if (preview.includes_preferences === false) parts.push(localizedText('不含偏好'));
   if (preview.includes_secrets) {
     parts.push(preview.includes_private_keys
       ? localizedText('已含加密密码与私钥')
       : localizedText('已含加密密码'));
+    if (preview.expired) parts.push(localizedText('已过期'));
   }
   return parts.join(' · ');
+}
+
+function renderMigrateImportPreview(preview, {needsPass = false} = {}) {
+  if (!ui.migrateImportPreview) return;
+  if (!preview || typeof preview !== 'object') {
+    ui.migrateImportPreview.hidden = true;
+    ui.migrateImportPreview.textContent = '';
+    if (ui.migrateImportModeWrap) ui.migrateImportModeWrap.hidden = true;
+    if (ui.migrateImportConfirm) ui.migrateImportConfirm.hidden = true;
+    return;
+  }
+  const names = Array.isArray(preview.server_names) ? preview.server_names.slice(0, 8).join('、') : '';
+  const lines = [
+    `<strong>${localizedText('导入预览')}</strong>`,
+    formatMigratePreview(preview),
+  ];
+  if (names) lines.push(`${localizedText('服务器')}：${names}`);
+  if (preview.includes_secrets) {
+    lines.push(localizedText('含密码：导入后此码在本机作废，且有过期时间'));
+  }
+  if (needsPass) lines.push(localizedText('需要迁移口令'));
+  ui.migrateImportPreview.hidden = false;
+  ui.migrateImportPreview.innerHTML = lines.filter(Boolean).join('<br>');
+  if (ui.migrateImportModeWrap) ui.migrateImportModeWrap.hidden = false;
+  if (ui.migrateImportConfirm) ui.migrateImportConfirm.hidden = false;
+}
+
+function renderMigrateCheck(check) {
+  if (!ui.migrateImportCheck) return;
+  if (!check || typeof check !== 'object') {
+    ui.migrateImportCheck.hidden = true;
+    ui.migrateImportCheck.textContent = '';
+    return;
+  }
+  const rows = Array.isArray(check.servers) ? check.servers : [];
+  const lines = [`<strong>${localizedText('导入自检')}</strong>`];
+  lines.push(`${localizedText('正常')} ${check.ok_count || 0} / ${check.server_count || 0}`);
+  for (const row of rows.slice(0, 12)) {
+    const flags = [];
+    if (row.missing_pw) flags.push(localizedText('缺密码'));
+    if (row.missing_key) flags.push(localizedText('缺私钥文件'));
+    const cls = flags.length ? 'is-bad' : 'is-ok';
+    const detail = flags.length ? flags.join(' · ') : localizedText('就绪');
+    lines.push(`<span class="${cls}">${row.display_name || row.id} — ${detail}</span>`);
+  }
+  ui.migrateImportCheck.hidden = false;
+  ui.migrateImportCheck.innerHTML = lines.join('<br>');
+}
+
+async function loadMigrateExportTargets() {
+  if (!api?.list_migrate_export_targets || !ui.migrateServerList) return;
+  try {
+    const result = await api.list_migrate_export_targets();
+    const servers = Array.isArray(result?.servers) ? result.servers : [];
+    const previous = new Set(migrateSelectedServerIds() || []);
+    ui.migrateServerList.innerHTML = '';
+    if (!servers.length) {
+      ui.migrateServerList.innerHTML = `<p class="migrate-aside-hint">${localizedText('暂无服务器可导出')}</p>`;
+      migrateTargetsLoaded = true;
+      return;
+    }
+    for (const server of servers) {
+      const id = String(server.id || '');
+      const label = document.createElement('label');
+      label.className = 'settings-pref check-label migrate-check';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.serverId = id;
+      input.checked = previous.size ? previous.has(id) : true;
+      const span = document.createElement('span');
+      span.className = 'settings-pref-text';
+      span.innerHTML = `<strong>${server.display_name || id}</strong><small>${server.host || ''}</small>`;
+      label.appendChild(input);
+      label.appendChild(span);
+      ui.migrateServerList.appendChild(label);
+      input.addEventListener('change', () => { void generateMigrateExport(); });
+    }
+    migrateTargetsLoaded = true;
+  } catch (_) {
+    migrateTargetsLoaded = false;
+  }
+}
+
+function setMigrateServerSelection(all) {
+  if (!ui.migrateServerList) return;
+  for (const box of ui.migrateServerList.querySelectorAll('input[type="checkbox"][data-server-id]')) {
+    box.checked = Boolean(all);
+  }
+  void generateMigrateExport();
 }
 
 async function generateMigrateExport({forceFile = false} = {}) {
@@ -5482,7 +5609,18 @@ async function generateMigrateExport({forceFile = false} = {}) {
     const includeSecrets = migrateWantsSecrets();
     const includeKeys = includeSecrets && migrateWantsKeys();
     const passphrase = includeSecrets ? readMigrateExportPassphrase() : '';
-    const result = await api.export_migrate_bundle(includeSecrets, passphrase, includeKeys);
+    const serverIds = migrateSelectedServerIds();
+    if (Array.isArray(serverIds) && serverIds.length === 0) {
+      throw new Error(localizedText('请至少选择一台服务器'));
+    }
+    const result = await api.export_migrate_bundle(
+      includeSecrets,
+      passphrase,
+      includeKeys,
+      serverIds,
+      migrateWantsPrefs(),
+      includeSecrets ? migrateTtlSeconds() : null,
+    );
     if (!result?.ok) throw new Error(localizedText(result?.error || '生成失败'));
     lastMigrateToken = String(result.token || '');
     lastMigrateFileText = String(result.file_text || '');
@@ -5499,7 +5637,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
         ui.migrateExportStatus,
         drew
           ? [localizedText('复制二维码到新电脑导入'), previewLine].filter(Boolean).join('\n')
-          : localizedText('二维码组件不可用，请保存文件'),
+          : localizedText('二维码组件不可用；请保存文件'),
         {error: !drew},
       );
       if (!drew && (forceFile || lastMigrateFileText)) {
@@ -5511,7 +5649,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
       if (ui.migrateExportFile) ui.migrateExportFile.hidden = false;
       setMigrateStatus(
         ui.migrateExportStatus,
-        [localizedText('配置较大，二维码装不下'), localizedText('请保存文件后导入'), previewLine].filter(Boolean).join('\n'),
+        [localizedText('配置较大，二维码装不下'), localizedText('请保存文件导入'), previewLine].filter(Boolean).join('\n'),
         {error: true},
       );
       if (forceFile && lastMigrateFileText) downloadMigrateFile(lastMigrateFileName, lastMigrateFileText);
@@ -5525,49 +5663,78 @@ async function generateMigrateExport({forceFile = false} = {}) {
   }
 }
 
-async function applyMigrateImportText(text) {
-  if (!api?.import_migrate_bundle || migrateImportBusy) return;
+function migrateImportMode() {
+  return ui.migrateModeMerge?.checked ? 'merge' : 'overwrite';
+}
+
+async function stageMigrateImportText(text) {
   const payload = String(text || '').trim();
   if (!payload) {
     setMigrateStatus(ui.migrateImportStatus, localizedText('请先导入或粘贴二维码'), {error: true});
     return;
   }
+  pendingMigrateImportText = payload;
   let needsPass = false;
+  let preview = null;
   try {
     if (api.preview_migrate_payload) {
-      const preview = await api.preview_migrate_payload(payload);
-      needsPass = Boolean(preview?.needs_passphrase);
+      const result = await api.preview_migrate_payload(payload);
+      if (!result?.ok) throw new Error(localizedText(result?.error || '无法解析迁移内容'));
+      needsPass = Boolean(result?.needs_passphrase);
+      preview = result?.preview || null;
       if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = !needsPass;
     }
-  } catch (_) {}
+  } catch (error) {
+    pendingMigrateImportText = '';
+    renderMigrateImportPreview(null);
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法解析迁移内容'), {error: true});
+    return;
+  }
+  renderMigrateImportPreview(preview, {needsPass});
+  setMigrateStatus(ui.migrateImportStatus, localizedText('已就绪，请确认导入方式'));
+}
+
+async function confirmMigrateImport() {
+  if (!api?.import_migrate_bundle || migrateImportBusy) return;
+  const payload = String(pendingMigrateImportText || '').trim();
+  if (!payload) {
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请先导入或粘贴二维码'), {error: true});
+    return;
+  }
+  let needsPass = Boolean(ui.migrateImportPassWrap && !ui.migrateImportPassWrap.hidden);
   let passphrase = '';
   if (needsPass) {
     passphrase = String(ui.migrateImportPassphrase?.value || '');
     if (!passphrase) {
-      if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = false;
       setMigrateStatus(ui.migrateImportStatus, localizedText('请输入迁移口令以导入加密内容'), {error: true});
       ui.migrateImportPassphrase?.focus();
       return;
     }
   }
-  const confirmed = window.confirm(localizedText('导入将替换当前服务器与界面配置，是否继续？'));
-  if (!confirmed) return;
+  const mode = migrateImportMode();
+  const applyPrefs = ui.migrateApplyPrefs ? Boolean(ui.migrateApplyPrefs.checked) : true;
+  const confirmText = mode === 'merge'
+    ? localizedText('导入将合并服务器配置，是否继续？')
+    : localizedText('导入将替换当前服务器与偏好设置，是否继续？');
+  if (!window.confirm(confirmText)) return;
   migrateImportBusy = true;
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在导入…'));
   try {
-    const result = await api.import_migrate_bundle(payload, passphrase);
+    const result = await api.import_migrate_bundle(payload, passphrase, mode, applyPrefs);
     if (!result?.ok) throw new Error(localizedText(result?.error || '导入失败'));
     if (result.profile) {
       acceptProfile(result.profile);
       openSettings({forceNormal: true});
-      if (typeof showSettingsPane === 'function') showSettingsPane('servers', {scroll: false});
+      if (typeof showSettingsPane === 'function') showSettingsPane('migrate', {scroll: false});
     }
     const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
     setMigrateStatus(
       ui.migrateImportStatus,
       [localizedText('导入完成'), formatMigratePreview(result.preview), ...warnings].filter(Boolean).join('\n'),
     );
-    showToast(localizedText('配置已迁移导入'));
+    renderMigrateCheck(result.check || null);
+    pendingMigrateImportText = '';
+    showToast(localizedText('已从迁移导入'));
   } catch (error) {
     setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('导入失败'), {error: true});
   } finally {
@@ -5611,11 +5778,11 @@ async function readMigrateImageFile(file) {
   if (isImage) {
     const token = await decodeMigrateQrFromBlob(file);
     setMigrateStatus(ui.migrateImportStatus, localizedText('已识别二维码'));
-    await applyMigrateImportText(token);
+    await stageMigrateImportText(token);
     return;
   }
   const text = await file.text();
-  await applyMigrateImportText(text);
+  await stageMigrateImportText(text);
 }
 
 async function pasteMigrateQrImage() {
@@ -5629,12 +5796,99 @@ async function pasteMigrateQrImage() {
       const blob = await item.getType(type);
       const token = await decodeMigrateQrFromBlob(blob);
       setMigrateStatus(ui.migrateImportStatus, localizedText('已识别二维码'));
-      await applyMigrateImportText(token);
+      await stageMigrateImportText(token);
       return;
     }
-    throw new Error(localizedText('剪贴板中没有图片'));
+    throw new Error(localizedText('剪贴板上没有图片'));
   } catch (error) {
     setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('读取失败'), {error: true});
+  }
+}
+
+function renderLanTransferStatus(transfer) {
+  if (!ui.migrateLanStatus) return;
+  if (!transfer?.active) {
+    ui.migrateLanStatus.hidden = true;
+    ui.migrateLanStatus.textContent = '';
+    return;
+  }
+  const mins = Math.max(1, Math.round(Number(transfer.expires_in_seconds || 0) / 60));
+  ui.migrateLanStatus.hidden = false;
+  ui.migrateLanStatus.textContent = [
+    localizedText('局域网传送已开启（同一 Wi‑Fi，不经公网）'),
+    transfer.url || '',
+    `${localizedText('约')} ${mins} ${localizedText('分钟后失效')} · ${localizedText('剩余次数')} ${transfer.downloads_left || 0}`,
+  ].filter(Boolean).join('\n');
+}
+
+async function refreshLanTransferStatus() {
+  if (!api?.lan_migrate_transfer_status) return;
+  try {
+    const result = await api.lan_migrate_transfer_status();
+    renderLanTransferStatus(result?.transfer);
+    if (!result?.transfer?.active && migrateLanPollTimer) {
+      clearInterval(migrateLanPollTimer);
+      migrateLanPollTimer = 0;
+    }
+  } catch (_) {}
+}
+
+async function startLanMigrateTransfer() {
+  if (!api?.start_lan_migrate_transfer) {
+    showToast(localizedText('当前版本不支持局域网传送'));
+    return;
+  }
+  try {
+    const includeSecrets = migrateWantsSecrets();
+    const includeKeys = includeSecrets && migrateWantsKeys();
+    const passphrase = includeSecrets ? readMigrateExportPassphrase() : '';
+    const serverIds = migrateSelectedServerIds();
+    if (Array.isArray(serverIds) && serverIds.length === 0) {
+      throw new Error(localizedText('请至少选择一台服务器'));
+    }
+    const result = await api.start_lan_migrate_transfer(
+      includeSecrets,
+      passphrase,
+      includeKeys,
+      serverIds,
+      migrateWantsPrefs(),
+      includeSecrets ? migrateTtlSeconds() : 600,
+    );
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法启动局域网传送'));
+    renderLanTransferStatus(result.transfer);
+    if (result.token) {
+      lastMigrateToken = String(result.token || '');
+      lastMigrateFileText = String(result.file_text || '');
+      lastMigrateFileName = String(result.file_name || lastMigrateFileName);
+      updateMigrateSummary(result.preview || null);
+      if (result.qr_eligible && lastMigrateToken) {
+        lastMigrateQrReady = drawMigrateQr(lastMigrateToken);
+        if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = !lastMigrateQrReady;
+      }
+    }
+    showToast(localizedText('局域网传送已开启'));
+    if (migrateLanPollTimer) clearInterval(migrateLanPollTimer);
+    migrateLanPollTimer = setInterval(() => { void refreshLanTransferStatus(); }, 5000);
+  } catch (error) {
+    showToast(error?.message || localizedText('无法启动局域网传送'));
+  }
+}
+
+async function fetchLanMigratePayload() {
+  if (!api?.fetch_lan_migrate_payload) return;
+  const url = String(ui.migrateLanUrl?.value || '').trim();
+  if (!url) {
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入局域网传送链接'), {error: true});
+    return;
+  }
+  setMigrateStatus(ui.migrateImportStatus, localizedText('正在取回…'));
+  try {
+    const result = await api.fetch_lan_migrate_payload(url);
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法取回局域网迁移内容'));
+    setMigrateStatus(ui.migrateImportStatus, localizedText('已取回迁移内容'));
+    await stageMigrateImportText(result.text || '');
+  } catch (error) {
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法取回局域网迁移内容'), {error: true});
   }
 }
 
@@ -5642,16 +5896,18 @@ function ensureMigrateQrForPane(paneId) {
   if (String(paneId) !== 'migrate') return;
   if (!api?.export_migrate_bundle) return;
   syncMigrateSecretFields();
-  if (migrateWantsSecrets()) {
-    // Wait for passphrase before generating a sealed QR.
-    if (String(ui.migratePassphrase?.value || '').length < 8) {
-      clearMigrateQr();
-      if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
-      setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置迁移口令'));
-      return;
+  void loadMigrateExportTargets().then(() => {
+    if (migrateWantsSecrets()) {
+      if (String(ui.migratePassphrase?.value || '').length < 8) {
+        clearMigrateQr();
+        if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
+        setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置迁移口令'));
+        return;
+      }
     }
-  }
-  void generateMigrateExport();
+    void generateMigrateExport();
+  });
+  void refreshLanTransferStatus();
 }
 
 
@@ -6319,6 +6575,12 @@ ui.migrateIncludeKeys?.addEventListener('change', () => {
   syncMigrateSecretFields();
   void generateMigrateExport();
 });
+ui.migrateIncludePrefs?.addEventListener('change', () => { void generateMigrateExport(); });
+ui.migrateTtl?.addEventListener('change', () => {
+  if (migrateWantsSecrets()) void generateMigrateExport();
+});
+ui.migrateSelectAll?.addEventListener('click', () => setMigrateServerSelection(true));
+ui.migrateSelectNone?.addEventListener('click', () => setMigrateServerSelection(false));
 const remakeMigrateQr = () => {
   if (!migrateWantsSecrets()) return;
   void generateMigrateExport();
@@ -6347,7 +6609,10 @@ ui.migrateExportFile?.addEventListener('click', () => {
   }
   void generateMigrateExport({forceFile: true});
 });
+ui.migrateLanStart?.addEventListener('click', () => { void startLanMigrateTransfer(); });
+ui.migrateLanFetch?.addEventListener('click', () => { void fetchLanMigratePayload(); });
 ui.migratePasteImage?.addEventListener('click', () => { void pasteMigrateQrImage(); });
+ui.migrateImportConfirm?.addEventListener('click', () => { void confirmMigrateImport(); });
 ui.migrateImportFile?.addEventListener('change', async (event) => {
   const file = event.target?.files?.[0];
   try {

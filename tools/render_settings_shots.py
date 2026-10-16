@@ -47,29 +47,44 @@ window.addEventListener('load', () => setTimeout(() => {
   currentProfile = {
     ...(currentProfile || {}),
     ui_language: lang,
-    servers: currentProfile?.servers || [{id: 'lab', display_name: 'lab', host: 'gpu.example.org'}],
+    display_name: 'demo',
+    servers: [
+      {id: 'lab', display_name: 'Lab GPU', host: 'gpu.example.org'},
+      {id: 'train', display_name: 'Train', host: 'train.example.org'},
+    ],
   };
   window.chrome = window.chrome || {};
   window.chrome.webview = window.chrome.webview || {};
-  // Compact demo token (~similar length to real sparse export) for a clean QR.
   const demoToken = 'VR1:eNqdj8FOwzAMhl8F-Vy6ptKY1mfgDRCKvMTtItKmstPCNJVnxxkc4MABbs6v35-_XMExYSZvMUNnDsfWPLT7w7GCPvFYMlgZR0aPfD-GgbW7Ww1UECYXF09ihRSRBboeo1AFM4q8JvbWpWVSQPMtkphKs0Sc-hAJuisEr1c89bjErGBxZxrRrsQS0qRSGhGXJ3RPVzihe6HpthKYXLYiZ93yQeaIFzvhqFB4xNNdo_E5SfnDMC9NTW84zpHqxEPxLwjhtbnNNOWQL_ZTCd53tVJ3wVvy7X5vjtpZVOILjjE4gq36i4z5IWN-kTH_lnnetg8OYZnm';
   api = {
     ...(api || {}),
+    list_migrate_export_targets: async () => ({
+      ok: true,
+      servers: [
+        {id: 'lab', display_name: 'Lab GPU', host: 'gpu.example.org'},
+        {id: 'train', display_name: 'Train', host: 'train.example.org'},
+      ],
+    }),
     export_migrate_bundle: async () => ({
       ok: true,
       token: demoToken,
       qr_eligible: true,
       file_text: '{}',
       file_name: 'demo.vramradar-migrate',
-      preview: {display_name: 'demo', server_count: 2},
+      preview: {display_name: 'demo', server_count: 2, includes_secrets: false, includes_preferences: true},
       includes_secrets: false,
     }),
     import_migrate_bundle: async () => ({ok: false, error: 'shot'}),
-    preview_migrate_payload: async () => ({ok: true, needs_passphrase: false}),
+    preview_migrate_payload: async () => ({ok: true, needs_passphrase: false, preview: {display_name: 'demo', server_count: 2}}),
+    start_lan_migrate_transfer: async () => ({ok: false, error: 'shot'}),
+    lan_migrate_transfer_status: async () => ({ok: true, transfer: {active: false}}),
+    stop_lan_migrate_transfer: async () => ({ok: true, transfer: {active: false}}),
+    fetch_lan_migrate_payload: async () => ({ok: false, error: 'shot'}),
   };
   openSettings({forceNormal: true});
   if (typeof showSettingsPane === 'function') showSettingsPane('migrate', {scroll: false});
-  setTimeout(() => {
+  setTimeout(async () => {
+    if (typeof loadMigrateExportTargets === 'function') await loadMigrateExportTargets();
     if (typeof drawMigrateQr === 'function') {
       const drew = drawMigrateQr(demoToken);
       if (typeof lastMigrateQrReady !== 'undefined') lastMigrateQrReady = drew;
@@ -82,16 +97,13 @@ window.addEventListener('load', () => setTimeout(() => {
     if (fileBtn) fileBtn.hidden = true;
     if (typeof syncMigrateSecretFields === 'function') syncMigrateSecretFields();
     if (typeof updateMigrateSummary === 'function') {
-      updateMigrateSummary({display_name: 'demo', server_count: 2, includes_secrets: false});
+      updateMigrateSummary({display_name: 'demo', server_count: 2, includes_secrets: false, includes_preferences: true});
     }
     window.VRAMRadarI18n?.localizeTree?.(document.body);
-  }, 400);
+  }, 500);
   const stack = document.getElementById('profile-settings');
   stack?.scrollIntoView({block: 'start'});
-  const dialogContent = document.querySelector('#settings-dialog .dialog-content');
-  if (dialogContent) dialogContent.scrollTop = 0;
-  window.VRAMRadarI18n?.localizeTree?.(document.body);
-}, 1200));
+}, 250));
 </script>
 """
 

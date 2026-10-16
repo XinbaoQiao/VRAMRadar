@@ -1,4 +1,4 @@
-"""Offline profile migration packages (QR + file).
+"""Offline profile migration packages (QR + file + optional LAN handoff).
 
 Design (vramradar-migrate/v1):
 - Default export is a *compact* profile: servers + non-default preferences only.
@@ -17,10 +17,16 @@ import hashlib
 import hmac
 import json
 import os
+import socket
+import threading
 import time
+import uuid
 import zlib
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .models import ConfigError, Profile, ServerProfile
 
@@ -31,6 +37,12 @@ QR_MAX_TOKEN_CHARS = 1200
 PBKDF2_ITERS = 200_000
 SEAL_VERSION = 1
 MAX_PRIVATE_KEY_EXPORT_BYTES = 16 * 1024
+DEFAULT_SEAL_TTL_SECONDS = 30 * 60
+MIN_SEAL_TTL_SECONDS = 5 * 60
+MAX_SEAL_TTL_SECONDS = 24 * 60 * 60
+DEFAULT_LAN_TTL_SECONDS = 10 * 60
+MIN_LAN_TTL_SECONDS = 60
+MAX_LAN_TTL_SECONDS = 30 * 60
 
 _MACHINE_LOCAL_PROFILE_KEYS = frozenset({
     "server_config_path",
@@ -145,7 +157,7 @@ def _compact_server_dict(server: dict[str, Any]) -> dict[str, Any]:
         if key in _SERVER_CORE_KEYS:
             row[key] = value
             continue
-        if key == "password" or key == "has_password":
+        if key == "password" or key == "has_pw":
             continue
         if key in baseline and baseline[key] == value:
             continue
@@ -158,7 +170,13 @@ def _compact_server_dict(server: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def _compact_profile_dict(raw: dict[str, Any], *, strip_auth_refs: bool) -> tuple[dict[str, Any], int]:
+def _compact_profile_dict(
+    raw: dict[str, Any],
+    *,
+    strip_auth_refs: bool,
+    server_ids: set[str] | None = None,
+    include_preferences: bool = True,
+) -> tuple[dict[str, Any], int]:
     profile_id = str(raw.get("id") or "default")
     defaults = Profile.empty(profile_id).to_dict()
     compact: dict[str, Any] = {
@@ -166,24 +184,27 @@ def _compact_profile_dict(raw: dict[str, Any], *, strip_auth_refs: bool) -> tupl
         "id": profile_id,
     }
     password_refs = 0
-    for key, value in raw.items():
-        if key in ("schema_version", "id", "servers"):
-            continue
-        if key in _MACHINE_LOCAL_PROFILE_KEYS:
-            continue
-        if key in defaults and defaults[key] == value:
-            continue
-        if value in ("", None, [], (), False) and key not in defaults:
-            continue
-        compact[key] = value
+    if include_preferences:
+        for key, value in raw.items():
+            if key in ("schema_version", "id", "servers"):
+                continue
+            if key in _MACHINE_LOCAL_PROFILE_KEYS:
+                continue
+            if key in defaults and defaults[key] == value:
+                continue
+            if value in ("", None, [], (), False) and key not in defaults:
+                continue
+            compact[key] = value
+    else:
+        name = str(raw.get("display_name") or "").strip()
+        if name and name != defaults.get("display_name"):
+            compact["display_name"] = name
 
     servers: list[dict[str, Any]] = []
-    for server in raw.get("servers", []) or []:
-        if not isinstance(server, dict):
-            continue
+    for server in _filter_servers(list(raw.get("servers", []) or []), server_ids=server_ids):
         row = dict(server)
         row.pop("password", None)
-        row.pop("has_password", None)
+        row.pop("has_pw", None)
         if row.get("auth_ref"):
             password_refs += 1
             if strip_auth_refs:
@@ -193,16 +214,34 @@ def _compact_profile_dict(raw: dict[str, Any], *, strip_auth_refs: bool) -> tupl
     return compact, password_refs
 
 
-def _export_profile_dict(profile: Profile, *, strip_auth_refs: bool) -> tuple[dict[str, Any], int]:
-    return _compact_profile_dict(profile.to_dict(), strip_auth_refs=strip_auth_refs)
+def _export_profile_dict(
+    profile: Profile,
+    *,
+    strip_auth_refs: bool,
+    server_ids: set[str] | None = None,
+    include_preferences: bool = True,
+) -> tuple[dict[str, Any], int]:
+    return _compact_profile_dict(
+        profile.to_dict(),
+        strip_auth_refs=strip_auth_refs,
+        server_ids=server_ids,
+        include_preferences=include_preferences,
+    )
 
 
-def collect_secrets(profile: Profile, secret_store: Any) -> dict[str, str]:
+def collect_secrets(
+    profile: Profile,
+    secret_store: Any,
+    *,
+    server_ids: set[str] | None = None,
+) -> dict[str, str]:
     secrets: dict[str, str] = {}
     getter = getattr(secret_store, "get", None)
     if getter is None:
         return secrets
     for server in profile.servers:
+        if server_ids is not None and server.id not in server_ids:
+            continue
         if not server.auth_ref:
             continue
         try:
@@ -214,10 +253,16 @@ def collect_secrets(profile: Profile, secret_store: Any) -> dict[str, str]:
     return secrets
 
 
-def collect_private_keys(profile: Profile) -> dict[str, str]:
+def collect_private_keys(
+    profile: Profile,
+    *,
+    server_ids: set[str] | None = None,
+) -> dict[str, str]:
     """Return ``sshkey:<server_id>`` → base64 private-key PEM for small local keys."""
     out: dict[str, str] = {}
     for server in profile.servers:
+        if server_ids is not None and server.id not in server_ids:
+            continue
         path_text = str(server.identity_file or "").strip()
         if not path_text:
             continue
@@ -243,6 +288,7 @@ def split_sealed_payload(secrets: dict[str, str]) -> tuple[dict[str, str], dict[
     return passwords, keys
 
 
+
 def build_bundle(
     profile: Profile,
     *,
@@ -251,38 +297,72 @@ def build_bundle(
     include_secrets: bool = False,
     include_private_keys: bool = False,
     created_at: float | None = None,
+    server_ids: list[str] | tuple[str, ...] | None = None,
+    include_preferences: bool = True,
+    ttl_seconds: int | None = None,
+    package_id: str | None = None,
 ) -> dict[str, Any]:
     include = bool(include_secrets)
     include_keys = bool(include_private_keys)
+    include_prefs = bool(include_preferences)
+    selected_ids = _normalize_server_ids(server_ids)
+    if selected_ids is not None and not selected_ids:
+        raise ConfigError("请至少选择一台服务器")
     if include_keys and not include:
         raise ConfigError("导出私钥前请先勾选含登录密码")
     if (include or include_keys) and not passphrase:
-        raise ConfigError("导出密码时必须设置迁移口令")
+        raise ConfigError("导出密码时请设置迁移口令")
     sealed = None
-    exported, password_refs = _export_profile_dict(profile, strip_auth_refs=not include)
+    exported, password_refs = _export_profile_dict(
+        profile,
+        strip_auth_refs=not include,
+        server_ids=selected_ids,
+        include_preferences=include_prefs,
+    )
+    if selected_ids is not None and not exported["servers"]:
+        raise ConfigError("所选服务器不存在")
     secret_payload: dict[str, str] = {}
     if include:
-        secret_payload.update(collect_secrets(profile, secret_store))
+        secret_payload.update(collect_secrets(profile, secret_store, server_ids=selected_ids))
     if include_keys:
-        keys = collect_private_keys(profile)
+        keys = collect_private_keys(profile, server_ids=selected_ids)
         if not keys:
-            raise ConfigError("当前配置没有可读的 SSH 私钥可导出")
+            raise ConfigError("当前配置没有可读取的 SSH 私钥可导出")
         secret_payload.update(keys)
     if include and not secret_payload:
         raise ConfigError("当前配置没有已保存的登录密码或私钥可导出")
+    created = int(created_at if created_at is not None else time.time())
+    expires_at = None
+    pkg_id = None
     if secret_payload:
         sealed = seal_secrets(passphrase or "", secret_payload)
         password_refs = len([k for k in secret_payload if not k.startswith("sshkey:")]) or password_refs
+        ttl = _clamp_ttl(
+            ttl_seconds,
+            default=DEFAULT_SEAL_TTL_SECONDS,
+            minimum=MIN_SEAL_TTL_SECONDS,
+            maximum=MAX_SEAL_TTL_SECONDS,
+        )
+        expires_at = created + ttl
+        pkg_id = str(package_id or uuid.uuid4())
     notes = [
-        "默认不含登录密码；勾选后用口令加密写入。",
-        "私钥默认只保留路径；勾选含私钥后才会加密打包。",
-        "额度监控的本机登录态不会迁移，到新电脑后需重新授权。",
+        "默认不含登录密码；可选口令加密后写入。",
+        "私钥默认只保留路径；含私钥时体积变大。",
+        "额度监测的本地登录态不会迁移；到新电脑后需重新授权。",
     ]
+    if expires_at is not None:
+        notes.append("含密码的迁移码有时限，请尽快在受信任设备上导入，勿长期留存。")
+    if not include_prefs:
+        notes.append("本次仅导出服务器，未包含界面偏好。")
     return {
         "format": FORMAT,
-        "created_at": int(created_at if created_at is not None else time.time()),
+        "created_at": created,
+        "expires_at": expires_at,
+        "package_id": pkg_id,
         "includes_secrets": bool(sealed),
         "includes_private_keys": bool(include_keys and sealed),
+        "includes_preferences": include_prefs,
+        "selected_server_ids": sorted(selected_ids) if selected_ids is not None else None,
         "password_count": len([k for k in (secret_payload or {}) if not k.startswith("sshkey:")]) if sealed else 0,
         "password_slots": password_refs,
         "private_key_count": len([k for k in (secret_payload or {}) if k.startswith("sshkey:")]) if sealed else 0,
@@ -300,9 +380,15 @@ def bundle_to_token(bundle: dict[str, Any]) -> str:
     }
     if not slim.get("includes_secrets"):
         slim.pop("secrets", None)
+        slim.pop("expires_at", None)
+        slim.pop("package_id", None)
     if not slim.get("includes_private_keys"):
         slim.pop("includes_private_keys", None)
         slim.pop("private_key_count", None)
+    if slim.get("includes_preferences", True):
+        slim.pop("includes_preferences", None)
+    if slim.get("selected_server_ids") is None:
+        slim.pop("selected_server_ids", None)
     raw = json.dumps(slim, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return TOKEN_PREFIX + _b64e(zlib.compress(raw, level=9))
 
@@ -342,24 +428,55 @@ def parse_migrate_text(text: str) -> dict[str, Any]:
     return bundle
 
 
-def preview_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+
+def preview_bundle(bundle: dict[str, Any], *, now: float | None = None) -> dict[str, Any]:
     profile = bundle.get("profile") if isinstance(bundle, dict) else None
     servers = profile.get("servers") if isinstance(profile, dict) else []
     server_names: list[str] = []
+    server_rows: list[dict[str, Any]] = []
     if isinstance(servers, list):
-        for row in servers[:12]:
-            if isinstance(row, dict):
-                server_names.append(str(row.get("display_name") or row.get("id") or "").strip() or "(unnamed)")
+        for row in servers:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("display_name") or row.get("id") or "").strip() or "(unnamed)"
+            sid = str(row.get("id") or "").strip()
+            server_rows.append({
+                "id": sid,
+                "display_name": name,
+                "host": str(row.get("host") or ""),
+                "has_auth_ref": bool(row.get("auth_ref")),
+                "has_identity_file": bool(str(row.get("identity_file") or "").strip()),
+            })
+            if len(server_names) < 12:
+                server_names.append(name)
+    expires_at = bundle.get("expires_at")
+    current = float(now if now is not None else time.time())
+    expired = False
+    expires_in_seconds = None
+    if expires_at is not None:
+        try:
+            expiry = float(expires_at)
+            expires_in_seconds = int(expiry - current)
+            expired = expires_in_seconds < 0
+        except Exception:
+            expires_in_seconds = None
     return {
         "format": bundle.get("format"),
         "created_at": bundle.get("created_at"),
+        "expires_at": expires_at,
+        "expires_in_seconds": expires_in_seconds,
+        "expired": expired,
+        "package_id": bundle.get("package_id"),
         "includes_secrets": bool(bundle.get("includes_secrets")),
         "includes_private_keys": bool(bundle.get("includes_private_keys")),
+        "includes_preferences": bool(bundle.get("includes_preferences", True)),
+        "selected_server_ids": list(bundle.get("selected_server_ids") or []) or None,
         "password_count": int(bundle.get("password_count") or 0),
         "password_slots": int(bundle.get("password_slots") or 0),
         "private_key_count": int(bundle.get("private_key_count") or 0),
         "server_count": len(servers) if isinstance(servers, list) else 0,
         "server_names": server_names,
+        "servers": server_rows,
         "display_name": str((profile or {}).get("display_name") or ""),
         "ui_language": str((profile or {}).get("ui_language") or ""),
         "notes": list(bundle.get("notes") or []),
@@ -384,8 +501,6 @@ def rebind_secrets_to_profile(
     target_profile_id: str,
 ) -> tuple[Profile, dict[str, str]]:
     """Rewrite auth_ref keys to ``server:<target>:<server_id>:login-password``."""
-    from dataclasses import replace
-
     passwords, _keys = split_sealed_payload(secrets)
     new_secrets: dict[str, str] = {}
     new_servers = []
@@ -413,8 +528,6 @@ def restore_private_keys(
     keys_root: Path,
 ) -> tuple[Profile, list[str]]:
     """Write sealed private keys under keys_root and retarget identity_file."""
-    from dataclasses import replace
-
     _passwords, key_map = split_sealed_payload(secrets)
     if not key_map:
         return profile, []
@@ -456,3 +569,345 @@ def secrets_for_import(bundle: dict[str, Any], passphrase: str | None) -> dict[s
     if not bundle.get("includes_secrets"):
         return {}
     return open_secrets(passphrase or "", bundle["secrets"])
+
+
+def _filter_servers(
+    servers: list[Any],
+    *,
+    server_ids: set[str] | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for server in servers or []:
+        if not isinstance(server, dict):
+            continue
+        sid = str(server.get("id") or "").strip()
+        if server_ids is not None and sid not in server_ids:
+            continue
+        out.append(server)
+    return out
+
+
+def _normalize_server_ids(server_ids: list[str] | tuple[str, ...] | None) -> set[str] | None:
+    if server_ids is None:
+        return None
+    cleaned = {str(item).strip() for item in server_ids if str(item).strip()}
+    return cleaned
+
+
+def _clamp_ttl(ttl_seconds: int | None, *, default: int, minimum: int, maximum: int) -> int:
+    if ttl_seconds is None:
+        return default
+    try:
+        value = int(ttl_seconds)
+    except Exception as exc:
+        raise ConfigError("有效期无效") from exc
+    if value < minimum or value > maximum:
+        raise ConfigError("有效期超出允许范围")
+    return value
+
+
+def assert_bundle_usable(
+    bundle: dict[str, Any],
+    *,
+    now: float | None = None,
+    consumed_ids: set[str] | frozenset[str] | None = None,
+) -> None:
+    """Reject expired or consumed sealed packages."""
+    if not bundle.get("includes_secrets"):
+        return
+    current = float(now if now is not None else time.time())
+    expires_at = bundle.get("expires_at")
+    if expires_at is not None:
+        try:
+            expiry = float(expires_at)
+        except Exception as exc:
+            raise ConfigError("迁移包有效期无效") from exc
+        if current > expiry:
+            raise ConfigError("含密码的迁移码已过期，请在原电脑重新生成")
+    package_id = str(bundle.get("package_id") or "").strip()
+    if package_id and consumed_ids and package_id in consumed_ids:
+        raise ConfigError("此迁移码已在本机使用过，请重新生成")
+
+
+def merge_profiles(
+    current: Profile,
+    incoming: Profile,
+    *,
+    apply_preferences: bool = True,
+) -> Profile:
+    """Merge servers by id (incoming wins). Optionally apply incoming preferences."""
+    by_id = {server.id: server for server in current.servers}
+    for server in incoming.servers:
+        by_id[server.id] = server
+    merged_servers = tuple(by_id.values())
+    if apply_preferences:
+        base = replace(incoming, id=current.id, servers=merged_servers)
+        return replace(
+            base,
+            server_config_path=current.server_config_path,
+            navigator_width=current.navigator_width,
+            navigator_height=current.navigator_height,
+            ignored_ssh_aliases=current.ignored_ssh_aliases,
+            pending_alias_choices=current.pending_alias_choices,
+            resolved_alias_choice_keys=current.resolved_alias_choice_keys,
+            usage_session_consent=current.usage_session_consent,
+            codex_executable=current.codex_executable,
+        )
+    return replace(current, servers=merged_servers)
+
+
+def post_import_check(profile: Profile, secret_store: Any) -> dict[str, Any]:
+    """Mark servers missing passwords or private-key files after import."""
+    getter = getattr(secret_store, "get", None)
+    items: list[dict[str, Any]] = []
+    missing_pw = 0
+    missing_key = 0
+    for server in profile.servers:
+        has_pw = False
+        if server.auth_ref and getter is not None:
+            try:
+                value = getter(server.auth_ref)
+            except Exception:
+                value = None
+            has_pw = isinstance(value, str) and bool(value)
+        identity = str(server.identity_file or "").strip()
+        key_ok = False
+        key_missing = False
+        if identity:
+            try:
+                key_ok = Path(identity).expanduser().is_file()
+            except Exception:
+                key_ok = False
+            key_missing = not key_ok
+        needs_pw = bool(server.auth_ref) and not has_pw
+        if needs_pw:
+            missing_pw += 1
+        if key_missing:
+            missing_key += 1
+        items.append({
+            "id": server.id,
+            "display_name": server.display_name or server.id,
+            "host": server.host,
+            "has_pw": has_pw,
+            "auth_ref": server.auth_ref or "",
+            "identity_file": identity,
+            "identity_file_ok": key_ok if identity else None,
+            "missing_pw": needs_pw,
+            "missing_key": key_missing,
+            "ok": not needs_pw and not key_missing,
+        })
+    return {
+        "server_count": len(items),
+        "missing_pw_count": missing_pw,
+        "missing_key_count": missing_key,
+        "ok_count": sum(1 for row in items if row["ok"]),
+        "servers": items,
+    }
+
+
+def list_export_targets(profile: Profile) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for server in profile.servers:
+        rows.append({
+            "id": server.id,
+            "display_name": server.display_name or server.id,
+            "host": server.host,
+            "username": server.username,
+            "has_auth_ref": bool(server.auth_ref),
+            "has_identity_file": bool(str(server.identity_file or "").strip()),
+        })
+    return rows
+
+
+def guess_lan_ipv4() -> str:
+    """Best-effort LAN IPv4 for same-network handoff URLs."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+    except Exception:
+        pass
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if ip and not ip.startswith("127."):
+                return ip
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+
+class LanMigrateTransfer:
+    """One-shot / short-lived HTTP handoff on the local network."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._httpd: ThreadingHTTPServer | None = None
+        self._thread: threading.Thread | None = None
+        self._token = ""
+        self._payload = ""
+        self._expires_at = 0.0
+        self._downloads_left = 0
+        self._host = ""
+        self._port = 0
+        self._started_at = 0.0
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            active = self._httpd is not None and self._downloads_left > 0 and time.time() <= self._expires_at
+            return {
+                "active": active,
+                "url": self.url() if active else "",
+                "token": self._token if active else "",
+                "host": self._host if active else "",
+                "port": self._port if active else 0,
+                "expires_at": int(self._expires_at) if active else None,
+                "expires_in_seconds": max(0, int(self._expires_at - time.time())) if active else 0,
+                "downloads_left": self._downloads_left if active else 0,
+            }
+
+    def url(self) -> str:
+        if not self._host or not self._port or not self._token:
+            return ""
+        return f"http://{self._host}:{self._port}/m/{self._token}"
+
+    def stop(self) -> None:
+        with self._lock:
+            httpd = self._httpd
+            self._httpd = None
+            self._token = ""
+            self._payload = ""
+            self._downloads_left = 0
+            self._expires_at = 0.0
+            self._host = ""
+            self._port = 0
+        if httpd is not None:
+            try:
+                httpd.shutdown()
+            except Exception:
+                pass
+            try:
+                httpd.server_close()
+            except Exception:
+                pass
+
+    def start(
+        self,
+        payload_text: str,
+        *,
+        ttl_seconds: int | None = None,
+        max_downloads: int = 1,
+    ) -> dict[str, Any]:
+        if not isinstance(payload_text, str) or not payload_text.strip():
+            raise ConfigError("没有可局域网传送的迁移内容")
+        ttl = _clamp_ttl(
+            ttl_seconds,
+            default=DEFAULT_LAN_TTL_SECONDS,
+            minimum=MIN_LAN_TTL_SECONDS,
+            maximum=MAX_LAN_TTL_SECONDS,
+        )
+        downloads = max(1, min(int(max_downloads or 1), 3))
+        self.stop()
+        token = _b64e(os.urandom(18))
+        host = guess_lan_ipv4()
+        transfer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+                return
+
+            def do_GET(self) -> None:  # noqa: N802
+                parsed = urlparse(self.path)
+                path = parsed.path or ""
+                with transfer._lock:
+                    alive = (
+                        transfer._httpd is not None
+                        and transfer._downloads_left > 0
+                        and time.time() <= transfer._expires_at
+                        and path == f"/m/{transfer._token}"
+                    )
+                    body = transfer._payload if alive else ""
+                    if alive:
+                        transfer._downloads_left -= 1
+                        remaining = transfer._downloads_left
+                    else:
+                        remaining = 0
+                if not alive or not body:
+                    self.send_response(404)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(b"not found or expired\n")
+                    if remaining <= 0:
+                        threading.Thread(target=transfer.stop, daemon=True).start()
+                    return
+                data = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-VRAMRadar-Migrate", "1")
+                self.end_headers()
+                self.wfile.write(data)
+                if remaining <= 0:
+                    threading.Thread(target=transfer.stop, daemon=True).start()
+
+        httpd = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        port = int(httpd.server_address[1])
+        with self._lock:
+            self._httpd = httpd
+            self._token = token
+            self._payload = payload_text
+            self._expires_at = time.time() + ttl
+            self._downloads_left = downloads
+            self._host = host
+            self._port = port
+            self._started_at = time.time()
+        thread = threading.Thread(target=httpd.serve_forever, name="vramradar-lan-migrate", daemon=True)
+        self._thread = thread
+        thread.start()
+
+        def _auto_stop() -> None:
+            time.sleep(ttl + 1)
+            status = self.status()
+            if status.get("active"):
+                self.stop()
+
+        threading.Thread(target=_auto_stop, daemon=True).start()
+        return self.status()
+
+    def fetch(self, url: str, *, timeout: float = 8.0) -> str:
+        """Pull a LAN migrate payload from another computer on the same network."""
+        import urllib.error
+        import urllib.request
+
+        cleaned = str(url or "").strip()
+        if not cleaned:
+            raise ConfigError("请输入局域网传送链接")
+        parsed = urlparse(cleaned)
+        if parsed.scheme != "http":
+            raise ConfigError("局域网传送仅支持 http 链接")
+        if not parsed.path.startswith("/m/"):
+            raise ConfigError("局域网传送链接无效")
+        try:
+            with urllib.request.urlopen(cleaned, timeout=timeout) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise ConfigError("传送链接已失效或已取走") from exc
+            raise ConfigError("无法从局域网取回迁移内容") from exc
+        except Exception as exc:
+            raise ConfigError("无法连接局域网传送，请确认同一 Wi‑Fi 且对方已开启传送") from exc
+        text = raw.decode("utf-8", errors="strict")
+        parse_migrate_text(text)
+        return text
+
+
+_LAN_TRANSFER = LanMigrateTransfer()
+
+
+def get_lan_transfer() -> LanMigrateTransfer:
+    return _LAN_TRANSFER
+

@@ -2052,6 +2052,120 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   grid-template-columns: 1fr;
 }
 
+
+.settings-pane-migrate .migrate-select-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--surface-2));
+}
+.settings-pane-migrate .migrate-select-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-pane-migrate .migrate-select-head strong {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+}
+.settings-pane-migrate .migrate-select-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.settings-pane-migrate .migrate-select-actions .button {
+  min-height: 28px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+.settings-pane-migrate .migrate-server-list {
+  display: grid;
+  gap: 6px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 2px;
+}
+.settings-pane-migrate .migrate-server-list .migrate-check {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: var(--surface);
+}
+.settings-pane-migrate .migrate-server-list .migrate-check:hover {
+  border-color: var(--border);
+}
+.settings-pane-migrate .migrate-field select {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.settings-pane-migrate .migrate-lan-status {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px dashed var(--border-strong);
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+.settings-pane-migrate .migrate-lan-fetch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.settings-pane-migrate .migrate-import-preview {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.settings-pane-migrate .migrate-import-preview strong {
+  font-size: 13px;
+}
+.settings-pane-migrate .migrate-import-mode {
+  display: grid;
+  gap: 8px;
+}
+.settings-pane-migrate .migrate-import-check {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.settings-pane-migrate .migrate-import-check .is-bad {
+  color: var(--red);
+}
+.settings-pane-migrate .migrate-import-check .is-ok {
+  color: color-mix(in srgb, var(--green, #2f9e44) 80%, var(--text));
+}
+.settings-pane-migrate .migrate-actions-export {
+  grid-template-columns: 1fr 1fr;
+}
+.settings-pane-migrate .migrate-actions-export #migrate-export-file,
+.settings-pane-migrate .migrate-actions-export #migrate-lan-start {
+  grid-column: 1 / -1;
+}
+.settings-pane-migrate .migrate-panel-body {
+  max-width: 720px;
+}
+
 @media (max-width: 720px) {
   .settings-pane-migrate .migrate-export-grid {
     grid-template-columns: 1fr;
@@ -2076,5 +2190,4 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   .settings-pane-migrate .migrate-actions-import {
     grid-template-columns: 1fr;
   }
-}
 }

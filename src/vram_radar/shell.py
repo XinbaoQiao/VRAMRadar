@@ -70,11 +70,16 @@ from .server_catalog import (
 )
 from .openssh_resolution import format_openssh_connection_summary
 from .migrate import (
+    assert_bundle_usable,
     build_bundle,
     bundle_to_token,
     encode_bundle_text,
+    get_lan_transfer,
+    list_export_targets,
     materialize_profile,
+    merge_profiles,
     parse_migrate_text,
+    post_import_check,
     preview_bundle,
     rebind_secrets_to_profile,
     restore_private_keys,
@@ -4787,20 +4792,61 @@ class AppApi:
         }
 
 
+    def _consumed_migrate_ids_path(self):
+        return self.paths.config / "consumed-migrate-ids.json"
+
+    def _load_consumed_migrate_ids(self) -> set[str]:
+        path = self._consumed_migrate_ids_path()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return set()
+        if not isinstance(raw, list):
+            return set()
+        return {str(item).strip() for item in raw if str(item).strip()}
+
+    def _remember_consumed_migrate_id(self, package_id: str) -> None:
+        pid = str(package_id or "").strip()
+        if not pid:
+            return
+        ids = self._load_consumed_migrate_ids()
+        ids.add(pid)
+        # Keep the list bounded.
+        ordered = sorted(ids)[-200:]
+        path = self._consumed_migrate_ids_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(ordered, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def list_migrate_export_targets(self) -> dict[str, Any]:
+        try:
+            return {"ok": True, "servers": list_export_targets(self.profile)}
+        except Exception:
+            return {"ok": False, "error": "无法列出可导出的服务器", "code": "migrate_targets_failed", "servers": []}
+
     def export_migrate_bundle(
         self,
         include_secrets: bool = False,
         passphrase: str = "",
         include_private_keys: bool = False,
+        server_ids: list[str] | None = None,
+        include_preferences: bool = True,
+        ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
-        """Build a migrate package for QR / file transfer."""
+        """Build a migrate package for QR / file / LAN transfer."""
         try:
+            selected = server_ids if server_ids else None
             bundle = build_bundle(
                 self.profile,
                 secret_store=self.secret_store,
                 passphrase=passphrase or None,
                 include_secrets=bool(include_secrets),
                 include_private_keys=bool(include_private_keys),
+                server_ids=selected,
+                include_preferences=bool(include_preferences),
+                ttl_seconds=ttl_seconds,
             )
             payload = bundle_to_token(bundle)
             file_text = encode_bundle_text(bundle)
@@ -4814,6 +4860,9 @@ class AppApi:
                 "file_name": f"vramradar-migrate-{self.profile.id}.vramradar-migrate",
                 "includes_secrets": bool(bundle.get("includes_secrets")),
                 "includes_private_keys": bool(bundle.get("includes_private_keys")),
+                "includes_preferences": bool(bundle.get("includes_preferences", True)),
+                "expires_at": bundle.get("expires_at"),
+                "package_id": bundle.get("package_id"),
             }
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_export_invalid"}
@@ -4823,14 +4872,28 @@ class AppApi:
     def preview_migrate_payload(self, text: str = "") -> dict[str, Any]:
         try:
             bundle = parse_migrate_text(text)
-            return {"ok": True, "preview": preview_bundle(bundle), "needs_passphrase": bool(bundle.get("includes_secrets"))}
+            assert_bundle_usable(bundle, consumed_ids=self._load_consumed_migrate_ids())
+            return {
+                "ok": True,
+                "preview": preview_bundle(bundle),
+                "needs_passphrase": bool(bundle.get("includes_secrets")),
+            }
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_preview_invalid"}
         except Exception:
             return {"ok": False, "error": "无法解析迁移内容", "code": "migrate_preview_failed"}
 
-    def import_migrate_bundle(self, text: str = "", passphrase: str = "") -> dict[str, Any]:
-        """Replace the current profile from a migrate token or file body."""
+    def import_migrate_bundle(
+        self,
+        text: str = "",
+        passphrase: str = "",
+        mode: str = "overwrite",
+        apply_preferences: bool = True,
+    ) -> dict[str, Any]:
+        """Import a migrate token or file body (overwrite or merge)."""
+        mode_text = str(mode or "overwrite").strip().lower()
+        if mode_text not in {"overwrite", "merge"}:
+            return {"ok": False, "error": "导入模式无效", "code": "migrate_import_invalid"}
         if not self._profile_mutation_lock.acquire(blocking=False):
             return {
                 "ok": False,
@@ -4842,6 +4905,7 @@ class AppApi:
         try:
             try:
                 bundle = parse_migrate_text(text)
+                assert_bundle_usable(bundle, consumed_ids=self._load_consumed_migrate_ids())
                 incoming = materialize_profile(bundle, target_profile_id=self.profile.id)
                 raw_secrets = secrets_for_import(bundle, passphrase or None)
                 profile, secrets = rebind_secrets_to_profile(
@@ -4849,23 +4913,34 @@ class AppApi:
                     raw_secrets,
                     target_profile_id=self.profile.id,
                 )
-                key_warnings: list[str] = []
+                key_warnings = []
                 if bundle.get("includes_private_keys"):
                     profile, key_warnings = restore_private_keys(
                         profile,
                         raw_secrets,
                         keys_root=self.paths.config / "migrated-keys",
                     )
+                if mode_text == "merge":
+                    profile = merge_profiles(
+                        self.profile,
+                        profile,
+                        apply_preferences=bool(apply_preferences) and bool(bundle.get("includes_preferences", True)),
+                    )
+                    # Keep secrets only for servers present after merge; rebinding already
+                    # targeted incoming servers. Existing local secrets for other servers stay.
+                elif not bool(apply_preferences) and bool(bundle.get("includes_preferences", True)):
+                    # Overwrite servers/secrets but keep local preferences.
+                    profile = merge_profiles(self.profile, profile, apply_preferences=False)
 
             except ConfigError as exc:
                 return {"ok": False, "error": str(exc), "code": "migrate_import_invalid"}
 
-            # Replace credential set for servers present in the new profile.
             retained_refs = {server.auth_ref for server in profile.servers if server.auth_ref}
             secret_operations: dict[str, str | None] = {ref: value for ref, value in secrets.items()}
-            for old_server in self.profile.servers:
-                if old_server.auth_ref and old_server.auth_ref not in retained_refs:
-                    secret_operations[old_server.auth_ref] = None
+            if mode_text == "overwrite":
+                for old_server in self.profile.servers:
+                    if old_server.auth_ref and old_server.auth_ref not in retained_refs:
+                        secret_operations[old_server.auth_ref] = None
 
             try:
                 ordered = sorted(secret_operations.items(), key=lambda item: item[1] is not None)
@@ -4927,23 +5002,98 @@ class AppApi:
             tray_controller = self._tray_controller
             if tray_controller is not None:
                 tray_controller.refresh_menu()
+            if bundle.get("includes_secrets"):
+                self._remember_consumed_migrate_id(str(bundle.get("package_id") or ""))
             warnings: list[str] = []
             warnings.extend(key_warnings)
             if bundle.get("includes_secrets"):
-                warnings.append(f"已写入 {len(secrets)} 个登录密码到系统凭据库")
+                warnings.append(f"已写入 {len(secrets)} 条登录密码到系统凭据库")
             else:
                 slots = int(bundle.get("password_slots") or 0)
                 if slots:
-                    warnings.append(f"原配置有 {slots} 个已保存密码未包含在迁移包中，请在新电脑重新输入")
-                warnings.append("SSH 私钥文件不会随迁移复制，请确认本机路径仍可用")
+                    warnings.append(f"原配置有 {slots} 个已保存密码未包含在迁移包中；请在新电脑重新输入")
+                warnings.append("SSH 私钥文件不会随迁移复制；请确认本地路径仍可用")
+            check = post_import_check(profile, self.secret_store)
+            if check.get("missing_pw_count"):
+                warnings.append(f"自检：{check['missing_pw_count']} 台服务器缺少登录密码")
+            if check.get("missing_key_count"):
+                warnings.append(f"自检：{check['missing_key_count']} 台服务器的私钥文件不存在")
             return {
                 "ok": True,
                 "profile": self._desktop_profile(profile),
                 "preview": preview_bundle(bundle),
                 "warnings": warnings,
+                "mode": mode_text,
+                "check": check,
             }
         finally:
             self._profile_mutation_lock.release()
+
+    def start_lan_migrate_transfer(
+        self,
+        include_secrets: bool = False,
+        passphrase: str = "",
+        include_private_keys: bool = False,
+        server_ids: list[str] | None = None,
+        include_preferences: bool = True,
+        ttl_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Start a short-lived same-LAN one-shot transfer (no public cloud)."""
+        exported = self.export_migrate_bundle(
+            include_secrets=include_secrets,
+            passphrase=passphrase,
+            include_private_keys=include_private_keys,
+            server_ids=server_ids,
+            include_preferences=include_preferences,
+            ttl_seconds=ttl_seconds,
+        )
+        if not exported.get("ok"):
+            return exported
+        try:
+            payload = str(exported.get("file_text") or "")
+            status = get_lan_transfer().start(payload, ttl_seconds=min(int(ttl_seconds or 600), 1800))
+            return {
+                "ok": True,
+                "transfer": status,
+                "preview": exported.get("preview"),
+                "includes_secrets": exported.get("includes_secrets"),
+                "qr_eligible": exported.get("qr_eligible"),
+                "token": exported.get("token"),
+                "file_text": exported.get("file_text"),
+                "file_name": exported.get("file_name"),
+            }
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "migrate_lan_invalid"}
+        except Exception:
+            return {"ok": False, "error": "无法启动局域网传送", "code": "migrate_lan_failed"}
+
+    def lan_migrate_transfer_status(self) -> dict[str, Any]:
+        try:
+            return {"ok": True, "transfer": get_lan_transfer().status()}
+        except Exception:
+            return {"ok": False, "error": "无法读取局域网传送状态", "code": "migrate_lan_status_failed", "transfer": {"active": False}}
+
+    def stop_lan_migrate_transfer(self) -> dict[str, Any]:
+        try:
+            get_lan_transfer().stop()
+            return {"ok": True, "transfer": get_lan_transfer().status()}
+        except Exception:
+            return {"ok": False, "error": "无法停止局域网传送", "code": "migrate_lan_stop_failed"}
+
+    def fetch_lan_migrate_payload(self, url: str = "") -> dict[str, Any]:
+        try:
+            text = get_lan_transfer().fetch(url)
+            bundle = parse_migrate_text(text)
+            return {
+                "ok": True,
+                "text": text,
+                "preview": preview_bundle(bundle),
+                "needs_passphrase": bool(bundle.get("includes_secrets")),
+            }
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "migrate_lan_fetch_invalid"}
+        except Exception:
+            return {"ok": False, "error": "无法取回局域网迁移内容", "code": "migrate_lan_fetch_failed"}
 
     def import_server_config(self, path: str | list[str] = "") -> dict[str, Any]:
         if (
