@@ -1822,7 +1822,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   display: grid;
   grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   gap: 16px 20px;
-  align-items: start;
+  align-items: stretch;
 }
 .settings-pane-migrate .migrate-qr-column {
   display: grid;
@@ -1852,10 +1852,50 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   image-rendering: pixelated;
 }
 .settings-pane-migrate .migrate-side-column {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-content: start;
   min-width: 0;
+  min-height: 100%;
+}
+.settings-pane-migrate .migrate-aside {
+  margin-top: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--surface-2));
+  box-sizing: border-box;
+}
+.settings-pane-migrate .migrate-summary {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.settings-pane-migrate .migrate-steps {
+  margin: 0;
+  padding: 0 0 0 1.15em;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.settings-pane-migrate .migrate-steps li {
+  margin: 0 0 2px;
+}
+.settings-pane-migrate .migrate-aside-hint {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 450;
+}
+.settings-pane-migrate .migrate-panel-body.is-compact .migrate-aside {
+  margin-top: 4px;
 }
 .settings-pane-migrate .migrate-options {
   display: grid;

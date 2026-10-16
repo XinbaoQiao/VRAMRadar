@@ -115,6 +115,7 @@ const ui = {
   migrateImportPassWrap: document.getElementById('migrate-import-pass-wrap'),
   migrateImportPassphrase: document.getElementById('migrate-import-passphrase'),
   migratePrivacy: document.getElementById('migrate-privacy'),
+  migrateSummary: document.getElementById('migrate-summary'),
   migrateImportStatus: document.getElementById('migrate-import-status'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
@@ -5296,6 +5297,7 @@ let lastMigrateFileText = '';
 let lastMigrateFileName = '';
 let lastMigrateQrReady = false;
 let lastMigrateIncludesSecrets = false;
+let lastMigratePreview = null;
 
 function setMigrateStatus(el, message, {error = false} = {}) {
   if (!el) return;
@@ -5331,6 +5333,7 @@ function syncMigrateSecretFields() {
         : localizedText('已含加密密码'))
       : localizedText('默认不含登录密码与私钥');
   }
+  updateMigrateSummary(lastMigratePreview);
 }
 
 function readMigrateExportPassphrase() {
@@ -5434,6 +5437,28 @@ async function saveMigrateQrImage() {
   return true;
 }
 
+
+function updateMigrateSummary(preview) {
+  if (!ui.migrateSummary) return;
+  if (preview && typeof preview === 'object') {
+    lastMigratePreview = preview;
+  }
+  const p = lastMigratePreview;
+  if (!p || typeof p !== 'object') {
+    ui.migrateSummary.textContent = migrateWantsSecrets()
+      ? localizedText('设置口令后生成含密码二维码')
+      : localizedText('正在准备本机配置…');
+    return;
+  }
+  const line = formatMigratePreview(p);
+  const mode = migrateWantsSecrets()
+    ? (migrateWantsKeys()
+      ? localizedText('当前：含加密密码与私钥')
+      : localizedText('当前：含加密密码'))
+    : localizedText('当前：不含密码与私钥');
+  ui.migrateSummary.textContent = [line, mode].filter(Boolean).join(' · ');
+}
+
 function formatMigratePreview(preview) {
   if (!preview || typeof preview !== 'object') return '';
   const parts = [];
@@ -5463,6 +5488,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
     lastMigrateFileText = String(result.file_text || '');
     lastMigrateFileName = String(result.file_name || 'vramradar-migrate.vramradar-migrate');
     lastMigrateIncludesSecrets = Boolean(result.includes_secrets);
+    updateMigrateSummary(result.preview || null);
     const previewLine = formatMigratePreview(result.preview);
     if (ui.migrateExportFile) ui.migrateExportFile.hidden = Boolean(result.qr_eligible);
     if (result.qr_eligible && lastMigrateToken) {

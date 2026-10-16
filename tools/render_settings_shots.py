@@ -81,6 +81,9 @@ window.addEventListener('load', () => setTimeout(() => {
     if (status) { status.hidden = true; status.textContent = ''; status.classList.remove('is-error'); }
     if (fileBtn) fileBtn.hidden = true;
     if (typeof syncMigrateSecretFields === 'function') syncMigrateSecretFields();
+    if (typeof updateMigrateSummary === 'function') {
+      updateMigrateSummary({display_name: 'demo', server_count: 2, includes_secrets: false});
+    }
     window.VRAMRadarI18n?.localizeTree?.(document.body);
   }, 400);
   const stack = document.getElementById('profile-settings');
@@ -130,6 +133,9 @@ window.addEventListener('load', () => setTimeout(() => {
     if (pass) pass.value = 'demo-pass-word';
     if (confirm) confirm.value = 'demo-pass-word';
     if (typeof syncMigrateSecretFields === 'function') syncMigrateSecretFields();
+    if (typeof updateMigrateSummary === 'function') {
+      updateMigrateSummary({display_name: 'demo', server_count: 2, includes_secrets: true});
+    }
     if (typeof drawMigrateQr === 'function') {
       const drew = drawMigrateQr(demoToken);
       if (typeof lastMigrateQrReady !== 'undefined') lastMigrateQrReady = drew;
