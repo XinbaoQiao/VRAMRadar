@@ -98,6 +98,16 @@ const ui = {
   extensionsSettings: document.getElementById('extensions-settings'),
   codexEnabled: document.getElementById('quota-usage-enabled'),
   importPanel: document.getElementById('import-panel'),
+  migratePanel: document.getElementById('migrate-panel'),
+  migrateCopyImage: document.getElementById('migrate-copy-image'),
+  migrateSaveImage: document.getElementById('migrate-save-image'),
+  migrateExportFile: document.getElementById('migrate-export-file'),
+  migrateExportStatus: document.getElementById('migrate-export-status'),
+  migrateQrWrap: document.getElementById('migrate-qr-wrap'),
+  migrateQrCanvas: document.getElementById('migrate-qr-canvas'),
+  migratePasteImage: document.getElementById('migrate-paste-image'),
+  migrateImportFile: document.getElementById('migrate-import-file'),
+  migrateImportStatus: document.getElementById('migrate-import-status'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
   cancelSettings: document.getElementById('cancel-settings'),
@@ -4781,6 +4791,7 @@ function showSettingsPane(paneId, options = {}) {
     pane?.scrollIntoView({ block: 'nearest' });
     ui.dialog?.querySelector('.dialog-content')?.scrollTo?.({ top: 0 });
   }
+  if (typeof ensureMigrateQrForPane === 'function') ensureMigrateQrForPane(next);
 }
 
 function setOnboardingStep(step) {
@@ -5267,6 +5278,262 @@ async function loadApplication() {
 }
 
 
+
+
+
+let migrateExportBusy = false;
+let migrateImportBusy = false;
+let lastMigrateToken = '';
+let lastMigrateFileText = '';
+let lastMigrateFileName = '';
+let lastMigrateQrReady = false;
+
+function setMigrateStatus(el, message, {error = false} = {}) {
+  if (!el) return;
+  const text = String(message || '').trim();
+  if (!text) {
+    el.hidden = true;
+    el.textContent = '';
+    el.classList.remove('is-error');
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
+  el.classList.toggle('is-error', Boolean(error));
+}
+
+function drawMigrateQr(token) {
+  const canvas = ui.migrateQrCanvas;
+  if (!canvas || typeof qrcode !== 'function') return false;
+  const qr = qrcode(0, 'M');
+  qr.addData(token);
+  qr.make();
+  const cell = Math.max(2, Math.floor(240 / qr.getModuleCount()));
+  const size = cell * qr.getModuleCount();
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#111111';
+  for (let row = 0; row < qr.getModuleCount(); row += 1) {
+    for (let col = 0; col < qr.getModuleCount(); col += 1) {
+      if (qr.isDark(row, col)) ctx.fillRect(col * cell, row * cell, cell, cell);
+    }
+  }
+  return true;
+}
+
+function clearMigrateQr() {
+  const canvas = ui.migrateQrCanvas;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = 240;
+  canvas.height = 240;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 240, 240);
+  lastMigrateQrReady = false;
+}
+
+function downloadMigrateBlob(fileName, blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName || 'vramradar-migrate.png';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadMigrateFile(fileName, text) {
+  downloadMigrateBlob(fileName || 'vramradar-migrate.vramradar-migrate', new Blob([text], {type: 'application/json;charset=utf-8'}));
+}
+
+function migrateCanvasPngBlob() {
+  const canvas = ui.migrateQrCanvas;
+  if (!canvas || !lastMigrateQrReady) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob || null), 'image/png');
+  });
+}
+
+async function copyMigrateQrImage() {
+  const blob = await migrateCanvasPngBlob();
+  if (!blob) return false;
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+async function saveMigrateQrImage() {
+  const blob = await migrateCanvasPngBlob();
+  if (!blob) return false;
+  downloadMigrateBlob('vramradar-migrate.png', blob);
+  return true;
+}
+
+function formatMigratePreview(preview) {
+  if (!preview || typeof preview !== 'object') return '';
+  const parts = [];
+  const name = String(preview.display_name || '').trim();
+  if (name) parts.push(name);
+  const serverCount = Number(preview.server_count) || 0;
+  parts.push(`${localizedText('服务器')} ${serverCount}`);
+  return parts.join(' · ');
+}
+
+async function generateMigrateExport({forceFile = false} = {}) {
+  if (!api?.export_migrate_bundle || migrateExportBusy) return;
+  migrateExportBusy = true;
+  setMigrateStatus(ui.migrateExportStatus, localizedText('正在生成…'));
+  try {
+    const result = await api.export_migrate_bundle(false, '');
+    if (!result?.ok) throw new Error(localizedText(result?.error || '生成失败'));
+    lastMigrateToken = String(result.token || '');
+    lastMigrateFileText = String(result.file_text || '');
+    lastMigrateFileName = String(result.file_name || 'vramradar-migrate.vramradar-migrate');
+    const previewLine = formatMigratePreview(result.preview);
+    if (ui.migrateExportFile) ui.migrateExportFile.hidden = Boolean(result.qr_eligible);
+    if (result.qr_eligible && lastMigrateToken) {
+      const drew = drawMigrateQr(lastMigrateToken);
+      lastMigrateQrReady = drew;
+      if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = !drew;
+      setMigrateStatus(
+        ui.migrateExportStatus,
+        drew
+          ? [localizedText('复制二维码到新电脑导入'), previewLine].filter(Boolean).join('\n')
+          : localizedText('二维码组件不可用，请保存文件'),
+        {error: !drew},
+      );
+      if (!drew && (forceFile || lastMigrateFileText)) {
+        if (ui.migrateExportFile) ui.migrateExportFile.hidden = false;
+      }
+    } else {
+      clearMigrateQr();
+      if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
+      if (ui.migrateExportFile) ui.migrateExportFile.hidden = false;
+      setMigrateStatus(
+        ui.migrateExportStatus,
+        [localizedText('配置较大，二维码装不下'), localizedText('请保存文件后导入'), previewLine].filter(Boolean).join('\n'),
+        {error: true},
+      );
+      if (forceFile && lastMigrateFileText) downloadMigrateFile(lastMigrateFileName, lastMigrateFileText);
+    }
+  } catch (error) {
+    clearMigrateQr();
+    if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
+    setMigrateStatus(ui.migrateExportStatus, error?.message || localizedText('生成失败'), {error: true});
+  } finally {
+    migrateExportBusy = false;
+  }
+}
+
+async function applyMigrateImportText(text) {
+  if (!api?.import_migrate_bundle || migrateImportBusy) return;
+  const payload = String(text || '').trim();
+  if (!payload) {
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请先导入或粘贴二维码'), {error: true});
+    return;
+  }
+  const confirmed = window.confirm(localizedText('导入将替换当前服务器与界面配置，是否继续？'));
+  if (!confirmed) return;
+  migrateImportBusy = true;
+  setMigrateStatus(ui.migrateImportStatus, localizedText('正在导入…'));
+  try {
+    const result = await api.import_migrate_bundle(payload, '');
+    if (!result?.ok) throw new Error(localizedText(result?.error || '导入失败'));
+    if (result.profile) {
+      acceptProfile(result.profile);
+      openSettings({forceNormal: true});
+      if (typeof showSettingsPane === 'function') showSettingsPane('servers', {scroll: false});
+    }
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    setMigrateStatus(
+      ui.migrateImportStatus,
+      [localizedText('导入完成'), formatMigratePreview(result.preview), ...warnings].filter(Boolean).join('\n'),
+    );
+    showToast(localizedText('配置已迁移导入'));
+  } catch (error) {
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('导入失败'), {error: true});
+  } finally {
+    migrateImportBusy = false;
+  }
+}
+
+function decodeQrFromImageData(imageData) {
+  if (typeof jsQR !== 'function' || !imageData) return '';
+  const code = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts: 'dontInvert'});
+  return code?.data ? String(code.data) : '';
+}
+
+async function decodeMigrateQrFromBlob(blob) {
+  if (!blob) throw new Error(localizedText('无法读取二维码图片'));
+  const bitmapUrl = URL.createObjectURL(blob);
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error(localizedText('无法读取二维码图片')));
+      img.src = bitmapUrl;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(image, 0, 0);
+    const payload = decodeQrFromImageData(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    if (!payload) throw new Error(localizedText('图片中未识别到二维码'));
+    return payload;
+  } finally {
+    URL.revokeObjectURL(bitmapUrl);
+  }
+}
+
+async function readMigrateImageFile(file) {
+  if (!file) return;
+  const lower = String(file.name || '').toLowerCase();
+  const isImage = (file.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp)$/i.test(lower);
+  if (isImage) {
+    const token = await decodeMigrateQrFromBlob(file);
+    setMigrateStatus(ui.migrateImportStatus, localizedText('已识别二维码'));
+    await applyMigrateImportText(token);
+    return;
+  }
+  // Silent fallback for oversized-package file imports.
+  const text = await file.text();
+  await applyMigrateImportText(text);
+}
+
+async function pasteMigrateQrImage() {
+  setMigrateStatus(ui.migrateImportStatus, localizedText('正在读取剪贴板…'));
+  try {
+    if (!navigator.clipboard?.read) throw new Error(localizedText('当前环境无法读取剪贴板图片'));
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = (item.types || []).find((name) => String(name).startsWith('image/'));
+      if (!type) continue;
+      const blob = await item.getType(type);
+      const token = await decodeMigrateQrFromBlob(blob);
+      setMigrateStatus(ui.migrateImportStatus, localizedText('已识别二维码'));
+      await applyMigrateImportText(token);
+      return;
+    }
+    throw new Error(localizedText('剪贴板中没有图片'));
+  } catch (error) {
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('读取失败'), {error: true});
+  }
+}
+
+function ensureMigrateQrForPane(paneId) {
+  if (String(paneId) !== 'migrate') return;
+  if (!api?.export_migrate_bundle) return;
+  void generateMigrateExport();
+}
 
 function syncCacheCleanupControls() {
   if (!ui.cacheCleanupInterval || !ui.cacheCleanupEnabled) return;
@@ -5924,6 +6191,40 @@ ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
 ui.checkForUpdates.addEventListener('click', () => void checkForUpdates({interactive: true}));
 ui.cacheCleanupEnabled?.addEventListener('change', syncCacheCleanupControls);
 ui.runCacheCleanup?.addEventListener('click', () => { void runCacheCleanupNow(); });
+ui.migrateCopyImage?.addEventListener('click', async () => {
+  if (!lastMigrateQrReady) {
+    await generateMigrateExport();
+  }
+  const ok = await copyMigrateQrImage();
+  showToast(ok ? localizedText('已复制二维码') : localizedText('复制失败'));
+});
+ui.migrateSaveImage?.addEventListener('click', async () => {
+  if (!lastMigrateQrReady) {
+    await generateMigrateExport();
+  }
+  const ok = await saveMigrateQrImage();
+  showToast(ok ? localizedText('已保存图片') : localizedText('保存失败'));
+});
+ui.migrateExportFile?.addEventListener('click', () => {
+  if (lastMigrateFileText) {
+    downloadMigrateFile(lastMigrateFileName, lastMigrateFileText);
+    showToast(localizedText('已保存文件'));
+    return;
+  }
+  void generateMigrateExport({forceFile: true});
+});
+ui.migratePasteImage?.addEventListener('click', () => { void pasteMigrateQrImage(); });
+ui.migrateImportFile?.addEventListener('change', async (event) => {
+  const file = event.target?.files?.[0];
+  try {
+    await readMigrateImageFile(file);
+  } catch (error) {
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('读取失败'), {error: true});
+  } finally {
+    event.target.value = '';
+  }
+});
+
 ui.taskAlertIndicator.addEventListener('click', () => {
   void setNotificationCenterOpen(ui.notificationCenter.hidden);
 });

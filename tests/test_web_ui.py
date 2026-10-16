@@ -957,6 +957,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("settings-pane-head", self.markup)
         self.assertIn("缓存清理", self.markup)
         self.assertIn("应用更新", self.markup)
+        self.assertIn("配置迁移", self.markup)
+        self.assertIn('data-settings-pane="migrate"', self.markup)
         self.assertIn("诊断与日志", self.markup)
         self.assertIn("扩展功能", self.markup)
         self.assertIn('class="settings-pref', self.markup)

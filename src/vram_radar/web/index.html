@@ -180,6 +180,7 @@
             <button type="button" class="settings-nav-item" data-settings-pane="extensions">扩展功能</button>
             <button type="button" class="settings-nav-item" data-settings-pane="cache">缓存清理</button>
             <button type="button" class="settings-nav-item" data-settings-pane="updates">应用更新</button>
+            <button type="button" class="settings-nav-item" data-settings-pane="migrate">配置迁移</button>
             <button type="button" class="settings-nav-item" data-settings-pane="diagnostics">诊断与日志</button>
           </nav>
           <div class="settings-panes">
@@ -244,7 +245,42 @@
               </div>
             </section>
 
-            <section id="settings-pane-diagnostics" class="settings-pane" data-settings-pane="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
+
+                        <section id="settings-pane-migrate" class="settings-pane settings-pane-migrate" data-settings-pane="migrate" aria-labelledby="settings-migrate-title" hidden>
+              <header class="settings-pane-head">
+                <h3 id="settings-migrate-title">配置迁移</h3>
+                <p>复制二维码，在新电脑导入</p>
+              </header>
+              <div id="migrate-panel" class="migrate-panel-body">
+                <div class="migrate-stage">
+                  <div id="migrate-qr-wrap" class="migrate-qr-wrap" hidden>
+                    <div class="migrate-qr-frame">
+                      <canvas id="migrate-qr-canvas" width="240" height="240" aria-label="配置迁移二维码"></canvas>
+                    </div>
+                  </div>
+                  <div id="migrate-export-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
+                  <div class="migrate-actions migrate-actions-export">
+                    <button id="migrate-copy-image" class="button primary" type="button">复制二维码</button>
+                    <button id="migrate-save-image" class="button" type="button">保存图片</button>
+                    <button id="migrate-export-file" class="button" type="button" hidden>导出文件</button>
+                  </div>
+                </div>
+                <div class="migrate-divider" role="separator">
+                  <span id="migrate-import-label">导入到本机</span>
+                </div>
+                <div class="migrate-import-block">
+                  <div class="migrate-actions migrate-actions-import">
+                    <button id="migrate-paste-image" class="button" type="button">粘贴二维码</button>
+                    <label class="button migrate-file-button"><input id="migrate-import-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/*,.vramradar-migrate,.json,application/json,text/plain" hidden><span>导入图片</span></label>
+                  </div>
+                  <div id="migrate-import-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
+                </div>
+                <p class="migrate-privacy">不含登录密码与私钥</p>
+              </div>
+            </section>
+
+
+<section id="settings-pane-diagnostics" class="settings-pane" data-settings-pane="diagnostics" aria-labelledby="settings-diagnostics-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-diagnostics-title">诊断与日志</h3>
                 <p>排查连接问题，复制时隐藏敏感信息</p>
@@ -334,6 +370,7 @@
           </details>
           </div>
         </details>
+
         <div id="server-settings-heading" class="section-heading"><div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动调整顺序</p></div><button id="add-server" class="button" type="button">添加服务器</button></div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
@@ -477,6 +514,8 @@
   </template>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="vendor/qrcode.min.js"></script>
+  <script src="vendor/jsQR.js"></script>
   <script src="localization.js"></script>
   <script src="app.js"></script>
 </body>

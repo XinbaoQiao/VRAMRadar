@@ -69,6 +69,17 @@ from .server_catalog import (
     _server_id_from_alias,
 )
 from .openssh_resolution import format_openssh_connection_summary
+from .migrate import (
+    build_bundle,
+    bundle_to_token,
+    encode_bundle_text,
+    materialize_profile,
+    parse_migrate_text,
+    preview_bundle,
+    rebind_secrets_to_profile,
+    secrets_for_import,
+    token_fits_qr,
+)
 from .secrets import SecretStore
 from .service import DashboardService, favorite_resource_matches
 from .ssh_recovery import HostSshRecovery
@@ -4773,6 +4784,152 @@ class AppApi:
             "selection": "keep_all",
             "profile": persisted.get("profile"),
         }
+
+
+    def export_migrate_bundle(
+        self,
+        include_secrets: bool = False,
+        passphrase: str = "",
+    ) -> dict[str, Any]:
+        """Build a migrate package for QR / file transfer."""
+        try:
+            bundle = build_bundle(
+                self.profile,
+                secret_store=self.secret_store,
+                passphrase=passphrase or None,
+                include_secrets=bool(include_secrets),
+            )
+            payload = bundle_to_token(bundle)
+            file_text = encode_bundle_text(bundle)
+            preview = preview_bundle(bundle)
+            return {
+                "ok": True,
+                "preview": preview,
+                "token": payload,
+                "qr_eligible": token_fits_qr(payload),
+                "file_text": file_text,
+                "file_name": f"vramradar-migrate-{self.profile.id}.vramradar-migrate",
+                "includes_secrets": bool(bundle.get("includes_secrets")),
+            }
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "migrate_export_invalid"}
+        except Exception:
+            return {"ok": False, "error": "无法生成迁移包", "code": "migrate_export_failed"}
+
+    def preview_migrate_payload(self, text: str = "") -> dict[str, Any]:
+        try:
+            bundle = parse_migrate_text(text)
+            return {"ok": True, "preview": preview_bundle(bundle), "needs_passphrase": bool(bundle.get("includes_secrets"))}
+        except ConfigError as exc:
+            return {"ok": False, "error": str(exc), "code": "migrate_preview_invalid"}
+        except Exception:
+            return {"ok": False, "error": "无法解析迁移内容", "code": "migrate_preview_failed"}
+
+    def import_migrate_bundle(self, text: str = "", passphrase: str = "") -> dict[str, Any]:
+        """Replace the current profile from a migrate token or file body."""
+        if not self._profile_mutation_lock.acquire(blocking=False):
+            return {
+                "ok": False,
+                "error": "另一项设置正在保存，请稍后再导入",
+                "code": "profile_mutation_busy",
+            }
+        changed: list[tuple[str, str | None]] = []
+        try:
+            try:
+                bundle = parse_migrate_text(text)
+                incoming = materialize_profile(bundle, target_profile_id=self.profile.id)
+                raw_secrets = secrets_for_import(bundle, passphrase or None)
+                profile, secrets = rebind_secrets_to_profile(
+                    incoming,
+                    raw_secrets,
+                    target_profile_id=self.profile.id,
+                )
+            except ConfigError as exc:
+                return {"ok": False, "error": str(exc), "code": "migrate_import_invalid"}
+
+            # Replace credential set for servers present in the new profile.
+            retained_refs = {server.auth_ref for server in profile.servers if server.auth_ref}
+            secret_operations: dict[str, str | None] = {ref: value for ref, value in secrets.items()}
+            for old_server in self.profile.servers:
+                if old_server.auth_ref and old_server.auth_ref not in retained_refs:
+                    secret_operations[old_server.auth_ref] = None
+
+            try:
+                ordered = sorted(secret_operations.items(), key=lambda item: item[1] is not None)
+                for ref, new_value in ordered:
+                    previous = self.secret_store.get(ref)
+                    changed.append((ref, previous))
+                    if new_value is None:
+                        self.secret_store.delete(ref)
+                    else:
+                        self.secret_store.set(ref, new_value)
+            except Exception:
+                for ref, previous in reversed(changed):
+                    try:
+                        if previous is None:
+                            self.secret_store.delete(ref)
+                        else:
+                            self.secret_store.set(ref, previous)
+                    except Exception:
+                        pass
+                return {
+                    "ok": False,
+                    "error": "无法写入系统凭据存储，迁移未应用",
+                    "code": "credential_store_unavailable",
+                }
+
+            old_profile = self.profile
+            try:
+                self.store.save(profile)
+                self.service.replace_profile(profile, SnapshotCache(self.paths, profile.id))
+                clear_notice = getattr(self.service, "clear_notice", None)
+                if callable(clear_notice):
+                    clear_notice("server_catalog_sync_failed")
+            except Exception:
+                try:
+                    self.store.save(old_profile)
+                    self.service.replace_profile(old_profile, SnapshotCache(self.paths, old_profile.id))
+                except Exception:
+                    pass
+                for ref, previous in reversed(changed):
+                    try:
+                        if previous is None:
+                            self.secret_store.delete(ref)
+                        else:
+                            self.secret_store.set(ref, previous)
+                    except Exception:
+                        pass
+                return {
+                    "ok": False,
+                    "error": "迁移配置未能保存，已恢复原配置",
+                    "code": "migrate_import_failed",
+                }
+
+            self.profile = profile
+            self._configure_usage(profile)
+            self._apply_cache_cleanup_schedule()
+            self._profile_revision += 1
+            self._reset_favorite_alerts_if_changed(old_profile, profile)
+            self._reset_task_alerts_if_servers_changed(old_profile, profile)
+            tray_controller = self._tray_controller
+            if tray_controller is not None:
+                tray_controller.refresh_menu()
+            warnings: list[str] = []
+            if bundle.get("includes_secrets"):
+                warnings.append(f"已写入 {len(secrets)} 个登录密码到系统凭据库")
+            else:
+                slots = int(bundle.get("password_slots") or 0)
+                if slots:
+                    warnings.append(f"原配置有 {slots} 个已保存密码未包含在迁移包中，请在新电脑重新输入")
+                warnings.append("SSH 私钥文件不会随迁移复制，请确认本机路径仍可用")
+            return {
+                "ok": True,
+                "profile": self._desktop_profile(profile),
+                "preview": preview_bundle(bundle),
+                "warnings": warnings,
+            }
+        finally:
+            self._profile_mutation_lock.release()
 
     def import_server_config(self, path: str | list[str] = "") -> dict[str, Any]:
         if (
