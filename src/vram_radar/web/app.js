@@ -107,6 +107,14 @@ const ui = {
   migrateQrCanvas: document.getElementById('migrate-qr-canvas'),
   migratePasteImage: document.getElementById('migrate-paste-image'),
   migrateImportFile: document.getElementById('migrate-import-file'),
+  migrateIncludeSecrets: document.getElementById('migrate-include-secrets'),
+  migrateIncludeKeys: document.getElementById('migrate-include-keys'),
+  migratePassphraseFields: document.getElementById('migrate-passphrase-fields'),
+  migratePassphrase: document.getElementById('migrate-passphrase'),
+  migratePassphraseConfirm: document.getElementById('migrate-passphrase-confirm'),
+  migrateImportPassWrap: document.getElementById('migrate-import-pass-wrap'),
+  migrateImportPassphrase: document.getElementById('migrate-import-passphrase'),
+  migratePrivacy: document.getElementById('migrate-privacy'),
   migrateImportStatus: document.getElementById('migrate-import-status'),
   serverSettingsHeading: document.getElementById('server-settings-heading'),
   closeSettings: document.getElementById('close-settings'),
@@ -5287,6 +5295,7 @@ let lastMigrateToken = '';
 let lastMigrateFileText = '';
 let lastMigrateFileName = '';
 let lastMigrateQrReady = false;
+let lastMigrateIncludesSecrets = false;
 
 function setMigrateStatus(el, message, {error = false} = {}) {
   if (!el) return;
@@ -5302,23 +5311,71 @@ function setMigrateStatus(el, message, {error = false} = {}) {
   el.classList.toggle('is-error', Boolean(error));
 }
 
+function migrateWantsSecrets() {
+  return Boolean(ui.migrateIncludeSecrets?.checked);
+}
+
+function migrateWantsKeys() {
+  return Boolean(ui.migrateIncludeKeys?.checked);
+}
+
+function syncMigrateSecretFields() {
+  const on = migrateWantsSecrets();
+  if (ui.migratePassphraseFields) ui.migratePassphraseFields.hidden = !on;
+  if (!on && ui.migrateIncludeKeys) ui.migrateIncludeKeys.checked = false;
+  if (ui.migratePanel) ui.migratePanel.classList.toggle('is-compact', on);
+  if (ui.migratePrivacy) {
+    ui.migratePrivacy.textContent = on
+      ? (migrateWantsKeys()
+        ? localizedText('已含加密密码与私钥')
+        : localizedText('已含加密密码'))
+      : localizedText('默认不含登录密码与私钥');
+  }
+}
+
+function readMigrateExportPassphrase() {
+  if (!migrateWantsSecrets()) return '';
+  const a = String(ui.migratePassphrase?.value || '');
+  const b = String(ui.migratePassphraseConfirm?.value || '');
+  if (a.length < 8) throw new Error(localizedText('导出密码时，口令至少 8 位'));
+  if (a !== b) throw new Error(localizedText('口令不一致'));
+  return a;
+}
+
 function drawMigrateQr(token) {
   const canvas = ui.migrateQrCanvas;
   if (!canvas || typeof qrcode !== 'function') return false;
-  const qr = qrcode(0, 'M');
-  qr.addData(token);
-  qr.make();
-  const cell = Math.max(2, Math.floor(240 / qr.getModuleCount()));
-  const size = cell * qr.getModuleCount();
+  // Prefer low EC so the same payload uses fewer modules (cleaner look).
+  let qr;
+  try {
+    qr = qrcode(0, 'L');
+    qr.addData(token);
+    qr.make();
+  } catch (_) {
+    try {
+      qr = qrcode(0, 'M');
+      qr.addData(token);
+      qr.make();
+    } catch (error) {
+      return false;
+    }
+  }
+  const modules = qr.getModuleCount();
+  const quiet = 4; // modules of white border
+  const target = 196;
+  const cell = Math.max(3, Math.floor(target / (modules + quiet * 2)));
+  const size = cell * (modules + quiet * 2);
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
   ctx.fillStyle = '#111111';
-  for (let row = 0; row < qr.getModuleCount(); row += 1) {
-    for (let col = 0; col < qr.getModuleCount(); col += 1) {
-      if (qr.isDark(row, col)) ctx.fillRect(col * cell, row * cell, cell, cell);
+  for (let row = 0; row < modules; row += 1) {
+    for (let col = 0; col < modules; col += 1) {
+      if (qr.isDark(row, col)) {
+        ctx.fillRect((col + quiet) * cell, (row + quiet) * cell, cell, cell);
+      }
     }
   }
   return true;
@@ -5328,10 +5385,10 @@ function clearMigrateQr() {
   const canvas = ui.migrateQrCanvas;
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  canvas.width = 240;
-  canvas.height = 240;
+  canvas.width = 200;
+  canvas.height = 200;
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 240, 240);
+  ctx.fillRect(0, 0, 200, 200);
   lastMigrateQrReady = false;
 }
 
@@ -5384,6 +5441,11 @@ function formatMigratePreview(preview) {
   if (name) parts.push(name);
   const serverCount = Number(preview.server_count) || 0;
   parts.push(`${localizedText('服务器')} ${serverCount}`);
+  if (preview.includes_secrets) {
+    parts.push(preview.includes_private_keys
+      ? localizedText('已含加密密码与私钥')
+      : localizedText('已含加密密码'));
+  }
   return parts.join(' · ');
 }
 
@@ -5392,11 +5454,15 @@ async function generateMigrateExport({forceFile = false} = {}) {
   migrateExportBusy = true;
   setMigrateStatus(ui.migrateExportStatus, localizedText('正在生成…'));
   try {
-    const result = await api.export_migrate_bundle(false, '');
+    const includeSecrets = migrateWantsSecrets();
+    const includeKeys = includeSecrets && migrateWantsKeys();
+    const passphrase = includeSecrets ? readMigrateExportPassphrase() : '';
+    const result = await api.export_migrate_bundle(includeSecrets, passphrase, includeKeys);
     if (!result?.ok) throw new Error(localizedText(result?.error || '生成失败'));
     lastMigrateToken = String(result.token || '');
     lastMigrateFileText = String(result.file_text || '');
     lastMigrateFileName = String(result.file_name || 'vramradar-migrate.vramradar-migrate');
+    lastMigrateIncludesSecrets = Boolean(result.includes_secrets);
     const previewLine = formatMigratePreview(result.preview);
     if (ui.migrateExportFile) ui.migrateExportFile.hidden = Boolean(result.qr_eligible);
     if (result.qr_eligible && lastMigrateToken) {
@@ -5440,12 +5506,30 @@ async function applyMigrateImportText(text) {
     setMigrateStatus(ui.migrateImportStatus, localizedText('请先导入或粘贴二维码'), {error: true});
     return;
   }
+  let needsPass = false;
+  try {
+    if (api.preview_migrate_payload) {
+      const preview = await api.preview_migrate_payload(payload);
+      needsPass = Boolean(preview?.needs_passphrase);
+      if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = !needsPass;
+    }
+  } catch (_) {}
+  let passphrase = '';
+  if (needsPass) {
+    passphrase = String(ui.migrateImportPassphrase?.value || '');
+    if (!passphrase) {
+      if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = false;
+      setMigrateStatus(ui.migrateImportStatus, localizedText('请输入迁移口令以导入加密内容'), {error: true});
+      ui.migrateImportPassphrase?.focus();
+      return;
+    }
+  }
   const confirmed = window.confirm(localizedText('导入将替换当前服务器与界面配置，是否继续？'));
   if (!confirmed) return;
   migrateImportBusy = true;
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在导入…'));
   try {
-    const result = await api.import_migrate_bundle(payload, '');
+    const result = await api.import_migrate_bundle(payload, passphrase);
     if (!result?.ok) throw new Error(localizedText(result?.error || '导入失败'));
     if (result.profile) {
       acceptProfile(result.profile);
@@ -5504,7 +5588,6 @@ async function readMigrateImageFile(file) {
     await applyMigrateImportText(token);
     return;
   }
-  // Silent fallback for oversized-package file imports.
   const text = await file.text();
   await applyMigrateImportText(text);
 }
@@ -5532,8 +5615,19 @@ async function pasteMigrateQrImage() {
 function ensureMigrateQrForPane(paneId) {
   if (String(paneId) !== 'migrate') return;
   if (!api?.export_migrate_bundle) return;
+  syncMigrateSecretFields();
+  if (migrateWantsSecrets()) {
+    // Wait for passphrase before generating a sealed QR.
+    if (String(ui.migratePassphrase?.value || '').length < 8) {
+      clearMigrateQr();
+      if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
+      setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置迁移口令'));
+      return;
+    }
+  }
   void generateMigrateExport();
 }
+
 
 function syncCacheCleanupControls() {
   if (!ui.cacheCleanupInterval || !ui.cacheCleanupEnabled) return;
@@ -6191,6 +6285,20 @@ ui.openLogsDirectory.addEventListener('click', openLogsDirectory);
 ui.checkForUpdates.addEventListener('click', () => void checkForUpdates({interactive: true}));
 ui.cacheCleanupEnabled?.addEventListener('change', syncCacheCleanupControls);
 ui.runCacheCleanup?.addEventListener('click', () => { void runCacheCleanupNow(); });
+ui.migrateIncludeSecrets?.addEventListener('change', () => {
+  syncMigrateSecretFields();
+  void generateMigrateExport();
+});
+ui.migrateIncludeKeys?.addEventListener('change', () => {
+  syncMigrateSecretFields();
+  void generateMigrateExport();
+});
+const remakeMigrateQr = () => {
+  if (!migrateWantsSecrets()) return;
+  void generateMigrateExport();
+};
+ui.migratePassphrase?.addEventListener('change', remakeMigrateQr);
+ui.migratePassphraseConfirm?.addEventListener('change', remakeMigrateQr);
 ui.migrateCopyImage?.addEventListener('click', async () => {
   if (!lastMigrateQrReady) {
     await generateMigrateExport();

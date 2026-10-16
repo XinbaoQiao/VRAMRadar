@@ -49,52 +49,100 @@ window.addEventListener('load', () => setTimeout(() => {
     ui_language: lang,
     servers: currentProfile?.servers || [{id: 'lab', display_name: 'lab', host: 'gpu.example.org'}],
   };
-  // Stub migrate API so the pane shows the happy-path QR, not the oversized fallback.
   window.chrome = window.chrome || {};
   window.chrome.webview = window.chrome.webview || {};
+  // Compact demo token (~similar length to real sparse export) for a clean QR.
+  const demoToken = 'VR1:eNqdj8FOwzAMhl8F-Vy6ptKY1mfgDRCKvMTtItKmstPCNJVnxxkc4MABbs6v35-_XMExYSZvMUNnDsfWPLT7w7GCPvFYMlgZR0aPfD-GgbW7Ww1UECYXF09ihRSRBboeo1AFM4q8JvbWpWVSQPMtkphKs0Sc-hAJuisEr1c89bjErGBxZxrRrsQS0qRSGhGXJ3RPVzihe6HpthKYXLYiZ93yQeaIFzvhqFB4xNNdo_E5SfnDMC9NTW84zpHqxEPxLwjhtbnNNOWQL_ZTCd53tVJ3wVvy7X5vjtpZVOILjjE4gq36i4z5IWN-kTH_lnnetg8OYZnm';
   api = {
     ...(api || {}),
     export_migrate_bundle: async () => ({
       ok: true,
-      token: 'VR1:DEMO',
+      token: demoToken,
       qr_eligible: true,
       file_text: '{}',
       file_name: 'demo.vramradar-migrate',
-      preview: {display_name: 'demo', server_count: 1},
+      preview: {display_name: 'demo', server_count: 2},
+      includes_secrets: false,
     }),
     import_migrate_bundle: async () => ({ok: false, error: 'shot'}),
+    preview_migrate_payload: async () => ({ok: true, needs_passphrase: false}),
   };
   openSettings({forceNormal: true});
   if (typeof showSettingsPane === 'function') showSettingsPane('migrate', {scroll: false});
   setTimeout(() => {
-    const canvas = document.getElementById('migrate-qr-canvas');
-    const wrap = document.getElementById('migrate-qr-wrap');
+    if (typeof drawMigrateQr === 'function') {
+      const drew = drawMigrateQr(demoToken);
+      if (typeof lastMigrateQrReady !== 'undefined') lastMigrateQrReady = drew;
+      const wrap = document.getElementById('migrate-qr-wrap');
+      if (wrap) wrap.hidden = !drew;
+    }
     const status = document.getElementById('migrate-export-status');
     const fileBtn = document.getElementById('migrate-export-file');
-    if (canvas && wrap && typeof qrcode === 'function') {
-      const qr = qrcode(0, 'M');
-      qr.addData('VR1:DEMO-VRAMRADAR-MIGRATE');
-      qr.make();
-      const cell = Math.max(2, Math.floor(240 / qr.getModuleCount()));
-      const size = cell * qr.getModuleCount();
-      canvas.width = size; canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
-      ctx.fillStyle = '#111';
-      for (let r = 0; r < qr.getModuleCount(); r++) {
-        for (let c = 0; c < qr.getModuleCount(); c++) {
-          if (qr.isDark(r, c)) ctx.fillRect(c * cell, r * cell, cell, cell);
-        }
-      }
-      wrap.hidden = false;
-      if (typeof lastMigrateQrReady !== 'undefined') lastMigrateQrReady = true;
-    }
     if (status) { status.hidden = true; status.textContent = ''; status.classList.remove('is-error'); }
     if (fileBtn) fileBtn.hidden = true;
+    if (typeof syncMigrateSecretFields === 'function') syncMigrateSecretFields();
     window.VRAMRadarI18n?.localizeTree?.(document.body);
   }, 400);
   const stack = document.getElementById('profile-settings');
   stack?.scrollIntoView({block: 'start'});
+  const dialogContent = document.querySelector('#settings-dialog .dialog-content');
+  if (dialogContent) dialogContent.scrollTop = 0;
+  window.VRAMRadarI18n?.localizeTree?.(document.body);
+}, 1200));
+</script>
+"""
+
+SCENE_MIGRATE_SECRETS = r"""
+<script>
+window.addEventListener('load', () => setTimeout(() => {
+  const params = new URLSearchParams(location.search);
+  const lang = params.get('lang') === 'en' ? 'en' : 'zh-CN';
+  window.VRAMRadarI18n?.setLanguage(lang);
+  currentProfile = {
+    ...(currentProfile || {}),
+    ui_language: lang,
+    servers: currentProfile?.servers || [{id: 'lab', display_name: 'lab', host: 'gpu.example.org'}],
+  };
+  window.chrome = window.chrome || {};
+  window.chrome.webview = window.chrome.webview || {};
+  const demoToken = 'VR1:eNqdj8FOwzAMhl8F-Vy6ptKY1mfgDRCKvMTtItKmstPCNJVnxxkc4MABbs6v35-_XMExYSZvMUNnDsfWPLT7w7GCPvFYMlgZR0aPfD-GgbW7Ww1UECYXF09ihRSRBboeo1AFM4q8JvbWpWVSQPMtkphKs0Sc-hAJuisEr1c89bjErGBxZxrRrsQS0qRSGhGXJ3RPVzihe6HpthKYXLYiZ93yQeaIFzvhqFB4xNNdo_E5SfnDMC9NTW84zpHqxEPxLwjhtbnNNOWQL_ZTCd53tVJ3wVvy7X5vjtpZVOILjjE4gq36i4z5IWN-kTH_lnnetg8OYZnm';
+  api = {
+    ...(api || {}),
+    export_migrate_bundle: async () => ({
+      ok: true,
+      token: demoToken,
+      qr_eligible: true,
+      file_text: '{}',
+      file_name: 'demo.vramradar-migrate',
+      preview: {display_name: 'demo', server_count: 2, includes_secrets: true},
+      includes_secrets: true,
+    }),
+    import_migrate_bundle: async () => ({ok: false, error: 'shot'}),
+    preview_migrate_payload: async () => ({ok: true, needs_passphrase: true}),
+  };
+  openSettings({forceNormal: true});
+  if (typeof showSettingsPane === 'function') showSettingsPane('migrate', {scroll: false});
+  setTimeout(() => {
+    const include = document.getElementById('migrate-include-secrets');
+    const pass = document.getElementById('migrate-passphrase');
+    const confirm = document.getElementById('migrate-passphrase-confirm');
+    if (include) include.checked = true;
+    if (pass) pass.value = 'demo-pass-word';
+    if (confirm) confirm.value = 'demo-pass-word';
+    if (typeof syncMigrateSecretFields === 'function') syncMigrateSecretFields();
+    if (typeof drawMigrateQr === 'function') {
+      const drew = drawMigrateQr(demoToken);
+      if (typeof lastMigrateQrReady !== 'undefined') lastMigrateQrReady = drew;
+      const wrap = document.getElementById('migrate-qr-wrap');
+      if (wrap) wrap.hidden = !drew;
+    }
+    const status = document.getElementById('migrate-export-status');
+    if (status) { status.hidden = true; status.textContent = ''; }
+    const fileBtn = document.getElementById('migrate-export-file');
+    if (fileBtn) fileBtn.hidden = true;
+    window.VRAMRadarI18n?.localizeTree?.(document.body);
+  }, 400);
+  document.getElementById('profile-settings')?.scrollIntoView({block: 'start'});
   const dialogContent = document.querySelector('#settings-dialog .dialog-content');
   if (dialogContent) dialogContent.scrollTop = 0;
   window.VRAMRadarI18n?.localizeTree?.(document.body);
@@ -127,12 +175,16 @@ def main(out: str) -> list[str]:
     folder.mkdir(parents=True, exist_ok=True)
     made: list[str] = []
     with tempfile.TemporaryDirectory(prefix="vram-radar-settings-shots-") as tmp:
-        for scene_name, scene in (("servers", SCENE_SERVERS), ("migrate", SCENE_MIGRATE)):
+        for scene_name, scene in (("servers", SCENE_SERVERS), ("migrate", SCENE_MIGRATE), ("migrate_secrets", SCENE_MIGRATE_SECRETS)):
             index = prepare(Path(tmp) / scene_name)
             markup = index.read_text(encoding="utf-8")
             index.write_text(markup.replace("</body>", scene + "</body>"), encoding="utf-8")
             for lang, tag in (("zh-CN", "zh"), ("en", "en")):
-                target = folder / (f"settings_{tag}.png" if scene_name == "servers" else f"settings_migrate_{tag}.png")
+                target = folder / (
+                    f"settings_{tag}.png" if scene_name == "servers"
+                    else f"settings_migrate_secrets_{tag}.png" if scene_name == "migrate_secrets"
+                    else f"settings_migrate_{tag}.png"
+                )
                 if target.exists():
                     target.unlink()
                 url = index.resolve().as_uri() + f"?lang={lang}"

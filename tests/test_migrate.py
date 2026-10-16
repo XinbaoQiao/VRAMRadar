@@ -227,8 +227,25 @@ class MigrateUiPresenceTests(unittest.TestCase):
         self.assertIn("migrate-copy-image", html)
         self.assertIn("migrate-paste-image", html)
         self.assertIn("migrate-save-image", html)
-        self.assertNotIn("migrate-include-secrets", html)
+        self.assertIn("migrate-include-secrets", html)
+        self.assertIn("migrate-include-keys", html)
+        self.assertIn("migrate-passphrase", html)
         self.assertNotIn("migrate-import-text", html)
         self.assertNotIn("migrate-generate", html)
         self.assertIn("ensureMigrateQrForPane", js)
         self.assertIn("copyMigrateQrImage", js)
+
+
+    def test_compact_export_omits_default_prefs(self):
+        profile = _profile_with_server()
+        bundle = build_bundle(profile)
+        raw = bundle["profile"]
+        self.assertNotIn("navigator_width", raw)
+        self.assertNotIn("server_config_path", raw)
+        self.assertNotIn("ignored_ssh_aliases", raw)
+        server = raw["servers"][0]
+        self.assertNotIn("enabled", server)  # default True omitted
+        self.assertNotIn("port", server)  # default 22 omitted
+        qr_payload = bundle_to_token(bundle)
+        self.assertLess(len(qr_payload), 900)
+        self.assertTrue(token_fits_qr(qr_payload))

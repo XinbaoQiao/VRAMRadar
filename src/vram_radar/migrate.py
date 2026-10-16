@@ -1,15 +1,14 @@
 """Offline profile migration packages (QR + file).
 
 Design (vramradar-migrate/v1):
-- Default export carries servers and preferences only. Login passwords and
-  private-key bytes are never placed in a clear static QR or file.
-- Optional passphrase seals passwords from the OS credential store into an
-  encrypted ``secrets`` block (PBKDF2-HMAC-SHA256 + HMAC-SHA256 keystream +
-  HMAC integrity). SSH private keys stay as path strings; the key files are
-  not embedded.
-- Compact payloads can be encoded as ``VR1:`` tokens for QR; larger ones use
-  the ``.vramradar-migrate`` file. The same package is the foundation for a
-  future phone import.
+- Default export is a *compact* profile: servers + non-default preferences only.
+  Machine-local noise (navigator geometry, SSH discovery paths, session consent)
+  is omitted so the QR stays sparse and readable.
+- Login passwords and private-key bytes are never placed in a clear static QR
+  or file. Optional passphrase seals them into an encrypted ``secrets`` block
+  (PBKDF2-HMAC-SHA256 + HMAC-SHA256 keystream + HMAC integrity).
+- Compact payloads encode as ``VR1:`` tokens for QR; larger ones (especially
+  with sealed private keys) fall back to ``.vramradar-migrate`` files.
 """
 from __future__ import annotations
 
@@ -20,20 +19,36 @@ import json
 import os
 import time
 import zlib
+from pathlib import Path
 from typing import Any
 
-from .models import ConfigError, Profile
+from .models import ConfigError, Profile, ServerProfile
 
 FORMAT = "vramradar-migrate/v1"
 TOKEN_PREFIX = "VR1:"
-# Byte-mode QR capacity ~2953 at v40-L; keep headroom for camera + EC-M.
-QR_MAX_TOKEN_CHARS = 1800
+# Prefer sparse QR: ~v15-L at this budget. Oversized packages use the file.
+QR_MAX_TOKEN_CHARS = 1200
 PBKDF2_ITERS = 200_000
 SEAL_VERSION = 1
+MAX_PRIVATE_KEY_EXPORT_BYTES = 16 * 1024
 
-_EXCLUDED_PROFILE_KEYS = frozenset({
-    # Machine-local discovery path; safe but noisy on a new computer.
-    # Kept intentionally — user may still want it. Nothing secret here.
+_MACHINE_LOCAL_PROFILE_KEYS = frozenset({
+    "server_config_path",
+    "navigator_width",
+    "navigator_height",
+    "ignored_ssh_aliases",
+    "pending_alias_choices",
+    "resolved_alias_choice_keys",
+    "usage_session_consent",
+    "codex_executable",
+})
+
+_SERVER_CORE_KEYS = frozenset({
+    "id",
+    "display_name",
+    "backend",
+    "host",
+    "username",
 })
 
 
@@ -117,24 +132,69 @@ def open_secrets(passphrase: str, sealed: dict[str, Any]) -> dict[str, str]:
     return raw
 
 
-def _export_profile_dict(profile: Profile, *, strip_auth_refs: bool) -> tuple[dict[str, Any], int]:
-    raw = profile.to_dict()
-    servers: list[dict[str, Any]] = []
+def _compact_server_dict(server: dict[str, Any]) -> dict[str, Any]:
+    baseline = ServerProfile(
+        id="x",
+        display_name="x",
+        backend=str(server.get("backend") or "direct_ssh"),
+        host="h",
+        username="u",
+    ).to_dict()
+    row: dict[str, Any] = {}
+    for key, value in server.items():
+        if key in _SERVER_CORE_KEYS:
+            row[key] = value
+            continue
+        if key == "password" or key == "has_password":
+            continue
+        if key in baseline and baseline[key] == value:
+            continue
+        if value in ("", None, [], (), False):
+            continue
+        row[key] = value
+    for need in ("id", "display_name", "backend"):
+        if need not in row and need in server:
+            row[need] = server[need]
+    return row
+
+
+def _compact_profile_dict(raw: dict[str, Any], *, strip_auth_refs: bool) -> tuple[dict[str, Any], int]:
+    profile_id = str(raw.get("id") or "default")
+    defaults = Profile.empty(profile_id).to_dict()
+    compact: dict[str, Any] = {
+        "schema_version": 1,
+        "id": profile_id,
+    }
     password_refs = 0
-    for server in raw.get("servers", []):
+    for key, value in raw.items():
+        if key in ("schema_version", "id", "servers"):
+            continue
+        if key in _MACHINE_LOCAL_PROFILE_KEYS:
+            continue
+        if key in defaults and defaults[key] == value:
+            continue
+        if value in ("", None, [], (), False) and key not in defaults:
+            continue
+        compact[key] = value
+
+    servers: list[dict[str, Any]] = []
+    for server in raw.get("servers", []) or []:
         if not isinstance(server, dict):
             continue
         row = dict(server)
+        row.pop("password", None)
+        row.pop("has_password", None)
         if row.get("auth_ref"):
             password_refs += 1
             if strip_auth_refs:
                 row.pop("auth_ref", None)
-        # Never export live password fields if a caller stuffed one in.
-        row.pop("password", None)
-        row.pop("has_password", None)
-        servers.append(row)
-    raw["servers"] = servers
-    return raw, password_refs
+        servers.append(_compact_server_dict(row))
+    compact["servers"] = servers
+    return compact, password_refs
+
+
+def _export_profile_dict(profile: Profile, *, strip_auth_refs: bool) -> tuple[dict[str, Any], int]:
+    return _compact_profile_dict(profile.to_dict(), strip_auth_refs=strip_auth_refs)
 
 
 def collect_secrets(profile: Profile, secret_store: Any) -> dict[str, str]:
@@ -154,37 +214,78 @@ def collect_secrets(profile: Profile, secret_store: Any) -> dict[str, str]:
     return secrets
 
 
+def collect_private_keys(profile: Profile) -> dict[str, str]:
+    """Return ``sshkey:<server_id>`` → base64 private-key PEM for small local keys."""
+    out: dict[str, str] = {}
+    for server in profile.servers:
+        path_text = str(server.identity_file or "").strip()
+        if not path_text:
+            continue
+        try:
+            path = Path(path_text).expanduser()
+            if not path.is_file():
+                continue
+            size = path.stat().st_size
+            if size <= 0 or size > MAX_PRIVATE_KEY_EXPORT_BYTES:
+                continue
+            raw = path.read_bytes()
+        except Exception:
+            continue
+        if b"PRIVATE KEY" not in raw:
+            continue
+        out[f"sshkey:{server.id}"] = base64.b64encode(raw).decode("ascii")
+    return out
+
+
+def split_sealed_payload(secrets: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    passwords = {k: v for k, v in secrets.items() if not k.startswith("sshkey:")}
+    keys = {k: v for k, v in secrets.items() if k.startswith("sshkey:")}
+    return passwords, keys
+
+
 def build_bundle(
     profile: Profile,
     *,
     secret_store: Any | None = None,
     passphrase: str | None = None,
     include_secrets: bool = False,
+    include_private_keys: bool = False,
     created_at: float | None = None,
 ) -> dict[str, Any]:
     include = bool(include_secrets)
-    if include and not passphrase:
+    include_keys = bool(include_private_keys)
+    if include_keys and not include:
+        raise ConfigError("导出私钥前请先勾选含登录密码")
+    if (include or include_keys) and not passphrase:
         raise ConfigError("导出密码时必须设置迁移口令")
     sealed = None
-    password_refs = 0
     exported, password_refs = _export_profile_dict(profile, strip_auth_refs=not include)
+    secret_payload: dict[str, str] = {}
     if include:
-        secrets = collect_secrets(profile, secret_store)
-        if not secrets:
-            raise ConfigError("当前配置没有已保存的登录密码可导出")
-        sealed = seal_secrets(passphrase or "", secrets)
-        password_refs = len(secrets)
+        secret_payload.update(collect_secrets(profile, secret_store))
+    if include_keys:
+        keys = collect_private_keys(profile)
+        if not keys:
+            raise ConfigError("当前配置没有可读的 SSH 私钥可导出")
+        secret_payload.update(keys)
+    if include and not secret_payload:
+        raise ConfigError("当前配置没有已保存的登录密码或私钥可导出")
+    if secret_payload:
+        sealed = seal_secrets(passphrase or "", secret_payload)
+        password_refs = len([k for k in secret_payload if not k.startswith("sshkey:")]) or password_refs
     notes = [
-        "默认不含登录密码；密码仅在勾选并用口令加密后导出。",
-        "不含 SSH 私钥内容；仅保留本机路径，需在新电脑自行放置密钥。",
+        "默认不含登录密码；勾选后用口令加密写入。",
+        "私钥默认只保留路径；勾选含私钥后才会加密打包。",
         "额度监控的本机登录态不会迁移，到新电脑后需重新授权。",
     ]
     return {
         "format": FORMAT,
         "created_at": int(created_at if created_at is not None else time.time()),
-        "includes_secrets": include,
-        "password_count": password_refs if include else 0,
+        "includes_secrets": bool(sealed),
+        "includes_private_keys": bool(include_keys and sealed),
+        "password_count": len([k for k in (secret_payload or {}) if not k.startswith("sshkey:")]) if sealed else 0,
         "password_slots": password_refs,
+        "private_key_count": len([k for k in (secret_payload or {}) if k.startswith("sshkey:")]) if sealed else 0,
         "notes": notes,
         "profile": exported,
         "secrets": sealed,
@@ -192,7 +293,17 @@ def build_bundle(
 
 
 def bundle_to_token(bundle: dict[str, Any]) -> str:
-    raw = json.dumps(bundle, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    slim = {
+        key: value
+        for key, value in bundle.items()
+        if key != "notes" and value is not None
+    }
+    if not slim.get("includes_secrets"):
+        slim.pop("secrets", None)
+    if not slim.get("includes_private_keys"):
+        slim.pop("includes_private_keys", None)
+        slim.pop("private_key_count", None)
+    raw = json.dumps(slim, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return TOKEN_PREFIX + _b64e(zlib.compress(raw, level=9))
 
 
@@ -243,8 +354,10 @@ def preview_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         "format": bundle.get("format"),
         "created_at": bundle.get("created_at"),
         "includes_secrets": bool(bundle.get("includes_secrets")),
+        "includes_private_keys": bool(bundle.get("includes_private_keys")),
         "password_count": int(bundle.get("password_count") or 0),
         "password_slots": int(bundle.get("password_slots") or 0),
+        "private_key_count": int(bundle.get("private_key_count") or 0),
         "server_count": len(servers) if isinstance(servers, list) else 0,
         "server_names": server_names,
         "display_name": str((profile or {}).get("display_name") or ""),
@@ -257,13 +370,11 @@ def materialize_profile(bundle: dict[str, Any], *, target_profile_id: str) -> Pr
     raw = dict(bundle["profile"])
     raw["id"] = target_profile_id
     raw["schema_version"] = 1
-    # Drop auth_refs when secrets were not included / will be rebound later.
     if not bundle.get("includes_secrets"):
         for server in raw.get("servers", []) or []:
             if isinstance(server, dict):
                 server.pop("auth_ref", None)
     return Profile.from_dict(raw, expected_id=target_profile_id)
-
 
 
 def rebind_secrets_to_profile(
@@ -275,6 +386,7 @@ def rebind_secrets_to_profile(
     """Rewrite auth_ref keys to ``server:<target>:<server_id>:login-password``."""
     from dataclasses import replace
 
+    passwords, _keys = split_sealed_payload(secrets)
     new_secrets: dict[str, str] = {}
     new_servers = []
     for server in profile.servers:
@@ -284,7 +396,7 @@ def rebind_secrets_to_profile(
             f"server:{profile.id}:{server.id}:login-password",
             server.id,
         ]
-        password = next((secrets[key] for key in candidates if key and key in secrets), None)
+        password = next((passwords[key] for key in candidates if key and key in passwords), None)
         if password:
             new_ref = f"server:{target_profile_id}:{server.id}:login-password"
             new_secrets[new_ref] = password
@@ -293,6 +405,51 @@ def rebind_secrets_to_profile(
             new_servers.append(replace(server, auth_ref=""))
     return replace(profile, servers=tuple(new_servers)), new_secrets
 
+
+def restore_private_keys(
+    profile: Profile,
+    secrets: dict[str, str],
+    *,
+    keys_root: Path,
+) -> tuple[Profile, list[str]]:
+    """Write sealed private keys under keys_root and retarget identity_file."""
+    from dataclasses import replace
+
+    _passwords, key_map = split_sealed_payload(secrets)
+    if not key_map:
+        return profile, []
+    keys_root.mkdir(parents=True, exist_ok=True)
+    warnings: list[str] = []
+    new_servers = []
+    for server in profile.servers:
+        blob_b64 = key_map.get(f"sshkey:{server.id}")
+        if not blob_b64:
+            new_servers.append(server)
+            continue
+        try:
+            raw = base64.b64decode(blob_b64.encode("ascii"))
+        except Exception:
+            warnings.append(f"服务器 {server.display_name or server.id} 的私钥无法解码")
+            new_servers.append(server)
+            continue
+        if b"PRIVATE KEY" not in raw or len(raw) > MAX_PRIVATE_KEY_EXPORT_BYTES:
+            warnings.append(f"服务器 {server.display_name or server.id} 的私钥无效")
+            new_servers.append(server)
+            continue
+        dest = keys_root / f"migrate-{server.id}-ed25519"
+        try:
+            dest.write_bytes(raw)
+            try:
+                os.chmod(dest, 0o600)
+            except Exception:
+                pass
+        except Exception:
+            warnings.append(f"服务器 {server.display_name or server.id} 的私钥未能写入本机")
+            new_servers.append(server)
+            continue
+        new_servers.append(replace(server, identity_file=str(dest)))
+        warnings.append(f"已恢复私钥到 {dest}")
+    return replace(profile, servers=tuple(new_servers)), warnings
 
 
 def secrets_for_import(bundle: dict[str, Any], passphrase: str | None) -> dict[str, str]:

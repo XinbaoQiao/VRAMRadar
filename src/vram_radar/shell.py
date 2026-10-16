@@ -77,6 +77,7 @@ from .migrate import (
     parse_migrate_text,
     preview_bundle,
     rebind_secrets_to_profile,
+    restore_private_keys,
     secrets_for_import,
     token_fits_qr,
 )
@@ -4790,6 +4791,7 @@ class AppApi:
         self,
         include_secrets: bool = False,
         passphrase: str = "",
+        include_private_keys: bool = False,
     ) -> dict[str, Any]:
         """Build a migrate package for QR / file transfer."""
         try:
@@ -4798,6 +4800,7 @@ class AppApi:
                 secret_store=self.secret_store,
                 passphrase=passphrase or None,
                 include_secrets=bool(include_secrets),
+                include_private_keys=bool(include_private_keys),
             )
             payload = bundle_to_token(bundle)
             file_text = encode_bundle_text(bundle)
@@ -4810,6 +4813,7 @@ class AppApi:
                 "file_text": file_text,
                 "file_name": f"vramradar-migrate-{self.profile.id}.vramradar-migrate",
                 "includes_secrets": bool(bundle.get("includes_secrets")),
+                "includes_private_keys": bool(bundle.get("includes_private_keys")),
             }
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_export_invalid"}
@@ -4834,6 +4838,7 @@ class AppApi:
                 "code": "profile_mutation_busy",
             }
         changed: list[tuple[str, str | None]] = []
+        key_warnings: list[str] = []
         try:
             try:
                 bundle = parse_migrate_text(text)
@@ -4844,6 +4849,14 @@ class AppApi:
                     raw_secrets,
                     target_profile_id=self.profile.id,
                 )
+                key_warnings: list[str] = []
+                if bundle.get("includes_private_keys"):
+                    profile, key_warnings = restore_private_keys(
+                        profile,
+                        raw_secrets,
+                        keys_root=self.paths.config / "migrated-keys",
+                    )
+
             except ConfigError as exc:
                 return {"ok": False, "error": str(exc), "code": "migrate_import_invalid"}
 
@@ -4915,6 +4928,7 @@ class AppApi:
             if tray_controller is not None:
                 tray_controller.refresh_menu()
             warnings: list[str] = []
+            warnings.extend(key_warnings)
             if bundle.get("includes_secrets"):
                 warnings.append(f"已写入 {len(secrets)} 个登录密码到系统凭据库")
             else:
