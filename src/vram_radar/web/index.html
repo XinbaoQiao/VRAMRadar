@@ -244,59 +244,70 @@
                 <button id="check-for-updates" class="button" type="button">检查更新</button>
               </div>
             </section>
-
             <section id="settings-pane-migrate" class="settings-pane settings-pane-migrate" data-settings-pane="migrate" aria-labelledby="settings-migrate-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-migrate-title">配置迁移</h3>
-                <p>复制二维码，在新电脑导入</p>
+                <p>用二维码把本机配置带到新电脑</p>
               </header>
               <div id="migrate-panel" class="migrate-panel-body">
-                <div class="migrate-options">
-                  <label class="settings-pref check-label migrate-check">
-                    <input id="migrate-include-secrets" type="checkbox">
-                    <span class="settings-pref-text">
-                      <strong>含登录密码</strong>
-                      <small>用口令加密后写入二维码；请勿分享口令</small>
-                    </span>
-                  </label>
-                  <div id="migrate-passphrase-fields" class="migrate-passphrase-fields" hidden>
-                    <div class="migrate-passphrase-grid">
-                      <label class="settings-field migrate-field">
-                        <span>迁移口令（至少 8 位）</span>
-                        <input id="migrate-passphrase" type="password" autocomplete="new-password" spellcheck="false">
-                      </label>
-                      <label class="settings-field migrate-field">
-                        <span>确认口令</span>
-                        <input id="migrate-passphrase-confirm" type="password" autocomplete="new-password" spellcheck="false">
-                      </label>
+                <section class="migrate-card migrate-card-export" aria-labelledby="migrate-export-title">
+                  <header class="migrate-card-head">
+                    <h4 id="migrate-export-title">导出</h4>
+                    <p>生成本机配置二维码，复制或保存后到新电脑导入</p>
+                  </header>
+                  <div class="migrate-export-grid">
+                    <div class="migrate-qr-column">
+                      <div id="migrate-qr-wrap" class="migrate-qr-wrap" hidden>
+                        <div class="migrate-qr-frame">
+                          <canvas id="migrate-qr-canvas" width="256" height="256" aria-label="配置迁移二维码"></canvas>
+                        </div>
+                      </div>
+                      <div id="migrate-export-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
                     </div>
-                    <label class="settings-pref check-label migrate-check migrate-check-nested">
-                      <input id="migrate-include-keys" type="checkbox">
-                      <span class="settings-pref-text">
-                        <strong>含 SSH 私钥</strong>
-                        <small>体积更大，过密时改为导出文件</small>
-                      </span>
-                    </label>
-                    <p class="migrate-secret-warn">含密码或私钥的二维码等同于钥匙，请只在可信设备间传输。</p>
-                  </div>
-                </div>
-
-                <div class="migrate-qr-block">
-                  <div id="migrate-qr-wrap" class="migrate-qr-wrap" hidden>
-                    <div class="migrate-qr-frame">
-                      <canvas id="migrate-qr-canvas" width="200" height="200" aria-label="配置迁移二维码"></canvas>
+                    <div class="migrate-side-column">
+                      <div class="migrate-options">
+                        <label class="settings-pref check-label migrate-check">
+                          <input id="migrate-include-secrets" type="checkbox">
+                          <span class="settings-pref-text">
+                            <strong>含登录密码</strong>
+                            <small>用口令加密后写入二维码；请勿分享口令</small>
+                          </span>
+                        </label>
+                        <div id="migrate-passphrase-fields" class="migrate-passphrase-fields" hidden>
+                          <div class="migrate-passphrase-grid">
+                            <label class="settings-field migrate-field">
+                              <span>迁移口令（至少 8 位）</span>
+                              <input id="migrate-passphrase" type="password" autocomplete="new-password" spellcheck="false">
+                            </label>
+                            <label class="settings-field migrate-field">
+                              <span>确认口令</span>
+                              <input id="migrate-passphrase-confirm" type="password" autocomplete="new-password" spellcheck="false">
+                            </label>
+                          </div>
+                          <label class="settings-pref check-label migrate-check migrate-check-nested">
+                            <input id="migrate-include-keys" type="checkbox">
+                            <span class="settings-pref-text">
+                              <strong>含 SSH 私钥</strong>
+                              <small>体积更大，过密时改为导出文件</small>
+                            </span>
+                          </label>
+                          <p class="migrate-secret-warn">含密码或私钥的二维码等同于钥匙，请只在可信设备间传输。</p>
+                        </div>
+                      </div>
+                      <div class="migrate-actions migrate-actions-export">
+                        <button id="migrate-copy-image" class="button primary" type="button">复制二维码</button>
+                        <button id="migrate-save-image" class="button" type="button">保存图片</button>
+                        <button id="migrate-export-file" class="button" type="button" hidden>导出文件</button>
+                      </div>
                     </div>
                   </div>
-                  <div id="migrate-export-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
-                  <div class="migrate-actions migrate-actions-export">
-                    <button id="migrate-copy-image" class="button primary" type="button">复制二维码</button>
-                    <button id="migrate-save-image" class="button" type="button">保存图片</button>
-                    <button id="migrate-export-file" class="button" type="button" hidden>导出文件</button>
-                  </div>
-                </div>
+                </section>
 
-                <div class="migrate-import-section">
-                  <h4 id="migrate-import-label" class="migrate-section-title">导入到本机</h4>
+                <section class="migrate-card migrate-card-import" aria-labelledby="migrate-import-label">
+                  <header class="migrate-card-head">
+                    <h4 id="migrate-import-label">导入到本机</h4>
+                    <p>粘贴或选择二维码图片，将替换当前配置</p>
+                  </header>
                   <div class="migrate-import-block">
                     <div class="migrate-actions migrate-actions-import">
                       <button id="migrate-paste-image" class="button" type="button">粘贴二维码</button>
@@ -308,7 +319,7 @@
                     </label>
                     <div id="migrate-import-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
                   </div>
-                </div>
+                </section>
 
                 <p id="migrate-privacy" class="migrate-privacy">默认不含登录密码与私钥</p>
               </div>

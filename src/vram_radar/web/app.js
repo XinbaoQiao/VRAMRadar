@@ -5362,7 +5362,7 @@ function drawMigrateQr(token) {
   }
   const modules = qr.getModuleCount();
   const quiet = 4; // modules of white border
-  const target = 188;
+  const target = 240;
   const cell = Math.max(3, Math.floor(target / (modules + quiet * 2)));
   const size = cell * (modules + quiet * 2);
   canvas.width = size;
@@ -5385,10 +5385,10 @@ function clearMigrateQr() {
   const canvas = ui.migrateQrCanvas;
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  canvas.width = 200;
-  canvas.height = 200;
+  canvas.width = 256;
+  canvas.height = 256;
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 200, 200);
+  ctx.fillRect(0, 0, 256, 256);
   lastMigrateQrReady = false;
 }
 
