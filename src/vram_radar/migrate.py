@@ -84,12 +84,12 @@ def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
 
 def seal_secrets(passphrase: str, secrets: dict[str, str]) -> dict[str, Any]:
     if not isinstance(passphrase, str) or len(passphrase) < 8:
-        raise ConfigError("迁移口令至少 8 个字符")
+        raise ConfigError("口令至少 8 位")
     if not secrets:
-        raise ConfigError("没有可加密的登录密码")
+        raise ConfigError("没有可导出的登录密码")
     for ref, password in secrets.items():
         if not isinstance(ref, str) or not ref.strip():
-            raise ConfigError("凭据引用无效")
+            raise ConfigError("密码信息无效")
         if not isinstance(password, str) or not password:
             raise ConfigError("登录密码不能为空")
     salt = os.urandom(16)
@@ -114,11 +114,11 @@ def seal_secrets(passphrase: str, secrets: dict[str, str]) -> dict[str, Any]:
 
 def open_secrets(passphrase: str, sealed: dict[str, Any]) -> dict[str, str]:
     if not isinstance(passphrase, str) or not passphrase:
-        raise ConfigError("请输入迁移口令")
+        raise ConfigError("请输入口令")
     if not isinstance(sealed, dict):
-        raise ConfigError("加密凭据块无效")
+        raise ConfigError("加密内容无效")
     if sealed.get("v") != SEAL_VERSION or sealed.get("kdf") != "pbkdf2-sha256":
-        raise ConfigError("不支持的凭据加密格式")
+        raise ConfigError("不支持的加密格式")
     try:
         iters = int(sealed["iters"])
         salt = _b64d(str(sealed["salt"]))
@@ -126,21 +126,21 @@ def open_secrets(passphrase: str, sealed: dict[str, Any]) -> dict[str, str]:
         ciphertext = _b64d(str(sealed["ct"]))
         mac = _b64d(str(sealed["mac"]))
     except Exception as exc:
-        raise ConfigError("加密凭据块损坏") from exc
+        raise ConfigError("加密内容已损坏") from exc
     if iters < 100_000 or iters > 5_000_000:
-        raise ConfigError("凭据加密参数无效")
+        raise ConfigError("加密参数无效")
     material = hashlib.pbkdf2_hmac("sha256", passphrase.encode("utf-8"), salt, iters, dklen=64)
     enc_key, mac_key = material[:32], material[32:]
     expected = hmac.new(mac_key, b"vramradar-migrate-secrets-v1" + salt + nonce + ciphertext, hashlib.sha256).digest()
     if not hmac.compare_digest(expected, mac):
-        raise ConfigError("迁移口令不正确，或文件已损坏")
+        raise ConfigError("口令不正确，或文件已损坏")
     plaintext = bytes(a ^ b for a, b in zip(ciphertext, _keystream(enc_key, nonce, len(ciphertext))))
     try:
         raw = json.loads(plaintext.decode("utf-8"))
     except Exception as exc:
-        raise ConfigError("解密后的凭据无效") from exc
+        raise ConfigError("解密后的密码无效") from exc
     if not isinstance(raw, dict) or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in raw.items()):
-        raise ConfigError("解密后的凭据无效")
+        raise ConfigError("解密后的密码无效")
     return raw
 
 
@@ -309,9 +309,9 @@ def build_bundle(
     if selected_ids is not None and not selected_ids:
         raise ConfigError("请至少选择一台服务器")
     if include_keys and not include:
-        raise ConfigError("导出私钥前请先勾选含登录密码")
+        raise ConfigError("导出私钥前请先勾选「含登录密码」")
     if (include or include_keys) and not passphrase:
-        raise ConfigError("导出密码时请设置迁移口令")
+        raise ConfigError("导出密码时请设置口令")
     sealed = None
     exported, password_refs = _export_profile_dict(
         profile,
@@ -330,7 +330,7 @@ def build_bundle(
             raise ConfigError("当前配置没有可读取的 SSH 私钥可导出")
         secret_payload.update(keys)
     if include and not secret_payload:
-        raise ConfigError("当前配置没有已保存的登录密码或私钥可导出")
+        raise ConfigError("没有已保存的登录密码或私钥可导出")
     created = int(created_at if created_at is not None else time.time())
     expires_at = None
     pkg_id = None
@@ -353,7 +353,7 @@ def build_bundle(
     if expires_at is not None:
         notes.append("含密码的迁移码有时限，请尽快在受信任设备上导入，勿长期留存。")
     if not include_prefs:
-        notes.append("本次仅导出服务器，未包含界面偏好。")
+        notes.append("本次仅导出服务器，未包含偏好设置。")
     return {
         "format": FORMAT,
         "created_at": created,
@@ -417,14 +417,14 @@ def parse_migrate_text(text: str) -> dict[str, Any]:
         try:
             bundle = json.loads(cleaned)
         except Exception as exc:
-            raise ConfigError("迁移文件不是有效的 JSON") from exc
+            raise ConfigError("迁移文件格式无效") from exc
     if not isinstance(bundle, dict) or bundle.get("format") != FORMAT:
-        raise ConfigError("不是 VRAM Radar 迁移包")
+        raise ConfigError("不是 VRAM Radar 的迁移文件")
     profile = bundle.get("profile")
     if not isinstance(profile, dict):
-        raise ConfigError("迁移包缺少配置")
+        raise ConfigError("迁移文件缺少配置")
     if bundle.get("includes_secrets") and not isinstance(bundle.get("secrets"), dict):
-        raise ConfigError("迁移包声明含密码但缺少加密块")
+        raise ConfigError("迁移文件声称含密码，但缺少加密内容")
     return bundle
 
 
@@ -621,12 +621,12 @@ def assert_bundle_usable(
         try:
             expiry = float(expires_at)
         except Exception as exc:
-            raise ConfigError("迁移包有效期无效") from exc
+            raise ConfigError("迁移文件有效期无效") from exc
         if current > expiry:
             raise ConfigError("含密码的迁移码已过期，请在原电脑重新生成")
     package_id = str(bundle.get("package_id") or "").strip()
     if package_id and consumed_ids and package_id in consumed_ids:
-        raise ConfigError("此迁移码已在本机使用过，请重新生成")
+        raise ConfigError("此迁移码已在本机用过，请重新生成")
 
 
 def merge_profiles(
@@ -802,7 +802,7 @@ class LanMigrateTransfer:
         max_downloads: int = 1,
     ) -> dict[str, Any]:
         if not isinstance(payload_text, str) or not payload_text.strip():
-            raise ConfigError("没有可局域网传送的迁移内容")
+            raise ConfigError("没有可传送的迁移内容")
         ttl = _clamp_ttl(
             ttl_seconds,
             default=DEFAULT_LAN_TTL_SECONDS,
@@ -885,21 +885,21 @@ class LanMigrateTransfer:
 
         cleaned = str(url or "").strip()
         if not cleaned:
-            raise ConfigError("请输入局域网传送链接")
+            raise ConfigError("请输入同一 Wi‑Fi 传送链接")
         parsed = urlparse(cleaned)
         if parsed.scheme != "http":
-            raise ConfigError("局域网传送仅支持 http 链接")
+            raise ConfigError("同一 Wi‑Fi 传送仅支持 http 链接")
         if not parsed.path.startswith("/m/"):
-            raise ConfigError("局域网传送链接无效")
+            raise ConfigError("同一 Wi‑Fi 传送链接无效")
         try:
             with urllib.request.urlopen(cleaned, timeout=timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
                 raise ConfigError("传送链接已失效或已取走") from exc
-            raise ConfigError("无法从局域网取回迁移内容") from exc
+            raise ConfigError("无法从同一 Wi‑Fi 获取迁移内容") from exc
         except Exception as exc:
-            raise ConfigError("无法连接局域网传送，请确认同一 Wi‑Fi 且对方已开启传送") from exc
+            raise ConfigError("无法连接，请确认同一 Wi‑Fi，且对方仍在传送") from exc
         text = raw.decode("utf-8", errors="strict")
         parse_migrate_text(text)
         return text

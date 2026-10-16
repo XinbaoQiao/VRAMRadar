@@ -2191,3 +2191,25 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
     grid-template-columns: 1fr;
   }
 }
+
+/* migrate-copy-clarity */
+.settings-pane-migrate .migrate-card-head p {
+  max-width: 36em;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.settings-pane-migrate .migrate-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settings-pane-migrate .migrate-secret-warn {
+  line-height: 1.5;
+  font-size: 12px;
+}
+.settings-pane-migrate .migrate-steps {
+  margin-top: 2px;
+}
+.settings-pane-migrate .migrate-aside-hint {
+  margin-top: 6px;
+}

@@ -4824,7 +4824,7 @@ class AppApi:
         try:
             return {"ok": True, "servers": list_export_targets(self.profile)}
         except Exception:
-            return {"ok": False, "error": "无法列出可导出的服务器", "code": "migrate_targets_failed", "servers": []}
+            return {"ok": False, "error": "无法列出可带走的服务器", "code": "migrate_targets_failed", "servers": []}
 
     def export_migrate_bundle(
         self,
@@ -4867,7 +4867,7 @@ class AppApi:
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_export_invalid"}
         except Exception:
-            return {"ok": False, "error": "无法生成迁移包", "code": "migrate_export_failed"}
+            return {"ok": False, "error": "无法生成迁移文件", "code": "migrate_export_failed"}
 
     def preview_migrate_payload(self, text: str = "") -> dict[str, Any]:
         try:
@@ -4881,7 +4881,7 @@ class AppApi:
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_preview_invalid"}
         except Exception:
-            return {"ok": False, "error": "无法解析迁移内容", "code": "migrate_preview_failed"}
+            return {"ok": False, "error": "无法读取迁移内容", "code": "migrate_preview_failed"}
 
     def import_migrate_bundle(
         self,
@@ -4893,11 +4893,11 @@ class AppApi:
         """Import a migrate token or file body (overwrite or merge)."""
         mode_text = str(mode or "overwrite").strip().lower()
         if mode_text not in {"overwrite", "merge"}:
-            return {"ok": False, "error": "导入模式无效", "code": "migrate_import_invalid"}
+            return {"ok": False, "error": "导入方式无效", "code": "migrate_import_invalid"}
         if not self._profile_mutation_lock.acquire(blocking=False):
             return {
                 "ok": False,
-                "error": "另一项设置正在保存，请稍后再导入",
+                "error": "设置正在保存，请稍后再导入",
                 "code": "profile_mutation_busy",
             }
         changed: list[tuple[str, str | None]] = []
@@ -4962,7 +4962,7 @@ class AppApi:
                         pass
                 return {
                     "ok": False,
-                    "error": "无法写入系统凭据存储，迁移未应用",
+                    "error": "无法保存密码到系统，迁移未生效",
                     "code": "credential_store_unavailable",
                 }
 
@@ -4989,7 +4989,7 @@ class AppApi:
                         pass
                 return {
                     "ok": False,
-                    "error": "迁移配置未能保存，已恢复原配置",
+                    "error": "迁移未能保存，已恢复原配置",
                     "code": "migrate_import_failed",
                 }
 
@@ -5015,9 +5015,9 @@ class AppApi:
                 warnings.append("SSH 私钥文件不会随迁移复制；请确认本地路径仍可用")
             check = post_import_check(profile, self.secret_store)
             if check.get("missing_pw_count"):
-                warnings.append(f"自检：{check['missing_pw_count']} 台服务器缺少登录密码")
+                warnings.append(f"检查：{check['missing_pw_count']} 台服务器缺少登录密码")
             if check.get("missing_key_count"):
-                warnings.append(f"自检：{check['missing_key_count']} 台服务器的私钥文件不存在")
+                warnings.append(f"检查：{check['missing_key_count']} 台服务器的私钥文件不存在")
             return {
                 "ok": True,
                 "profile": self._desktop_profile(profile),
@@ -5065,20 +5065,20 @@ class AppApi:
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_lan_invalid"}
         except Exception:
-            return {"ok": False, "error": "无法启动局域网传送", "code": "migrate_lan_failed"}
+            return {"ok": False, "error": "无法启动同一 Wi‑Fi 传送", "code": "migrate_lan_failed"}
 
     def lan_migrate_transfer_status(self) -> dict[str, Any]:
         try:
             return {"ok": True, "transfer": get_lan_transfer().status()}
         except Exception:
-            return {"ok": False, "error": "无法读取局域网传送状态", "code": "migrate_lan_status_failed", "transfer": {"active": False}}
+            return {"ok": False, "error": "无法读取传送状态", "code": "migrate_lan_status_failed", "transfer": {"active": False}}
 
     def stop_lan_migrate_transfer(self) -> dict[str, Any]:
         try:
             get_lan_transfer().stop()
             return {"ok": True, "transfer": get_lan_transfer().status()}
         except Exception:
-            return {"ok": False, "error": "无法停止局域网传送", "code": "migrate_lan_stop_failed"}
+            return {"ok": False, "error": "无法停止传送", "code": "migrate_lan_stop_failed"}
 
     def fetch_lan_migrate_payload(self, url: str = "") -> dict[str, Any]:
         try:
@@ -5093,7 +5093,7 @@ class AppApi:
         except ConfigError as exc:
             return {"ok": False, "error": str(exc), "code": "migrate_lan_fetch_invalid"}
         except Exception:
-            return {"ok": False, "error": "无法取回局域网迁移内容", "code": "migrate_lan_fetch_failed"}
+            return {"ok": False, "error": "无法获取同一 Wi‑Fi 迁移内容", "code": "migrate_lan_fetch_failed"}
 
     def import_server_config(self, path: str | list[str] = "") -> dict[str, Any]:
         if (

@@ -5364,9 +5364,9 @@ function syncMigrateSecretFields() {
   if (ui.migratePrivacy) {
     ui.migratePrivacy.textContent = on
       ? (migrateWantsKeys()
-        ? localizedText('已含加密密码与私钥')
-        : localizedText('已含加密密码'))
-      : localizedText('默认不含登录密码与私钥');
+        ? localizedText('已含密码和私钥（已加密）')
+        : localizedText('已含密码（已加密）'))
+      : localizedText('默认不含登录密码和私钥');
   }
   updateMigrateSummary(lastMigratePreview);
 }
@@ -5375,8 +5375,8 @@ function readMigrateExportPassphrase() {
   if (!migrateWantsSecrets()) return '';
   const a = String(ui.migratePassphrase?.value || '');
   const b = String(ui.migratePassphraseConfirm?.value || '');
-  if (a.length < 8) throw new Error(localizedText('导出密码时口令至少 8 位'));
-  if (a !== b) throw new Error(localizedText('口令不一致'));
+  if (a.length < 8) throw new Error(localizedText('导出密码时，口令至少 8 位'));
+  if (a !== b) throw new Error(localizedText('两次两次口令不一致'));
   return a;
 }
 
@@ -5479,18 +5479,18 @@ function updateMigrateSummary(preview) {
   const p = lastMigratePreview;
   if (!p || typeof p !== 'object') {
     ui.migrateSummary.textContent = migrateWantsSecrets()
-      ? localizedText('设置口令后生成含密二维码')
-      : localizedText('正在准备本机配置…');
+      ? localizedText('设置口令后生成含密码的二维码')
+      : localizedText('正在准备配置…');
     return;
   }
   const line = formatMigratePreview(p);
   const mode = migrateWantsSecrets()
     ? (migrateWantsKeys()
-      ? localizedText('当前：含加密密码与私钥')
-      : localizedText('当前：含加密密码'))
-    : localizedText('当前：不含密码与私钥');
+      ? localizedText('当前：含密码和私钥（已加密）')
+      : localizedText('当前：含密码（已加密）'))
+    : localizedText('当前：不含密码和私钥');
   const ttl = migrateWantsSecrets() && p.expires_in_seconds != null
-    ? `${localizedText('有效期剩余')} ${Math.max(0, Math.round(Number(p.expires_in_seconds) / 60))} ${localizedText('分钟')}`
+    ? `${localizedText('剩余时间')} ${Math.max(0, Math.round(Number(p.expires_in_seconds) / 60))} ${localizedText('分钟')}`
     : '';
   ui.migrateSummary.textContent = [line, mode, ttl].filter(Boolean).join(' · ');
 }
@@ -5505,8 +5505,8 @@ function formatMigratePreview(preview) {
   if (preview.includes_preferences === false) parts.push(localizedText('不含偏好'));
   if (preview.includes_secrets) {
     parts.push(preview.includes_private_keys
-      ? localizedText('已含加密密码与私钥')
-      : localizedText('已含加密密码'));
+      ? localizedText('已含密码和私钥（已加密）')
+      : localizedText('已含密码（已加密）'));
     if (preview.expired) parts.push(localizedText('已过期'));
   }
   return parts.join(' · ');
@@ -5528,9 +5528,9 @@ function renderMigrateImportPreview(preview, {needsPass = false} = {}) {
   ];
   if (names) lines.push(`${localizedText('服务器')}：${names}`);
   if (preview.includes_secrets) {
-    lines.push(localizedText('含密码：导入后此码在本机作废，且有过期时间'));
+    lines.push(localizedText('含密码：导入后本机即失效，且有过期时间'));
   }
-  if (needsPass) lines.push(localizedText('需要迁移口令'));
+  if (needsPass) lines.push(localizedText('需要口令'));
   ui.migrateImportPreview.hidden = false;
   ui.migrateImportPreview.innerHTML = lines.filter(Boolean).join('<br>');
   if (ui.migrateImportModeWrap) ui.migrateImportModeWrap.hidden = false;
@@ -5545,7 +5545,7 @@ function renderMigrateCheck(check) {
     return;
   }
   const rows = Array.isArray(check.servers) ? check.servers : [];
-  const lines = [`<strong>${localizedText('导入自检')}</strong>`];
+  const lines = [`<strong>${localizedText('导入后检查')}</strong>`];
   lines.push(`${localizedText('正常')} ${check.ok_count || 0} / ${check.server_count || 0}`);
   for (const row of rows.slice(0, 12)) {
     const flags = [];
@@ -5567,7 +5567,7 @@ async function loadMigrateExportTargets() {
     const previous = new Set(migrateSelectedServerIds() || []);
     ui.migrateServerList.innerHTML = '';
     if (!servers.length) {
-      ui.migrateServerList.innerHTML = `<p class="migrate-aside-hint">${localizedText('暂无服务器可导出')}</p>`;
+      ui.migrateServerList.innerHTML = `<p class="migrate-aside-hint">${localizedText('暂无服务器可带走')}</p>`;
       migrateTargetsLoaded = true;
       return;
     }
@@ -5636,8 +5636,8 @@ async function generateMigrateExport({forceFile = false} = {}) {
       setMigrateStatus(
         ui.migrateExportStatus,
         drew
-          ? [localizedText('复制二维码到新电脑导入'), previewLine].filter(Boolean).join('\n')
-          : localizedText('二维码组件不可用；请保存文件'),
+          ? [localizedText('复制二维码，到新电脑导入'), previewLine].filter(Boolean).join('\n')
+          : localizedText('无法生成二维码，请改为保存文件'),
         {error: !drew},
       );
       if (!drew && (forceFile || lastMigrateFileText)) {
@@ -5649,7 +5649,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
       if (ui.migrateExportFile) ui.migrateExportFile.hidden = false;
       setMigrateStatus(
         ui.migrateExportStatus,
-        [localizedText('配置较大，二维码装不下'), localizedText('请保存文件导入'), previewLine].filter(Boolean).join('\n'),
+        [localizedText('配置较大，二维码装不下'), localizedText('请先保存文件，再导入'), previewLine].filter(Boolean).join('\n'),
         {error: true},
       );
       if (forceFile && lastMigrateFileText) downloadMigrateFile(lastMigrateFileName, lastMigrateFileText);
@@ -5679,7 +5679,7 @@ async function stageMigrateImportText(text) {
   try {
     if (api.preview_migrate_payload) {
       const result = await api.preview_migrate_payload(payload);
-      if (!result?.ok) throw new Error(localizedText(result?.error || '无法解析迁移内容'));
+      if (!result?.ok) throw new Error(localizedText(result?.error || '无法读取迁移内容'));
       needsPass = Boolean(result?.needs_passphrase);
       preview = result?.preview || null;
       if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = !needsPass;
@@ -5687,7 +5687,7 @@ async function stageMigrateImportText(text) {
   } catch (error) {
     pendingMigrateImportText = '';
     renderMigrateImportPreview(null);
-    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法解析迁移内容'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法读取迁移内容'), {error: true});
     return;
   }
   renderMigrateImportPreview(preview, {needsPass});
@@ -5706,7 +5706,7 @@ async function confirmMigrateImport() {
   if (needsPass) {
     passphrase = String(ui.migrateImportPassphrase?.value || '');
     if (!passphrase) {
-      setMigrateStatus(ui.migrateImportStatus, localizedText('请输入迁移口令以导入加密内容'), {error: true});
+      setMigrateStatus(ui.migrateImportStatus, localizedText('请输入口令以导入加密内容'), {error: true});
       ui.migrateImportPassphrase?.focus();
       return;
     }
@@ -5714,8 +5714,8 @@ async function confirmMigrateImport() {
   const mode = migrateImportMode();
   const applyPrefs = ui.migrateApplyPrefs ? Boolean(ui.migrateApplyPrefs.checked) : true;
   const confirmText = mode === 'merge'
-    ? localizedText('导入将合并服务器配置，是否继续？')
-    : localizedText('导入将替换当前服务器与偏好设置，是否继续？');
+    ? localizedText('导入会合并服务器配置，是否继续？')
+    : localizedText('导入会替换当前服务器和偏好，是否继续？');
   if (!window.confirm(confirmText)) return;
   migrateImportBusy = true;
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在导入…'));
@@ -5734,7 +5734,7 @@ async function confirmMigrateImport() {
     );
     renderMigrateCheck(result.check || null);
     pendingMigrateImportText = '';
-    showToast(localizedText('已从迁移导入'));
+    showToast(localizedText('配置已导入'));
   } catch (error) {
     setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('导入失败'), {error: true});
   } finally {
@@ -5764,7 +5764,7 @@ async function decodeMigrateQrFromBlob(blob) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(image, 0, 0);
     const payload = decodeQrFromImageData(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    if (!payload) throw new Error(localizedText('图片中未识别到二维码'));
+    if (!payload) throw new Error(localizedText('图片中未找到二维码'));
     return payload;
   } finally {
     URL.revokeObjectURL(bitmapUrl);
@@ -5788,7 +5788,7 @@ async function readMigrateImageFile(file) {
 async function pasteMigrateQrImage() {
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在读取剪贴板…'));
   try {
-    if (!navigator.clipboard?.read) throw new Error(localizedText('当前环境无法读取剪贴板图片'));
+    if (!navigator.clipboard?.read) throw new Error(localizedText('无法读取剪贴板图片'));
     const items = await navigator.clipboard.read();
     for (const item of items) {
       const type = (item.types || []).find((name) => String(name).startsWith('image/'));
@@ -5815,7 +5815,7 @@ function renderLanTransferStatus(transfer) {
   const mins = Math.max(1, Math.round(Number(transfer.expires_in_seconds || 0) / 60));
   ui.migrateLanStatus.hidden = false;
   ui.migrateLanStatus.textContent = [
-    localizedText('局域网传送已开启（同一 Wi‑Fi，不经公网）'),
+    localizedText('同一 Wi‑Fi 传送已开启（不经公网）'),
     transfer.url || '',
     `${localizedText('约')} ${mins} ${localizedText('分钟后失效')} · ${localizedText('剩余次数')} ${transfer.downloads_left || 0}`,
   ].filter(Boolean).join('\n');
@@ -5835,7 +5835,7 @@ async function refreshLanTransferStatus() {
 
 async function startLanMigrateTransfer() {
   if (!api?.start_lan_migrate_transfer) {
-    showToast(localizedText('当前版本不支持局域网传送'));
+    showToast(localizedText('当前版本不支持同一 Wi‑Fi 传送'));
     return;
   }
   try {
@@ -5854,7 +5854,7 @@ async function startLanMigrateTransfer() {
       migrateWantsPrefs(),
       includeSecrets ? migrateTtlSeconds() : 600,
     );
-    if (!result?.ok) throw new Error(localizedText(result?.error || '无法启动局域网传送'));
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法启动同一 Wi‑Fi 传送'));
     renderLanTransferStatus(result.transfer);
     if (result.token) {
       lastMigrateToken = String(result.token || '');
@@ -5866,11 +5866,11 @@ async function startLanMigrateTransfer() {
         if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = !lastMigrateQrReady;
       }
     }
-    showToast(localizedText('局域网传送已开启'));
+    showToast(localizedText('同一 Wi‑Fi 传送已开启'));
     if (migrateLanPollTimer) clearInterval(migrateLanPollTimer);
     migrateLanPollTimer = setInterval(() => { void refreshLanTransferStatus(); }, 5000);
   } catch (error) {
-    showToast(error?.message || localizedText('无法启动局域网传送'));
+    showToast(error?.message || localizedText('无法启动同一 Wi‑Fi 传送'));
   }
 }
 
@@ -5878,17 +5878,17 @@ async function fetchLanMigratePayload() {
   if (!api?.fetch_lan_migrate_payload) return;
   const url = String(ui.migrateLanUrl?.value || '').trim();
   if (!url) {
-    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入局域网传送链接'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入同一 Wi‑Fi 传送链接'), {error: true});
     return;
   }
-  setMigrateStatus(ui.migrateImportStatus, localizedText('正在取回…'));
+  setMigrateStatus(ui.migrateImportStatus, localizedText('正在获取…'));
   try {
     const result = await api.fetch_lan_migrate_payload(url);
-    if (!result?.ok) throw new Error(localizedText(result?.error || '无法取回局域网迁移内容'));
-    setMigrateStatus(ui.migrateImportStatus, localizedText('已取回迁移内容'));
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法获取同一 Wi‑Fi 迁移内容'));
+    setMigrateStatus(ui.migrateImportStatus, localizedText('已获取迁移内容'));
     await stageMigrateImportText(result.text || '');
   } catch (error) {
-    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法取回局域网迁移内容'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法获取同一 Wi‑Fi 迁移内容'), {error: true});
   }
 }
 
@@ -5901,7 +5901,7 @@ function ensureMigrateQrForPane(paneId) {
       if (String(ui.migratePassphrase?.value || '').length < 8) {
         clearMigrateQr();
         if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
-        setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置迁移口令'));
+        setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置口令'));
         return;
       }
     }
