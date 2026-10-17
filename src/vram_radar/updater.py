@@ -171,16 +171,44 @@ def download_verified_asset(
         raise
 
 
+def _packaged_windows_layout(install_root: Path) -> bool:
+    """True for a full Windows bundle: updater beside the app and _internal present.
+
+    The Inno Setup package writes ``.vram-radar-installed``. Agent or folder
+    copies of ``dist/VRAMRadar`` often keep the updater but lose that marker;
+    requiring only the marker then falsely treats those trees as portable.
+    """
+    return (
+        (install_root / "VRAMRadarUpdater.exe").is_file()
+        and (install_root / "_internal").is_dir()
+    )
+
+
+def ensure_windows_install_marker(install_root: Path | None = None) -> bool:
+    """Return True when the install marker exists, creating it for a full bundle."""
+    root = Path(sys.executable).resolve().parent if install_root is None else Path(install_root)
+    marker = root / INSTALL_MARKER
+    if marker.is_file():
+        return True
+    if not _packaged_windows_layout(root):
+        return False
+    try:
+        marker.write_text("VRAMRadar official installer\n", encoding="utf-8")
+    except OSError:
+        return False
+    return marker.is_file()
+
+
 def windows_update_capability() -> tuple[bool, str | None]:
     if sys.platform != "win32" or not getattr(sys, "frozen", False):
         return False, "当前不是 Windows 安装版"
     install_root = Path(sys.executable).resolve().parent
     if Path(sys.executable).name.lower() != "vramradar.exe":
         return False, "当前程序文件名不受自动更新支持"
-    if not (install_root / INSTALL_MARKER).is_file():
-        return False, "当前不是由正式安装器安装的版本"
     if not (install_root / "VRAMRadarUpdater.exe").is_file():
         return False, "此版本缺少更新执行器"
+    if not ensure_windows_install_marker(install_root):
+        return False, "当前不是由正式安装器安装的版本"
     return True, None
 
 

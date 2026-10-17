@@ -24,4 +24,11 @@ if ($LASTEXITCODE -ne 0) { throw "icon build failed with exit code $LASTEXITCODE
     (Join-Path $projectRoot 'packaging\vram-radar.spec')
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
+$markerSource = Join-Path $projectRoot 'packaging\installed-marker.txt'
+$markerDest = Join-Path $projectRoot 'dist\VRAMRadar\.vram-radar-installed'
+if (-not (Test-Path -LiteralPath $markerSource)) {
+    throw 'Missing packaging\installed-marker.txt'
+}
+Copy-Item -LiteralPath $markerSource -Destination $markerDest -Force
+
 Write-Output (Join-Path $projectRoot 'dist\VRAMRadar\VRAMRadar.exe')

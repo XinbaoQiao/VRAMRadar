@@ -2601,8 +2601,14 @@ function updateProgressLabel(status) {
   return '';
 }
 
+function updateBrowserFallbackLabel() {
+  const reason = String(latestUpdateActionReason || '').trim();
+  if (reason) return localizedText(reason);
+  return localizedText('当前无法应用内更新，将打开 GitHub 发布页');
+}
+
 function updateActionMarkup() {
-  const defaultLabel = localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : '当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页');
+  const defaultLabel = localizedText(latestUpdateAction === 'one_click' ? '安全一键更新' : latestUpdateAction === 'verified_download' ? '下载并校验' : updateBrowserFallbackLabel());
   const active = latestUpdateProgress?.state && latestUpdateProgress.state !== 'idle';
   const busy = latestUpdateProgress?.state === 'running';
   const terminal = latestUpdateProgress?.state === 'completed';
@@ -6096,14 +6102,14 @@ async function checkForUpdates({interactive = false} = {}) {
 
 async function installLatestUpdate(button) {
   if (latestUpdateAction === 'browser') {
-    const portableHint = localizedText('当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页');
+    const fallbackHint = updateBrowserFallbackLabel();
     const reason = String(latestUpdateActionReason || '').trim();
     const explanation = reason
-      ? `${portableHint}\n${localizedText(reason)}`
-      : portableHint;
+      ? `${fallbackHint}\n${localizedText('将打开 GitHub 发布页下载安装包')}`
+      : fallbackHint;
     if (!window.confirm(localizedText(explanation))) return;
     if (api?.open_latest_release) await api.open_latest_release();
-    showToast(portableHint);
+    showToast(fallbackHint);
     return;
   }
   const explanation = latestUpdateAction === 'one_click'

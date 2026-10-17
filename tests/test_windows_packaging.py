@@ -160,5 +160,11 @@ class WindowsPackagingContractTests(unittest.TestCase):
         self.assertIn("Program Files", guide_flat)
 
 
+
+    def test_bundle_build_stamps_install_marker_into_dist(self) -> None:
+        build = (ROOT / "Build-VramRadar.ps1").read_text(encoding="utf-8")
+        self.assertIn("packaging\\installed-marker.txt", build)
+        self.assertIn("dist\\VRAMRadar\\.vram-radar-installed", build)
+
 if __name__ == "__main__":
     unittest.main()

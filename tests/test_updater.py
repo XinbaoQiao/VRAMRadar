@@ -9,7 +9,11 @@ from unittest.mock import Mock, patch, sentinel
 from urllib.error import URLError
 
 from vram_radar.update_helper import run_update
-from vram_radar.updater import download_verified_asset
+from vram_radar.updater import (
+    download_verified_asset,
+    ensure_windows_install_marker,
+    windows_update_capability,
+)
 
 
 class FakeDownload:
@@ -302,6 +306,45 @@ class UpdateDownloadTests(unittest.TestCase):
                 close_fds=True,
             )
 
+    def test_windows_update_capability_heals_missing_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install_root = Path(temporary)
+            exe = install_root / "VRAMRadar.exe"
+            exe.write_bytes(b"app")
+            (install_root / "VRAMRadarUpdater.exe").write_bytes(b"updater")
+            (install_root / "_internal").mkdir()
+            marker = install_root / ".vram-radar-installed"
+            self.assertFalse(marker.exists())
+            with patch("vram_radar.updater.sys") as fake_sys:
+                fake_sys.platform = "win32"
+                fake_sys.frozen = True
+                fake_sys.executable = str(exe)
+                capable, reason = windows_update_capability()
+            self.assertTrue(capable)
+            self.assertIsNone(reason)
+            self.assertTrue(marker.is_file())
+            self.assertIn("official installer", marker.read_text(encoding="utf-8"))
+
+    def test_windows_update_capability_rejects_bundle_without_updater(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install_root = Path(temporary)
+            exe = install_root / "VRAMRadar.exe"
+            exe.write_bytes(b"app")
+            (install_root / "_internal").mkdir()
+            with patch("vram_radar.updater.sys") as fake_sys:
+                fake_sys.platform = "win32"
+                fake_sys.frozen = True
+                fake_sys.executable = str(exe)
+                capable, reason = windows_update_capability()
+            self.assertFalse(capable)
+            self.assertEqual(reason, "此版本缺少更新执行器")
+            self.assertFalse((install_root / ".vram-radar-installed").exists())
+
+    def test_ensure_windows_install_marker_skips_incomplete_trees(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install_root = Path(temporary)
+            self.assertFalse(ensure_windows_install_marker(install_root))
+            self.assertFalse((install_root / ".vram-radar-installed").exists())
 
 if __name__ == "__main__":
     unittest.main()

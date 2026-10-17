@@ -4241,6 +4241,7 @@ class AppApi:
         asset = result.get("asset")
         if not isinstance(asset, dict):
             result["update_action"] = "browser"
+            result["update_action_reason"] = "当前发布没有可用的自动更新包"
         elif sys.platform == "win32":
             capable, reason = windows_update_capability()
             result["update_action"] = "one_click" if capable else "browser"
