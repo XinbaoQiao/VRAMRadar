@@ -650,6 +650,21 @@ def _wait_for_process_exit(pid: int, timeout_seconds: float = 15.0) -> bool:
     return False
 
 
+# One local page: no extensions, sync, component updates, background
+# networking or spare renderer is ever needed, and each costs RAM.
+WEBVIEW2_LEAN_ARGUMENTS = " ".join((
+    "--disk-cache-size=16777216",
+    "--disable-gpu-shader-disk-cache",
+    "--renderer-process-limit=1",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "--no-pings",
+    "--disable-features=SpareRendererForSitePerProcess,msSmartScreenProtection,msWebOOUI,msPdfOOUI",
+))
+
+
 def webview_start_options(debug: bool, icon_path: Path, storage_path: Path | None = None) -> dict[str, Any]:
     options: dict[str, Any] = {"debug": debug}
     if sys.platform == "win32" and storage_path is not None:
@@ -662,7 +677,7 @@ def webview_start_options(debug: bool, icon_path: Path, storage_path: Path | Non
         options["storage_path"] = str(storage_path)
         # Cap WebView2's HTTP disk cache: the UI is local files, so a big
         # cache only grows on disk during weeks-long runs.
-        os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=16777216")
+        os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", WEBVIEW2_LEAN_ARGUMENTS)
     # Windows and macOS obtain their application icon from the packaged
     # executable/.app bundle. pywebview's runtime icon option is only supported
     # by its GTK/Qt backends.

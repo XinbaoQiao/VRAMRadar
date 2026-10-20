@@ -90,7 +90,7 @@ class UiaCache(unittest.TestCase):
 
 
 class TrimSchedule(unittest.TestCase):
-    def test_trim_after_startup_then_hourly_and_diagnostics_each_check(self):
+    def test_trim_after_startup_then_every_20_minutes_and_diagnostics_each_check(self):
         clock = [0.0]
         trim, diag = mock.Mock(return_value={"gc": 0}), mock.Mock()
         keeper = hk.Housekeeper(lambda: {}, clock=lambda: clock[0], trim=trim, diagnostics=diag,
@@ -98,8 +98,26 @@ class TrimSchedule(unittest.TestCase):
         for _ in range(int(7200 / 60) + 1):
             keeper.step()
             clock[0] += 60
-        self.assertEqual(trim.call_count, 2)          # ~3 min after start, then after an hour
+        self.assertEqual(trim.call_count, 6)          # ~3 min after start, then every 20 minutes
         self.assertEqual(diag.call_count, 12)         # every 10 minutes, not every step
+
+    def test_trim_reaches_webview_children(self):
+        import subprocess, sys, time
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+        try:
+            time.sleep(0.5)
+            if sys.platform == "win32":
+                self.assertIn(child.pid, hk.descendant_pids())
+            self.assertGreaterEqual(hk.trim_child_working_sets([child.pid]), 0)
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_webview_runs_lean(self):
+        from vram_radar.shell import WEBVIEW2_LEAN_ARGUMENTS
+        for flag in ("--renderer-process-limit=1", "--disable-extensions", "--disk-cache-size="):
+            self.assertIn(flag, WEBVIEW2_LEAN_ARGUMENTS)
+        self.assertEqual(hk.HealthWatchdog.LIMITS["private_bytes"], 300 * 1024 * 1024)
 
     def test_trim_memory_is_safe(self):
         out = hk.trim_memory(working_set=False)

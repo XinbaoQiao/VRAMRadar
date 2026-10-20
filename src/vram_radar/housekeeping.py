@@ -385,6 +385,110 @@ def _process_memory() -> dict[str, int]:
     return {}
 
 
+def descendant_pids(root: int | None = None) -> list[int]:
+    """PIDs of every process below ``root`` (WebView2 browser/renderer/GPU
+    children).  Windows only; returns [] elsewhere or on failure."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                        ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        snap = kernel32.CreateToolhelp32Snapshot(0x2, 0)
+        if not snap or snap == wintypes.HANDLE(-1).value:
+            return []
+        parents: dict[int, list[int]] = {}
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
+            while ok:
+                parents.setdefault(int(entry.th32ParentProcessID), []).append(int(entry.th32ProcessID))
+                ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
+        finally:
+            kernel32.CloseHandle(snap)
+        start = os.getpid() if root is None else root
+        found: list[int] = []
+        queue = [start]
+        while queue and len(found) < 64:
+            for child in parents.get(queue.pop(), []):
+                if child not in found and child != start:
+                    found.append(child)
+                    queue.append(child)
+        return found
+    except Exception:
+        return []
+
+
+def trim_child_working_sets(pids: Iterable[int] | None = None) -> int:
+    """Ask Windows to page out unused memory of our WebView2 children.
+    Pages in use fault back in; nothing visible changes.  Returns bytes freed
+    (working-set delta) best-effort."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi")
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        psapi.EmptyWorkingSet.argtypes = [wintypes.HANDLE]
+    except Exception:
+        return 0
+    freed = 0
+    for pid in (descendant_pids() if pids is None else pids):
+        handle = kernel32.OpenProcess(0x0100 | 0x0400, False, int(pid))  # SET_QUOTA | QUERY_INFORMATION
+        if not handle:
+            continue
+        try:
+            before = _working_set_of(handle)
+            psapi.EmptyWorkingSet(handle)
+            after = _working_set_of(handle)
+            if before and after is not None and before > after:
+                freed += before - after
+        except Exception:
+            pass
+        finally:
+            kernel32.CloseHandle(handle)
+    return freed
+
+
+def _working_set_of(handle: Any) -> int | None:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+        counters = PMC()
+        counters.cb = ctypes.sizeof(PMC)
+        psapi = ctypes.WinDLL("psapi")
+        if psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.cb):
+            return int(counters.WorkingSetSize)
+    except Exception:
+        pass
+    return None
+
+
 def trim_memory(working_set: bool = True) -> dict[str, Any]:
     """Give memory back without restarting: a full Python collection, a
     compacting .NET collection (WinForms/pythonnet objects) and -- Windows --
@@ -414,9 +518,10 @@ def trim_memory(working_set: bool = True) -> dict[str, Any]:
             kernel32.SetProcessWorkingSetSize(ctypes.c_void_p(-1), ctypes.c_size_t(-1), ctypes.c_size_t(-1))
         except Exception:
             pass
+    children_freed = trim_child_working_sets() if working_set else 0
     after = _process_memory()
     mb = lambda value: round(value / 1048576, 1) if isinstance(value, int) else None
-    return {"gc": collected,
+    return {"gc": collected, "webview_trimmed_mb": mb(children_freed),
             "private_mb": [mb(before.get("private_bytes")), mb(after.get("private_bytes"))],
             "working_set_mb": [mb(before.get("working_set")), mb(after.get("working_set"))]}
 
@@ -498,7 +603,7 @@ class HealthWatchdog:
     survives the restart itself) must be ``min_interval`` ago.
     """
 
-    LIMITS = {"private_bytes": 400 * 1024 * 1024, "handles": 10_000, "gdi": 5_000, "user": 5_000, "threads": 200}
+    LIMITS = {"private_bytes": 300 * 1024 * 1024, "handles": 10_000, "gdi": 5_000, "user": 5_000, "threads": 200}
 
     def __init__(self, state_path: Path, *, limits: dict[str, int] | None = None, confirm: int = 3,
                  min_interval: float = 6 * 3600.0, min_uptime: float = 3600.0,
@@ -559,7 +664,7 @@ class Housekeeper:
                  first_maintenance: float = 600.0, maintenance_interval: float = DAY,
                  check_interval: float = 600.0, clock: Callable[[], float] = time.monotonic,
                  trim: Callable[[], dict[str, Any]] | None = None, first_trim: float = 180.0,
-                 trim_interval: float = 3600.0, diagnostics: Callable[[], Any] | None = None,
+                 trim_interval: float = 1200.0, diagnostics: Callable[[], Any] | None = None,
                  maintenance_enabled: bool = True) -> None:
         self.maintenance = maintenance
         self.trim = trim
