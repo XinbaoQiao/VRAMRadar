@@ -660,6 +660,9 @@ def webview_start_options(debug: bool, icon_path: Path, storage_path: Path | Non
         # remove the folders of runs that ended abnormally.
         options["private_mode"] = True
         options["storage_path"] = str(storage_path)
+        # Cap WebView2's HTTP disk cache: the UI is local files, so a big
+        # cache only grows on disk during weeks-long runs.
+        os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disk-cache-size=16777216")
     # Windows and macOS obtain their application icon from the packaged
     # executable/.app bundle. pywebview's runtime icon option is only supported
     # by its GTK/Qt backends.

@@ -21,6 +21,10 @@ What can accumulate, and its cap:
   forced stop, power loss) are removed at startup and daily.
 * ``cache/usage-trend/<profile>.json`` quota sparkline samples -- pruned to
   30 days (one point per ~30 minutes per series).
+* ``<platform cache>/updates/<32 hex>`` stages left in the default per-user
+  cache when the app now runs from another home (``VRAM_RADAR_HOME``); older
+  builds downloaded every installer there and nothing ever pruned it (900 MB
+  seen) -- removed after 2 days like the current stages.
 """
 from __future__ import annotations
 
@@ -194,6 +198,34 @@ def _prune_usage_trend(cache: Path) -> int:
         return 0
 
 
+def default_update_root() -> Path | None:
+    try:
+        from .storage import storage_paths
+        saved = os.environ.pop("VRAM_RADAR_HOME", None)
+        try:
+            return Path(storage_paths().cache) / "updates"
+        finally:
+            if saved is not None:
+                os.environ["VRAM_RADAR_HOME"] = saved
+    except Exception:
+        return None
+
+
+def prune_legacy_update_stages(cache: Path, *, now: float | None = None,
+                               legacy_root: Path | None = None) -> int:
+    """Prune stale stages in the default cache when it is not our cache."""
+    from .updater import prune_stale_stages
+    root = default_update_root() if legacy_root is None else legacy_root
+    if root is None:
+        return 0
+    try:
+        if root.resolve() == (Path(cache) / "updates").resolve():
+            return 0
+    except OSError:
+        return 0
+    return prune_stale_stages(root, now=now)
+
+
 def _folder_bytes(paths: Any) -> dict[str, int]:
     cache, config, logs = Path(paths.cache), Path(paths.config), Path(paths.logs)
     return {
@@ -247,6 +279,7 @@ def run_maintenance(paths: Any, profile_id: str, known_server_ids: Iterable[str]
     steps: dict[str, Callable[[], int]] = {
         "logs": lambda: prune_log_files(logs, now=now),
         "update_stages": lambda: prune_stale_stages(cache / "updates", now=now),
+        "legacy_update_stages": lambda: prune_legacy_update_stages(cache, now=now),
         "temporaries": lambda: prune_orphan_temporaries(config, now=now) + prune_orphan_temporaries(cache, now=now),
         "invalid_profiles": lambda: prune_invalid_profile_backups(config / "profiles"),
         "snapshots": lambda: prune_snapshot_cache(cache / profile_id, known_server_ids, now=now),
