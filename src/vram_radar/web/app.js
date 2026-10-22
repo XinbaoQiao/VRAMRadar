@@ -36,6 +36,16 @@ const ui = {
   editorPageStatus: document.getElementById('server-editor-page-status'),
   editorPreviousPage: document.getElementById('server-editor-previous-page'),
   editorNextPage: document.getElementById('server-editor-next-page'),
+  serverMultiSelectToggle: document.getElementById('server-multi-select-toggle'),
+  serverMultiSelectBar: document.getElementById('server-multi-select-bar'),
+  serverMultiSelectStatus: document.getElementById('server-multi-select-status'),
+  serverSelectAll: document.getElementById('server-select-all'),
+  serverSelectNone: document.getElementById('server-select-none'),
+  serverBatchPause: document.getElementById('server-batch-pause'),
+  serverBatchResume: document.getElementById('server-batch-resume'),
+  serverBatchRemove: document.getElementById('server-batch-remove'),
+  serverMultiSelectDone: document.getElementById('server-multi-select-done'),
+  serverOrderInstructions: document.getElementById('server-order-instructions'),
   serverOrderStatus: document.getElementById('server-order-status'),
   profileName: document.getElementById('profile-name'),
   refreshSeconds: document.getElementById('refresh-seconds'),
@@ -182,6 +192,8 @@ let serverEditorSequence = 0;
 let settingsServerDrafts = [];
 let settingsServerQuery = '';
 let settingsServerPageOffset = 0;
+let settingsServerMultiSelect = false;
+let settingsServerSelectedDrafts = new Set();
 let settingsSaveInFlight = false;
 let draggedServerDraftIndex = -1;
 let pendingIgnoredSshAliases = new Set();
@@ -4268,15 +4280,17 @@ function refreshServerEditorOrder() {
     const position = index + 1;
     editor.querySelector('.server-position').textContent = String(position).padStart(2, '0');
     const handle = editor.querySelector('.server-drag-handle');
-    const sortable = !settingsServerQuery && settingsServerDrafts.length > 1 && index >= 0;
+    const sortable = !settingsServerMultiSelect && !settingsServerQuery && settingsServerDrafts.length > 1 && index >= 0;
     handle.draggable = sortable;
     handle.tabIndex = sortable ? 0 : -1;
     handle.setAttribute('aria-disabled', String(!sortable));
-    handle.setAttribute('aria-label', settingsServerQuery
-      ? '清除搜索后可排序'
-      : settingsServerDrafts.length <= 1
-        ? '仅一台服务器，无需排序'
-        : `拖动以调整第 ${position} 台服务器的顺序`);
+    handle.setAttribute('aria-label', settingsServerMultiSelect
+      ? '多选整理时不可拖动'
+      : settingsServerQuery
+        ? '清除搜索后可排序'
+        : settingsServerDrafts.length <= 1
+          ? '仅一台服务器，无需排序'
+          : `拖动以调整第 ${position} 台服务器的顺序`);
   });
 }
 
@@ -4293,6 +4307,16 @@ function reorderServerDraft(sourceIndex, insertionIndex) {
   const [draft] = settingsServerDrafts.splice(sourceIndex, 1);
   const adjustedInsertion = sourceIndex < boundedInsertion ? boundedInsertion - 1 : boundedInsertion;
   settingsServerDrafts.splice(adjustedInsertion, 0, draft);
+  if (settingsServerSelectedDrafts.size) {
+    const nextSelected = new Set();
+    settingsServerSelectedDrafts.forEach(index => {
+      if (index === sourceIndex) nextSelected.add(adjustedInsertion);
+      else if (sourceIndex < adjustedInsertion && index > sourceIndex && index <= adjustedInsertion) nextSelected.add(index - 1);
+      else if (adjustedInsertion < sourceIndex && index >= adjustedInsertion && index < sourceIndex) nextSelected.add(index + 1);
+      else nextSelected.add(index);
+    });
+    settingsServerSelectedDrafts = nextSelected;
+  }
   return adjustedInsertion;
 }
 
@@ -4332,7 +4356,7 @@ function setupServerEditorDrag(editor) {
     moveServerEditor(editor, event.key === 'ArrowUp' ? -1 : 1);
   });
   handle.addEventListener('dragstart', event => {
-    if (handle.getAttribute('aria-disabled') === 'true') {
+    if (settingsServerMultiSelect || handle.getAttribute('aria-disabled') === 'true') {
       event.preventDefault();
       return;
     }
@@ -4350,7 +4374,7 @@ function setupServerEditorDrag(editor) {
     clearServerEditorDraggingState();
   });
   editor.addEventListener('dragover', event => {
-    if (draggedServerDraftIndex < 0 || settingsServerQuery) return;
+    if (draggedServerDraftIndex < 0 || settingsServerQuery || settingsServerMultiSelect) return;
     const targetIndex = serverDraftIndexFromEditor(editor);
     if (targetIndex < 0 || targetIndex === draggedServerDraftIndex) return;
     event.preventDefault();
@@ -4360,7 +4384,7 @@ function setupServerEditorDrag(editor) {
     editor.classList.add(after ? 'drag-over-after' : 'drag-over-before');
   });
   editor.addEventListener('drop', event => {
-    if (draggedServerDraftIndex < 0 || settingsServerQuery) return;
+    if (draggedServerDraftIndex < 0 || settingsServerQuery || settingsServerMultiSelect) return;
     event.preventDefault();
     syncVisibleServerDrafts();
     const targetIndex = serverDraftIndexFromEditor(editor);
@@ -4534,6 +4558,148 @@ async function toggleEditorEnabled(editor) {
   syncServerDraftFromEditor(editor);
 }
 
+
+function selectedServerDraftIndices() {
+  return [...settingsServerSelectedDrafts]
+    .filter(index => Number.isInteger(index) && index >= 0 && index < settingsServerDrafts.length)
+    .sort((left, right) => left - right);
+}
+
+function refreshServerMultiSelectUi() {
+  const active = settingsServerMultiSelect;
+  if (ui.serverMultiSelectBar) ui.serverMultiSelectBar.hidden = !active || Boolean(ui.editorList?.hidden);
+  if (ui.serverMultiSelectToggle) {
+    ui.serverMultiSelectToggle.hidden = active || Boolean(ui.editorList?.hidden) || (settingsMode === 'onboarding' && onboardingStep !== 3);
+    ui.serverMultiSelectToggle.setAttribute('aria-pressed', String(active));
+    ui.serverMultiSelectToggle.textContent = active ? '退出多选' : '多选整理';
+  }
+  ui.editorList?.classList.toggle('server-editor-list--selecting', active);
+  if (ui.serverOrderInstructions) {
+    ui.serverOrderInstructions.textContent = active
+      ? '勾选后可批量整理'
+      : (settingsServerQuery ? '清除搜索后可排序' : '拖动调整顺序');
+  }
+  const selected = selectedServerDraftIndices();
+  if (ui.serverMultiSelectStatus) {
+    ui.serverMultiSelectStatus.textContent = selected.length
+      ? `已选 ${number(selected.length)} 台`
+      : '未选择';
+  }
+  const disableActions = !selected.length;
+  [ui.serverBatchPause, ui.serverBatchResume, ui.serverBatchRemove].forEach(button => {
+    if (button) button.disabled = !active || disableActions;
+  });
+  [ui.serverSelectAll, ui.serverSelectNone].forEach(button => {
+    if (button) button.disabled = !active || !settingsServerDrafts.length;
+  });
+  ui.editorList?.querySelectorAll('.server-editor').forEach(editor => {
+    const draftIndex = serverDraftIndexFromEditor(editor);
+    const checked = settingsServerSelectedDrafts.has(draftIndex);
+    const box = editor.querySelector('[data-server-select]');
+    if (box) box.checked = checked;
+    editor.classList.toggle('is-selected', active && checked);
+  });
+}
+
+function setServerMultiSelectMode(enabled) {
+  syncVisibleServerDrafts();
+  settingsServerMultiSelect = Boolean(enabled);
+  if (!settingsServerMultiSelect) settingsServerSelectedDrafts.clear();
+  if (settingsServerMultiSelect && draggedServerDraftIndex >= 0) {
+    draggedServerDraftIndex = -1;
+    clearServerEditorDropIndicators();
+    clearServerEditorDraggingState();
+  }
+  refreshServerMultiSelectUi();
+  refreshServerEditorOrder();
+}
+
+function setServerDraftSelection(all) {
+  if (!settingsServerMultiSelect) return;
+  syncVisibleServerDrafts();
+  if (all) {
+    filteredServerDraftIndices().forEach(index => settingsServerSelectedDrafts.add(index));
+  } else {
+    settingsServerSelectedDrafts.clear();
+  }
+  refreshServerMultiSelectUi();
+}
+
+function toggleServerDraftSelection(draftIndex, selected) {
+  if (!settingsServerMultiSelect || draftIndex < 0) return;
+  if (selected) settingsServerSelectedDrafts.add(draftIndex);
+  else settingsServerSelectedDrafts.delete(draftIndex);
+  refreshServerMultiSelectUi();
+}
+
+async function batchSetSelectedServersEnabled(enabled) {
+  if (!settingsServerMultiSelect) return;
+  syncVisibleServerDrafts();
+  const selected = selectedServerDraftIndices();
+  if (!selected.length) {
+    showToast('请至少选择一台服务器');
+    return;
+  }
+  let changed = 0;
+  let apiFailures = 0;
+  for (const index of selected) {
+    const draft = settingsServerDrafts[index];
+    if (!draft) continue;
+    const currentlyEnabled = draft.enabled !== false;
+    if (currentlyEnabled === enabled) continue;
+    draft.enabled = enabled;
+    changed += 1;
+    const serverId = String(draft._original_id || '').trim();
+    const saved = serverId && (currentProfile?.servers || []).some(item => item.id === serverId);
+    if (saved && api?.set_server_enabled) {
+      try {
+        const result = await api.set_server_enabled(serverId, enabled);
+        if (!result?.ok) throw new Error(result?.error || '无法更新服务器状态');
+        if (result.profile) acceptProfile(result.profile);
+      } catch (error) {
+        apiFailures += 1;
+        draft.enabled = currentlyEnabled;
+      }
+    }
+  }
+  renderServerEditorPage();
+  refreshServerMultiSelectUi();
+  if (!changed) {
+    showToast(enabled ? '所选服务器已在监控中' : '所选服务器已暂停监控');
+    return;
+  }
+  if (apiFailures) showToast(`已更新 ${number(changed - apiFailures)} 台；${number(apiFailures)} 台未能立即同步`);
+  else showToast(enabled ? `已恢复 ${number(changed)} 台服务器的监控` : `已暂停 ${number(changed)} 台服务器的监控`);
+  if (api?.refresh) await refresh(true);
+}
+
+function batchRemoveSelectedServers() {
+  if (!settingsServerMultiSelect) return;
+  syncVisibleServerDrafts();
+  const selected = selectedServerDraftIndices();
+  if (!selected.length) {
+    showToast('请至少选择一台服务器');
+    return;
+  }
+  const confirmation = `将移除已选的 ${number(selected.length)} 台服务器。从列表删除后，保存设置才会写入配置。是否继续？`;
+  if (!window.confirm(localizedText(confirmation))) return;
+  for (const index of [...selected].reverse()) {
+    const draft = settingsServerDrafts[index];
+    if (!draft) continue;
+    const originalId = String(draft._original_id || draft.id || '').trim();
+    const originalAlias = String(draft._original_ssh_alias || draft.ssh_alias || '').trim();
+    const wasSaved = (currentProfile?.servers || []).some(item => item.id === originalId);
+    const wasImportedCandidate = draft._imported_candidate === true;
+    if (wasSaved || wasImportedCandidate) rememberIgnoredSshAlias(originalAlias);
+    settingsServerDrafts.splice(index, 1);
+  }
+  settingsServerSelectedDrafts.clear();
+  // Re-index selection is empty; keep multi-select mode for further tidy.
+  renderServerEditorPage();
+  refreshServerMultiSelectUi();
+  showToast(`已移除 ${number(selected.length)} 台服务器`);
+}
+
 function addServerEditor(server = {}, options = {}) {
   const fragment = ui.editorTemplate.content.cloneNode(true);
   const editor = fragment.querySelector('.server-editor');
@@ -4648,6 +4814,16 @@ function addServerEditor(server = {}, options = {}) {
   editor.querySelector('.test-server-connection').addEventListener('click', () => void testServerEditorConnection(editor));
   editor.querySelector('.toggle-server-enabled').addEventListener('click', () => void toggleEditorEnabled(editor));
   setupServerEditorDrag(editor);
+  const selectBox = editor.querySelector('[data-server-select]');
+  if (selectBox) {
+    selectBox.checked = settingsServerSelectedDrafts.has(options.draftIndex ?? serverDraftIndexFromEditor(editor));
+    editor.classList.toggle('is-selected', settingsServerMultiSelect && selectBox.checked);
+    selectBox.addEventListener('click', event => event.stopPropagation());
+    selectBox.addEventListener('change', () => {
+      const draftIndex = serverDraftIndexFromEditor(editor);
+      toggleServerDraftSelection(draftIndex, selectBox.checked);
+    });
+  }
   editor.querySelector('.remove-server').addEventListener('click', () => {
     syncVisibleServerDrafts();
     const wasSaved = (currentProfile?.servers || []).some(item => item.id === editor.dataset.originalId);
@@ -4656,7 +4832,15 @@ function addServerEditor(server = {}, options = {}) {
     const draftIndex = serverDraftIndexFromEditor(editor);
     if (draftIndex < 0) return;
     settingsServerDrafts.splice(draftIndex, 1);
+    settingsServerSelectedDrafts.delete(draftIndex);
+    const nextSelected = new Set();
+    settingsServerSelectedDrafts.forEach(index => {
+      if (index > draftIndex) nextSelected.add(index - 1);
+      else if (index < draftIndex) nextSelected.add(index);
+    });
+    settingsServerSelectedDrafts = nextSelected;
     renderServerEditorPage();
+    refreshServerMultiSelectUi();
   });
   target.appendChild(fragment);
   refreshEditorEnabledState(editor);
@@ -4670,8 +4854,11 @@ function populateServerEditors(servers, options = {}) {
     .map(server => serverDraftFromValue(server, options));
   settingsServerQuery = '';
   settingsServerPageOffset = 0;
+  settingsServerMultiSelect = false;
+  settingsServerSelectedDrafts.clear();
   ui.editorSearch.value = '';
   renderServerEditorPage();
+  refreshServerMultiSelectUi();
 }
 
 function renderServerEditorPage(options = {}) {
@@ -4705,6 +4892,7 @@ function renderServerEditorPage(options = {}) {
     editor?.scrollIntoView({behavior: 'smooth', block: 'center'});
     editor?.querySelector(options.focusDragHandle ? '.server-drag-handle' : '[data-field="display_name"]')?.focus({preventScroll: true});
   }
+  refreshServerMultiSelectUi();
 }
 
 function invalidServerDraft() {
@@ -4869,6 +5057,8 @@ function setOnboardingStep(step) {
   ui.editorList.hidden = onboarding && onboardingStep !== 3;
   ui.editorToolbar.hidden = (onboarding && onboardingStep !== 3)
     || (settingsServerDrafts.length <= SERVER_EDITOR_PAGE_SIZE && !settingsServerQuery);
+  if (onboarding && onboardingStep !== 3 && settingsServerMultiSelect) setServerMultiSelectMode(false);
+  else refreshServerMultiSelectUi();
   ui.onboardingBack.hidden = !onboarding || onboardingStep === 1;
   ui.onboardingNext.hidden = !onboarding || onboardingStep === 3;
   ui.onboardingLater.hidden = !onboarding;
@@ -4917,6 +5107,7 @@ function setSettingsMode(mode) {
     ui.serverSettingsHeading.hidden = false;
     ui.editorList.hidden = false;
     ui.editorToolbar.hidden = settingsServerDrafts.length <= SERVER_EDITOR_PAGE_SIZE && !settingsServerQuery;
+    refreshServerMultiSelectUi();
     ui.onboardingLater.hidden = true;
     ui.onboardingBack.hidden = true;
     ui.onboardingNext.hidden = true;
@@ -6784,6 +6975,15 @@ ui.dialog.addEventListener('close', () => {
 ui.onboardingBack.addEventListener('click', () => setOnboardingStep(onboardingStep - 1));
 ui.onboardingNext.addEventListener('click', () => setOnboardingStep(onboardingStep + 1));
 document.getElementById('add-server').addEventListener('click', addAndFocusServerEditor);
+ui.serverMultiSelectToggle?.addEventListener('click', () => {
+  setServerMultiSelectMode(!settingsServerMultiSelect);
+});
+ui.serverMultiSelectDone?.addEventListener('click', () => setServerMultiSelectMode(false));
+ui.serverSelectAll?.addEventListener('click', () => setServerDraftSelection(true));
+ui.serverSelectNone?.addEventListener('click', () => setServerDraftSelection(false));
+ui.serverBatchPause?.addEventListener('click', () => void batchSetSelectedServersEnabled(false));
+ui.serverBatchResume?.addEventListener('click', () => void batchSetSelectedServersEnabled(true));
+ui.serverBatchRemove?.addEventListener('click', () => batchRemoveSelectedServers());
 ui.discoverServerConfig.addEventListener('click', discoverServerConfig);
 ui.importServerConfig.addEventListener('click', importServerConfig);
 ui.aliasChoiceConfirm?.addEventListener('click', () => { void confirmAliasChoices(); });

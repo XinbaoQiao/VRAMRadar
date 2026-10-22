@@ -1441,6 +1441,24 @@ details[open] > summary > .summary-action .when-open { display: inline; }
 .guide-more[open] > summary::after { content: '−'; }
 .guide-more-body { padding: 10px 12px 12px; border-top: 1px solid var(--border); }
 .guide-finish ol { margin: 7px 0 0; padding-left: 20px; color: var(--muted); font-size: var(--font-small); line-height: 1.65; }
+
+.server-settings-heading-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; align-items: center; }
+.server-multi-select-bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  margin: 0 0 9px; padding: 8px 10px; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.server-multi-select-status { color: var(--muted); font-size: var(--font-small); font-family: var(--data-font); white-space: nowrap; }
+.server-multi-select-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.server-multi-select-actions .button { min-height: 32px; }
+.server-select-check {
+  display: none; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 28px; height: 34px; margin-left: -2px; cursor: pointer;
+}
+.server-select-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--cyan); cursor: pointer; }
+.server-editor-list--selecting .server-select-check { display: inline-flex; }
+.server-editor-list--selecting .server-drag-handle { display: none; }
+.server-editor.is-selected { border-color: color-mix(in srgb, var(--cyan) 55%, var(--border)); background: color-mix(in srgb, var(--cyan) 5%, var(--surface)); }
 .server-editor-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; align-items: center; gap: 8px; margin: 0 0 9px; padding: 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .server-editor-search input { width: 100%; min-height: 38px; padding: 7px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
 .server-editor-page-status { color: var(--muted); font-family: var(--data-font); font-size: var(--font-small); white-space: nowrap; }
@@ -1568,6 +1586,8 @@ dialog[open], .notification-center:not([hidden]) { animation: surface-enter .24s
   body { padding-bottom: env(safe-area-inset-bottom); }
   .titlebar { position: sticky; top: 0; z-index: 20; align-items: flex-start; flex-wrap: wrap; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left)); }
   .server-editor-toolbar { grid-template-columns: 1fr; }
+  .server-multi-select-bar { flex-direction: column; align-items: stretch; }
+  .server-multi-select-actions { justify-content: flex-start; }
   .server-editor-page-actions { width: 100%; }
   .server-editor-page-actions .button { flex: 1 1 0; }
   .title-actions { width: 100%; align-items: stretch; }
