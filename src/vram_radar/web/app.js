@@ -5636,6 +5636,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
     const previewLine = formatMigratePreview(result.preview);
     if (ui.migrateExportFile) ui.migrateExportFile.hidden = Boolean(result.qr_eligible);
     if (result.qr_eligible && lastMigrateToken) {
+      await ensureMigrateQrLibs();
       const drew = drawMigrateQr(lastMigrateToken);
       lastMigrateQrReady = drew;
       if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = !drew;
@@ -5755,6 +5756,7 @@ function decodeQrFromImageData(imageData) {
 }
 
 async function decodeMigrateQrFromBlob(blob) {
+  await ensureMigrateQrLibs();
   if (!blob) throw new Error(localizedText('无法读取二维码图片'));
   const bitmapUrl = URL.createObjectURL(blob);
   try {
@@ -5898,11 +5900,45 @@ async function fetchLanMigratePayload() {
   }
 }
 
+
+let migrateQrLibsPromise = null;
+
+function ensureMigrateQrLibs() {
+  if (typeof qrcode === 'function' && typeof jsQR === 'function') {
+    return Promise.resolve();
+  }
+  if (migrateQrLibsPromise) return migrateQrLibsPromise;
+  const load = (src) => new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-migrate-lib="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === '1') { resolve(); return; }
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(src)), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.dataset.migrateLib = src;
+    script.onload = () => { script.dataset.loaded = '1'; resolve(); };
+    script.onerror = () => reject(new Error(src));
+    document.head.appendChild(script);
+  });
+  migrateQrLibsPromise = Promise.all([
+    load('vendor/qrcode.min.js'),
+    load('vendor/jsQR.js'),
+  ]).catch((error) => {
+    migrateQrLibsPromise = null;
+    throw error;
+  });
+  return migrateQrLibsPromise;
+}
+
 function ensureMigrateQrForPane(paneId) {
   if (String(paneId) !== 'migrate') return;
   if (!api?.export_migrate_bundle) return;
   syncMigrateSecretFields();
-  void loadMigrateExportTargets().then(() => {
+  void ensureMigrateQrLibs().catch(() => {}).then(() => loadMigrateExportTargets()).then(() => {
     if (migrateWantsSecrets()) {
       if (String(ui.migratePassphrase?.value || '').length < 8) {
         clearMigrateQr();
@@ -6272,6 +6308,8 @@ async function initialize() {
 function scheduleRefresh() {
   clearInterval(refreshTimer);
   const seconds = currentProfile?.refresh_seconds || 15;
+  // Hidden window: keep alerts alive but wake less often (CPU / battery).
+  const intervalSeconds = document.hidden ? Math.max(seconds, 60) : seconds;
   refreshTimer = setInterval(() => {
     if (document.hidden && api?.request_background_refresh) {
       refreshDeferredWhileHidden = true;
@@ -6279,7 +6317,7 @@ function scheduleRefresh() {
       return;
     }
     void refresh(false);
-  }, seconds * 1000);
+  }, intervalSeconds * 1000);
 }
 
 document.addEventListener('click', event => {
@@ -6812,6 +6850,7 @@ window.addEventListener('resize', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopQuotaMonitor();
   else if (ui.dialog.open) void pollQuotaMonitor();
+  scheduleRefresh();
   if (!document.hidden) {
     scheduleDirectoryFreshnessValidation();
     if (refreshDeferredWhileHidden) {

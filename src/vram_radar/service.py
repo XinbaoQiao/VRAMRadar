@@ -682,6 +682,7 @@ class DashboardService:
         self.secret_store = secret_store
         self.clock = clock
         self.logger = logger or logging.getLogger("vram_radar")
+        self._failure_log_at: dict[tuple[str, str], float] = {}
         self.profile_persist = profile_persist
         self.ssh_recovery = ssh_recovery
         self.ssh_transport = ssh_transport
@@ -1140,7 +1141,12 @@ class DashboardService:
                 "retry_at": runtime.retry_at,
             }
             self._touch_locked()
-            self.logger.warning("server=%s code=%s message=%s", server_id, failure.code, failure)
+            key = (str(server_id), str(failure.code))
+            now = time.monotonic()
+            last = self._failure_log_at.get(key, 0.0)
+            if now - last >= 600.0:
+                self._failure_log_at[key] = now
+                self.logger.warning("server=%s code=%s message=%s", server_id, failure.code, failure)
 
     def refresh(
         self,

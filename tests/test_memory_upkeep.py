@@ -119,6 +119,20 @@ class TrimSchedule(unittest.TestCase):
             self.assertIn(flag, WEBVIEW2_LEAN_ARGUMENTS)
         self.assertEqual(hk.HealthWatchdog.LIMITS["private_bytes"], 300 * 1024 * 1024)
 
+    def test_trim_skips_webview_children_while_user_active(self):
+        with mock.patch.object(hk, 'idle_seconds', return_value=5.0), \
+             mock.patch.object(hk, 'trim_child_working_sets', return_value=12_000_000) as trim_kids:
+            out = hk.trim_memory(working_set=True)
+        trim_kids.assert_not_called()
+        self.assertEqual(out.get('webview_trimmed_mb'), 0.0)
+
+    def test_trim_webview_children_when_idle(self):
+        with mock.patch.object(hk, 'idle_seconds', return_value=180.0), \
+             mock.patch.object(hk, 'trim_child_working_sets', return_value=12_000_000) as trim_kids:
+            out = hk.trim_memory(working_set=True)
+        trim_kids.assert_called_once()
+        self.assertEqual(out.get('webview_trimmed_mb'), 11.4)
+
     def test_trim_memory_is_safe(self):
         out = hk.trim_memory(working_set=False)
         self.assertIn("gc", out)

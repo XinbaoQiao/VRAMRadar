@@ -518,7 +518,13 @@ def trim_memory(working_set: bool = True) -> dict[str, Any]:
             kernel32.SetProcessWorkingSetSize(ctypes.c_void_p(-1), ctypes.c_size_t(-1), ctypes.c_size_t(-1))
         except Exception:
             pass
-    children_freed = trim_child_working_sets() if working_set else 0
+    # EmptyWorkingSet on WebView while the user is active forces a page-fault
+    # storm the next time they open the window; only trim children after idle.
+    children_freed = 0
+    if working_set:
+        idle = idle_seconds()
+        if idle is None or idle >= 120.0:
+            children_freed = trim_child_working_sets()
     after = _process_memory()
     mb = lambda value: round(value / 1048576, 1) if isinstance(value, int) else None
     return {"gc": collected, "webview_trimmed_mb": mb(children_freed),
