@@ -550,7 +550,7 @@ class WebUiContractTests(unittest.TestCase):
             "querySelectorAll('.server-editor')",
         ):
             self.assertIn(text, self.javascript)
-        self.assertIn("const sortable = !settingsServerQuery", self.javascript)
+        self.assertIn("const sortable = !settingsServerMultiSelect && !settingsServerQuery", self.javascript)
         self.assertIn(".server-editor-actions", self.styles)
         self.assertIn(".server-drag-handle", self.styles)
         self.assertIn(".server-editor.drag-over-before", self.styles)
@@ -694,7 +694,7 @@ class WebUiContractTests(unittest.TestCase):
             "function invalidServerDraft",
             "function revealInvalidServerDraft",
             "settingsServerDrafts = []",
-            "const sortable = !settingsServerQuery",
+            "const sortable = !settingsServerMultiSelect && !settingsServerQuery",
             "function reorderServerDraft",
             "服务器 ID 与前面的服务器重复",
         ):
