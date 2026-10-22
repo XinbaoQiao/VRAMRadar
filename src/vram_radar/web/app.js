@@ -188,13 +188,19 @@ let pendingIgnoredSshAliases = new Set();
 let dashboardDisclosureMode = 'default';
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_RETRY_MS = 5 * 60 * 1000;
+const UPDATE_CHECK_TIMEOUT_RETRY_MS = 15 * 60 * 1000;
 const UPDATE_CHECK_ON_FOCUS_AFTER_MS = 60 * 60 * 1000;
 let updateCheckFailures = 0;
+let nextUpdateCheckAt = 0;
 // A fixed 5-minute retry polled GitHub all night while offline and made a
 // rate limit (403/429) worse: back off 5, 10, 20 ... minutes, at most 6 hours.
+// Timeouts / DNS / network start at 15 minutes so a bad link is not hammered.
 function updateRetryDelay(failures, code) {
   if (code === 'update_rate_limited') return 60 * 60 * 1000;
   const steps = Math.max(0, Math.min(10, (failures || 1) - 1));
+  if (code === 'update_timeout' || code === 'update_dns_failed' || code === 'update_network_failed') {
+    return Math.min(UPDATE_CHECK_INTERVAL_MS, UPDATE_CHECK_TIMEOUT_RETRY_MS * 2 ** Math.min(steps, 4));
+  }
   return Math.min(UPDATE_CHECK_INTERVAL_MS, UPDATE_CHECK_RETRY_MS * 2 ** steps);
 }
 let recommendationRequested = false;
@@ -6055,9 +6061,11 @@ async function maybeShowPendingWhatsNew() {
 
 function scheduleUpdateCheck(delayMilliseconds) {
   clearTimeout(updateCheckTimer);
+  const delay = Math.max(0, Number(delayMilliseconds) || 0);
+  nextUpdateCheckAt = Date.now() + delay;
   updateCheckTimer = setTimeout(() => {
     void checkForUpdates();
-  }, delayMilliseconds);
+  }, delay);
 }
 
 function showUpdateCheckFailure(message = '暂时无法连接 GitHub', interactive = false) {
@@ -6129,7 +6137,9 @@ async function checkForUpdates({interactive = false} = {}) {
   } catch (error) {
     showUpdateCheckFailure(error?.message, interactive);
     updateCheckFailures += 1;
-    scheduleUpdateCheck(updateRetryDelay(updateCheckFailures));
+    const message = String(error?.message || '');
+    const code = /超时|timeout/i.test(message) ? 'update_timeout' : undefined;
+    scheduleUpdateCheck(updateRetryDelay(updateCheckFailures, code));
   } finally {
     updateCheckInFlight = false;
     if (interactive) ui.checkForUpdates.disabled = false;
@@ -6860,6 +6870,8 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 window.addEventListener('focus', () => {
+  // Do not cut short an in-progress backoff (timeouts / rate limits).
+  if (nextUpdateCheckAt && Date.now() < nextUpdateCheckAt) return;
   if (Date.now() - lastUpdateCheckAt >= UPDATE_CHECK_ON_FOCUS_AFTER_MS) {
     void checkForUpdates();
   }

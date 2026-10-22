@@ -329,6 +329,41 @@ class HoverGdiCycleTests(unittest.TestCase):
         self.assertFalse(ui._HOVER.get("shown"))
         self.assertIsNone(ui._HOVER.get("form"))
 
+
+
+@unittest.skipUnless(sys.platform == "win32", "WinForms hover card")
+class HoverReleaseTests(unittest.TestCase):
+    def tearDown(self):
+        from vram_radar import ui_dialogs as ui
+        ui.close_hover_card()
+
+    def test_release_disposes_form_but_keeps_handlers(self):
+        import clr
+        clr.AddReference("System.Drawing")
+        clr.AddReference("System.Windows.Forms")
+        from vram_radar import ui_dialogs as ui
+        from vram_radar.hover_detail import build_hover_rows, hover_card_spec
+        rows = build_hover_rows(
+            {"enabled": True, "state": "ready", "windows": [
+                {"name": "5 hour", "remaining_percent": 50, "window_minutes": 300, "resets_at": NOW + 7200}]},
+            None, ["codex"], language="en", now=NOW,
+            names={}, icon_names={"codex": "Codex"})
+        spec = hover_card_spec(rows, "en")
+        ui.set_hover_handlers(on_row_click=lambda pid: None, on_leave=lambda: None, clickable=lambda _pid: True)
+        ui.show_hover_card(spec, (100, 800, 300, 840), scale=1.0, dark=True, delay_ms=0)
+        self.assertIsNotNone(ui._HOVER.get("form"))
+        self.assertTrue(ui._HOVER.get("shown"))
+        ui.release_hover_card()
+        self.assertIsNone(ui._HOVER.get("form"))
+        self.assertIsNone(ui._HOVER.get("image"))
+        self.assertFalse(ui._HOVER.get("shown"))
+        self.assertTrue(callable(ui._HOVER.get("on_row_click")))
+        self.assertTrue(callable(ui._HOVER.get("on_leave")))
+        ui.show_hover_card(spec, (100, 800, 300, 840), scale=1.0, dark=True, delay_ms=0)
+        self.assertIsNotNone(ui._HOVER.get("form"))
+        self.assertTrue(ui._HOVER.get("shown"))
+
+
 @unittest.skipUnless(sys.platform == "win32", "WinForms offscreen render")
 class HoverRenderTests(unittest.TestCase):
     def test_offscreen_zh_en_light_dark(self):

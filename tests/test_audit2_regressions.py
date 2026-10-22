@@ -63,15 +63,18 @@ class UpdateNetworkTests(unittest.TestCase):
         if node is None:
             self.skipTest("node is not installed")
         script = (ROOT / "src" / "vram_radar" / "web" / "app.js").read_text(encoding="utf-8")
-        consts = "\n".join(re.findall(r"^const UPDATE_CHECK_(?:INTERVAL|RETRY)_MS = [^\n]+$", script, re.M))
+        consts = "\n".join(re.findall(r"^const UPDATE_CHECK_(?:INTERVAL|RETRY|TIMEOUT_RETRY)_MS = [^\n]+$", script, re.M))
         start = script.index("function updateRetryDelay(")
         body = script[start:script.index("\n}\n", start) + 3]
         program = consts + "\n" + body + (
             "\nconsole.log(JSON.stringify([1,2,3,4,8,20].map(n => updateRetryDelay(n) / 60000)"
-            ".concat([updateRetryDelay(1, 'update_rate_limited') / 60000])));")
+            ".concat([updateRetryDelay(1, 'update_rate_limited') / 60000,"
+            " updateRetryDelay(1, 'update_timeout') / 60000,"
+            " updateRetryDelay(2, 'update_timeout') / 60000,"
+            " updateRetryDelay(3, 'update_network_failed') / 60000])));")
         output = subprocess.run([node, "-e", program], capture_output=True, text=True, encoding="utf-8",
                                 check=True, timeout=30).stdout
-        self.assertEqual(json.loads(output), [5, 10, 20, 40, 360, 360, 60])
+        self.assertEqual(json.loads(output), [5, 10, 20, 40, 360, 360, 60, 15, 30, 60])
         self.assertIn("updateCheckFailures = 0;", script)
 
 

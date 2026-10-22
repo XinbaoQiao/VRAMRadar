@@ -1848,11 +1848,11 @@ class CodexUsageSurface:
             return False
 
     def _suspend_hover(self) -> None:
-        """Hide the card, cancel any delay timer, and require a later re-arm."""
+        """Drop the card (and its bitmap), cancel delay, require a later re-arm."""
         self._hover_armed = False
         try:
             from . import ui_dialogs
-            ui_dialogs.hide_hover_card()
+            ui_dialogs.release_hover_card()
         except Exception:
             pass
 
@@ -2088,7 +2088,8 @@ class CodexUsageSurface:
                         self._hover_spec, anchor, scale=self._scale,
                         delay_ms=0 if already else HOVER_DELAY_MS)
                 else:
-                    ui_dialogs.hide_hover_card()
+                    # Leave confirmed (or disarmed): free the card window/bitmap.
+                    ui_dialogs.release_hover_card()
             except Exception:
                 pass
 
@@ -2279,7 +2280,7 @@ class CodexUsageSurface:
             self._hover_armed = False
             try:
                 from . import ui_dialogs
-                ui_dialogs.hide_hover_card()
+                ui_dialogs.release_hover_card()
             except Exception:
                 pass
             if getattr(self, "_tick_deferred", False):
@@ -2947,7 +2948,7 @@ class CodexUsageSurface:
                     self._pointer_on_hover = False
                     try:
                         from . import ui_dialogs
-                        ui_dialogs.hide_hover_card()
+                        ui_dialogs.release_hover_card()
                     except Exception:
                         pass
                     if form.Visible:
@@ -3198,12 +3199,12 @@ class CodexUsageSurface:
                         scale=self._scale, delay_ms=0)
                 else:
                     # Leave, empty selection, menu/dialog, or disarmed: never leave a stuck card.
-                    ui_dialogs.hide_hover_card()
+                    ui_dialogs.release_hover_card()
             except Exception:
                 self._hover_spec = None
                 try:
                     from . import ui_dialogs
-                    ui_dialogs.hide_hover_card()
+                    ui_dialogs.release_hover_card()
                 except Exception:
                     pass
             for i, (zh, en, _) in enumerate(actions):
@@ -3217,7 +3218,7 @@ class CodexUsageSurface:
                 self._hovered = False
                 try:
                     from . import ui_dialogs
-                    ui_dialogs.hide_hover_card()
+                    ui_dialogs.release_hover_card()
                 except Exception:
                     pass
                 if form.Visible:

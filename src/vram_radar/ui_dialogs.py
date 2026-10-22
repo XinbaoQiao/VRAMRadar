@@ -7,6 +7,7 @@ Two components share the same tokens (see docs/dialog-design.md):
 * ``show_toast(spec, anchor)`` -- non-activating notice above the strip that
   fades out on its own (progress, limits, confirmations).
 * ``show_hover_card(spec, anchor)`` -- non-activating detail card on strip
+* ``release_hover_card()`` -- dispose window/bitmap after leave (handlers kept)
   hover (one reused window; never takes focus).
 
 ``spec`` dicts are built by the pure helpers below (testable without .NET);
@@ -1219,12 +1220,18 @@ def hide_hover_card() -> None:
         pass
 
 
-def close_hover_card() -> None:
-    """Full teardown used when the strip shuts down."""
+def release_hover_card() -> None:
+    """Hide and dispose the WinForms window/bitmap; keep click/leave handlers.
+
+    Used when the pointer leaves the strip/card so GDI and WebView-adjacent
+    RAM from the offscreen bitmap are returned promptly.  The next hover
+    recreates the form; handlers stay registered on the strip.
+    """
     hide_hover_card()
     form, image, delay = _HOVER.get("form"), _HOVER.get("image"), _HOVER.get("delay")
+    # Keep on_row_click / on_leave / clickable / feedback so the next show works.
     _HOVER.update(form=None, image=None, delay=None, signature=None, on_tick=None, shown=False,
-                  layout=None, on_row_click=None, on_leave=None, clickable=None, render=None)
+                  layout=None, render=None)
     try:
         if delay is not None:
             delay.Dispose()
@@ -1236,6 +1243,12 @@ def close_hover_card() -> None:
         pass
 
 
+def close_hover_card() -> None:
+    """Full teardown used when the strip shuts down."""
+    release_hover_card()
+    _HOVER.update(on_row_click=None, on_leave=None, clickable=None, render=None)
+
+
 def _present_hover(spec, anchor, scale, dark, accent):
     import ctypes
     from System.Drawing import Point, Size
@@ -1243,7 +1256,7 @@ def _present_hover(spec, anchor, scale, dark, accent):
                                       ImageLayout, Screen)
 
     if not spec or not spec.get("rows"):
-        hide_hover_card()
+        release_hover_card()
         return None
     scale_v = scale or system_scale()
     dark_v = system_dark() if dark is None else dark
