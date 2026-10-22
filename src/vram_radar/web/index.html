@@ -472,22 +472,33 @@
         </details>
 
         <div id="server-settings-heading" class="section-heading">
-          <div><h3>已添加的服务器</h3><p id="server-order-instructions">拖动调整顺序</p></div>
-          <div class="server-settings-heading-actions">
-            <button id="server-multi-select-toggle" class="button" type="button">多选整理</button>
-            <button id="add-server" class="button" type="button">添加服务器</button>
+          <div class="server-settings-heading-copy">
+            <h3>已添加的服务器</h3>
+            <p id="server-order-instructions">拖动调整顺序</p>
           </div>
-        </div>
-        <div id="server-multi-select-bar" class="server-multi-select-bar" hidden>
-          <span id="server-multi-select-status" class="server-multi-select-status" role="status" aria-live="polite">未选择</span>
-          <span class="server-multi-select-actions">
-            <button id="server-select-all" class="button compact-button" type="button">全选</button>
-            <button id="server-select-none" class="button compact-button" type="button">全不选</button>
-            <button id="server-batch-pause" class="button compact-button" type="button">暂停监控</button>
-            <button id="server-batch-resume" class="button compact-button" type="button">恢复监控</button>
-            <button id="server-batch-remove" class="button danger compact-button" type="button">移除所选</button>
-            <button id="server-multi-select-done" class="button primary compact-button" type="button">完成整理</button>
-          </span>
+          <div class="server-settings-heading-actions">
+            <div id="server-heading-normal-actions" class="server-heading-normal-actions">
+              <button id="server-multi-select-toggle" class="button compact-button" type="button" aria-pressed="false">多选整理</button>
+              <button id="add-server" class="button" type="button">添加服务器</button>
+            </div>
+            <div id="server-multi-select-bar" class="server-multi-select-bar" hidden>
+              <span id="server-multi-select-status" class="server-multi-select-status" role="status" aria-live="polite">未选择</span>
+              <span class="server-multi-select-actions">
+                <span class="server-multi-select-group">
+                  <button id="server-select-all" class="button compact-button" type="button">全选</button>
+                  <button id="server-select-none" class="button compact-button" type="button">全不选</button>
+                </span>
+                <span class="server-multi-select-group">
+                  <button id="server-batch-pause" class="button compact-button" type="button">暂停监控</button>
+                  <button id="server-batch-resume" class="button compact-button" type="button">恢复监控</button>
+                </span>
+                <span class="server-multi-select-group server-multi-select-group--end">
+                  <button id="server-batch-remove" class="button danger compact-button" type="button">移除所选</button>
+                  <button id="server-multi-select-done" class="button primary compact-button" type="button">完成整理</button>
+                </span>
+              </span>
+            </div>
+          </div>
         </div>
         <div id="server-editor-toolbar" class="server-editor-toolbar" hidden>
           <label class="server-editor-search"><span class="sr-only">搜索已添加的服务器</span><input id="server-editor-search" type="search" placeholder="搜索名称、别名、地址或账号" autocomplete="off"></label>
@@ -558,11 +569,14 @@
   <template id="server-editor-template">
     <details class="server-editor">
       <summary class="server-editor-head">
-        <label class="server-select-check" onclick="event.stopPropagation()">
-          <input type="checkbox" data-server-select>
-          <span class="sr-only">选择此服务器</span>
-        </label>
-        <span class="server-editor-title"><span class="server-drag-handle" role="button" tabindex="0" draggable="true" title="拖动以调整服务器顺序" aria-label="拖动以调整服务器顺序" aria-describedby="server-order-instructions"><svg viewBox="0 0 16 20" aria-hidden="true" focusable="false"><circle cx="5" cy="4" r="1.25"></circle><circle cx="11" cy="4" r="1.25"></circle><circle cx="5" cy="10" r="1.25"></circle><circle cx="11" cy="10" r="1.25"></circle><circle cx="5" cy="16" r="1.25"></circle><circle cx="11" cy="16" r="1.25"></circle></svg></span><span class="server-position" aria-hidden="true">01</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
+        <span class="server-editor-lead">
+          <label class="server-select-check" onclick="event.stopPropagation()">
+            <input type="checkbox" data-server-select>
+            <span class="sr-only">选择此服务器</span>
+          </label>
+          <span class="server-drag-handle" role="button" tabindex="0" draggable="true" title="拖动以调整服务器顺序" aria-label="拖动以调整服务器顺序" aria-describedby="server-order-instructions"><svg viewBox="0 0 16 20" aria-hidden="true" focusable="false"><circle cx="5" cy="4" r="1.25"></circle><circle cx="11" cy="4" r="1.25"></circle><circle cx="5" cy="10" r="1.25"></circle><circle cx="11" cy="10" r="1.25"></circle><circle cx="5" cy="16" r="1.25"></circle><circle cx="11" cy="16" r="1.25"></circle></svg></span>
+        </span>
+        <span class="server-editor-title"><span class="server-position" aria-hidden="true">01</span><span><strong data-server-editor-name>新服务器</strong><small>连接目标与监控类型</small></span></span>
         <span class="summary-action"><span class="when-closed">编辑</span><span class="when-open">收起</span></span>
       </summary>
       <div class="server-editor-body">

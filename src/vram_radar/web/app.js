@@ -36,6 +36,7 @@ const ui = {
   editorPageStatus: document.getElementById('server-editor-page-status'),
   editorPreviousPage: document.getElementById('server-editor-previous-page'),
   editorNextPage: document.getElementById('server-editor-next-page'),
+  serverHeadingNormalActions: document.getElementById('server-heading-normal-actions'),
   serverMultiSelectToggle: document.getElementById('server-multi-select-toggle'),
   serverMultiSelectBar: document.getElementById('server-multi-select-bar'),
   serverMultiSelectStatus: document.getElementById('server-multi-select-status'),
@@ -4567,11 +4568,12 @@ function selectedServerDraftIndices() {
 
 function refreshServerMultiSelectUi() {
   const active = settingsServerMultiSelect;
-  if (ui.serverMultiSelectBar) ui.serverMultiSelectBar.hidden = !active || Boolean(ui.editorList?.hidden);
+  const listHidden = Boolean(ui.editorList?.hidden);
+  const hideChrome = listHidden || (settingsMode === 'onboarding' && onboardingStep !== 3);
+  if (ui.serverHeadingNormalActions) ui.serverHeadingNormalActions.hidden = active || hideChrome;
+  if (ui.serverMultiSelectBar) ui.serverMultiSelectBar.hidden = !active || listHidden;
   if (ui.serverMultiSelectToggle) {
-    ui.serverMultiSelectToggle.hidden = active || Boolean(ui.editorList?.hidden) || (settingsMode === 'onboarding' && onboardingStep !== 3);
     ui.serverMultiSelectToggle.setAttribute('aria-pressed', String(active));
-    ui.serverMultiSelectToggle.textContent = active ? '退出多选' : '多选整理';
   }
   ui.editorList?.classList.toggle('server-editor-list--selecting', active);
   if (ui.serverOrderInstructions) {
@@ -4584,6 +4586,7 @@ function refreshServerMultiSelectUi() {
     ui.serverMultiSelectStatus.textContent = selected.length
       ? `已选 ${number(selected.length)} 台`
       : '未选择';
+    ui.serverMultiSelectStatus.classList.toggle('is-active', selected.length > 0);
   }
   const disableActions = !selected.length;
   [ui.serverBatchPause, ui.serverBatchResume, ui.serverBatchRemove].forEach(button => {
@@ -4675,6 +4678,7 @@ async function batchSetSelectedServersEnabled(enabled) {
 
 function batchRemoveSelectedServers() {
   if (!settingsServerMultiSelect) return;
+  if (ui.serverBatchRemove?.dataset.busy === '1') return;
   syncVisibleServerDrafts();
   const selected = selectedServerDraftIndices();
   if (!selected.length) {
@@ -4683,21 +4687,29 @@ function batchRemoveSelectedServers() {
   }
   const confirmation = `将移除已选的 ${number(selected.length)} 台服务器。从列表删除后，保存设置才会写入配置。是否继续？`;
   if (!window.confirm(localizedText(confirmation))) return;
-  for (const index of [...selected].reverse()) {
-    const draft = settingsServerDrafts[index];
-    if (!draft) continue;
-    const originalId = String(draft._original_id || draft.id || '').trim();
-    const originalAlias = String(draft._original_ssh_alias || draft.ssh_alias || '').trim();
-    const wasSaved = (currentProfile?.servers || []).some(item => item.id === originalId);
-    const wasImportedCandidate = draft._imported_candidate === true;
-    if (wasSaved || wasImportedCandidate) rememberIgnoredSshAlias(originalAlias);
-    settingsServerDrafts.splice(index, 1);
+  if (ui.serverBatchRemove) ui.serverBatchRemove.dataset.busy = '1';
+  const scrollRoot = ui.editorList?.closest('.dialog-content') || ui.editorList?.parentElement;
+  const scrollTop = scrollRoot ? scrollRoot.scrollTop : 0;
+  try {
+    for (const index of [...selected].reverse()) {
+      const draft = settingsServerDrafts[index];
+      if (!draft) continue;
+      const originalId = String(draft._original_id || draft.id || '').trim();
+      const originalAlias = String(draft._original_ssh_alias || draft.ssh_alias || '').trim();
+      const wasSaved = (currentProfile?.servers || []).some(item => item.id === originalId);
+      const wasImportedCandidate = draft._imported_candidate === true;
+      if (wasSaved || wasImportedCandidate) rememberIgnoredSshAlias(originalAlias);
+      settingsServerDrafts.splice(index, 1);
+    }
+    settingsServerSelectedDrafts.clear();
+    // Keep multi-select mode for further tidy.
+    renderServerEditorPage();
+    refreshServerMultiSelectUi();
+    if (scrollRoot) scrollRoot.scrollTop = scrollTop;
+    showToast(`已移除 ${number(selected.length)} 台服务器`);
+  } finally {
+    if (ui.serverBatchRemove) delete ui.serverBatchRemove.dataset.busy;
   }
-  settingsServerSelectedDrafts.clear();
-  // Re-index selection is empty; keep multi-select mode for further tidy.
-  renderServerEditorPage();
-  refreshServerMultiSelectUi();
-  showToast(`已移除 ${number(selected.length)} 台服务器`);
 }
 
 function addServerEditor(server = {}, options = {}) {
