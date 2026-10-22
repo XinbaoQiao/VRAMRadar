@@ -1143,8 +1143,8 @@ class DashboardService:
             self._touch_locked()
             key = (str(server_id), str(failure.code))
             now = time.monotonic()
-            last = self._failure_log_at.get(key, 0.0)
-            if now - last >= 600.0:
+            last = self._failure_log_at.get(key)
+            if last is None or now - last >= 600.0:
                 self._failure_log_at[key] = now
                 self.logger.warning("server=%s code=%s message=%s", server_id, failure.code, failure)
 

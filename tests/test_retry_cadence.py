@@ -1,4 +1,5 @@
 ﻿import unittest
+import time
 from unittest.mock import Mock
 from vram_radar.models import Profile
 from vram_radar.service import DashboardService
@@ -36,7 +37,7 @@ class RetryCadenceTests(unittest.TestCase):
         service._record_failure("gpu", failure)
         service._record_failure("gpu", failure)
         self.assertEqual(service.logger.warning.call_count, 1)
-        service._failure_log_at[("gpu", "proxy_failed")] = 0.0
+        service._failure_log_at[("gpu", "proxy_failed")] = time.monotonic() - 601.0
         service._record_failure("gpu", failure)
         self.assertEqual(service.logger.warning.call_count, 2)
 

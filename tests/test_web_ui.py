@@ -93,7 +93,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("focusNotificationTarget", self.javascript)
         self.assertIn("notification-jump", self.javascript)
         self.assertIn("data-matched-gpu-indices", self.javascript)
-        self.assertIn("当前不是正式安装版，无法应用内更新，将打开 GitHub 发布页", self.javascript)
+        self.assertIn("当前无法应用内更新，将打开 GitHub 发布页", self.javascript)
         self.assertIn("latestUpdateActionReason", self.javascript)
 
     def test_server_leave_position_is_remembered_and_restored(self):
