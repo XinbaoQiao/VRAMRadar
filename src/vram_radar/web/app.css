@@ -1902,80 +1902,103 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .removed-server-count { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 12px; background: var(--surface); font-variant-numeric: tabular-nums; }
 .removed-server-content { display: grid; gap: 12px; padding: 0 12px 12px; }
 
-/* Config migrate — simple primary path: large QR + copy, advanced folded */
+/* Config migrate — polished simple path: large QR + one primary CTA; advanced folded dense */
 .settings-pane-migrate {
   max-width: none;
 }
+.settings-pane-migrate .settings-pane-head {
+  margin-bottom: 4px;
+}
+.settings-pane-migrate .settings-pane-head h3 {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.settings-pane-migrate .settings-pane-head p {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 450;
+}
 .settings-pane-migrate .migrate-panel-body {
   display: grid;
-  gap: 14px;
-  padding: 2px 0 0;
-  max-width: 440px;
+  gap: 12px;
+  padding: 4px 0 0;
+  max-width: 420px;
   justify-items: stretch;
 }
 .settings-pane-migrate .migrate-hero {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   justify-items: center;
   text-align: center;
   margin: 0;
-  padding: 18px 16px 16px;
+  padding: 22px 20px 18px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface-2) 28%, var(--surface));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 18%, var(--surface));
   box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-qr-wrap {
   display: grid;
   justify-items: center;
   width: 100%;
+  margin-bottom: 2px;
 }
 .settings-pane-migrate .migrate-qr-frame {
   display: grid;
   place-items: center;
-  padding: 18px;
-  border-radius: 14px;
+  padding: 14px;
+  border-radius: 12px;
   background: #fff;
-  border: 1px solid var(--border-strong);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, var(--border));
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--text) 6%, transparent);
 }
 .settings-pane-migrate .migrate-qr-wrap canvas {
-  width: 288px;
-  height: 288px;
+  width: 304px;
+  height: 304px;
   display: block;
   background: #fff;
   border-radius: 2px;
   image-rendering: pixelated;
 }
-.settings-pane-migrate .migrate-primary {
-  width: 100%;
-  min-height: 42px;
-  font-size: 14px;
-  font-weight: 650;
-  justify-content: center;
-}
 .settings-pane-migrate .migrate-summary {
-  margin: 0;
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.45;
-  max-width: 36em;
-}
-.settings-pane-migrate .migrate-aside-hint {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.45;
+  font-weight: 500;
+  line-height: 1.4;
+  max-width: 34em;
+}
+.settings-pane-migrate .migrate-primary {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  justify-content: center;
+  border-radius: 9px;
+  box-shadow: 0 1px 0 color-mix(in srgb, #000 12%, transparent);
+}
+.settings-pane-migrate .migrate-aside-hint {
+  margin: 8px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  width: 100%;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
   font-weight: 450;
-  max-width: 36em;
+  max-width: none;
+  box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-import-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
   width: 100%;
-  margin-top: 2px;
+  margin-top: 0;
 }
 .settings-pane-migrate .migrate-actions {
   display: grid;
@@ -1987,18 +2010,22 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .settings-pane-migrate .migrate-actions-import .migrate-file-button {
   width: 100%;
   min-width: 0;
-  min-height: 36px;
+  min-height: 34px;
   justify-content: center;
   text-align: center;
   box-sizing: border-box;
-  background: var(--surface);
-  border-color: var(--border-strong);
-  color: var(--text);
-  font-weight: 600;
+  background: transparent;
+  border-color: var(--border);
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+  font-weight: 550;
+  font-size: 12.5px;
+  border-radius: 7px;
 }
 .settings-pane-migrate .migrate-actions-import .button:hover,
 .settings-pane-migrate .migrate-actions-import .migrate-file-button:hover {
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 .settings-pane-migrate .migrate-file-button {
   display: inline-flex;
@@ -2012,19 +2039,20 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-actions-confirm .button {
   width: 100%;
-  min-height: 38px;
+  min-height: 42px;
   justify-content: center;
+  font-weight: 700;
 }
 .settings-pane-migrate .migrate-status {
   margin: 0;
   width: 100%;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
   color: var(--text);
   font-size: var(--font-caption);
-  line-height: 1.45;
+  line-height: 1.4;
   text-align: center;
   box-sizing: border-box;
 }
@@ -2034,31 +2062,31 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   color: var(--red);
 }
 .settings-pane-migrate .migrate-privacy {
-  margin: 0;
-  padding: 0 2px;
+  margin: 2px 0 0;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  color: color-mix(in srgb, var(--muted) 88%, var(--text));
+  font-size: 11.5px;
+  line-height: 1.4;
   text-align: center;
-  font-weight: 450;
+  font-weight: 400;
 }
 .settings-pane-migrate .migrate-more {
-  margin: 0;
+  margin: 2px 0 0;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 92%, var(--surface-2));
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   width: 100%;
   text-align: left;
 }
 .settings-pane-migrate .migrate-more > summary {
   cursor: pointer;
   list-style: none;
-  padding: 8px 12px;
-  font-size: 12.5px;
-  font-weight: 600;
+  padding: 6px 2px;
+  font-size: 12px;
+  font-weight: 550;
   color: var(--muted);
   user-select: none;
 }
@@ -2066,52 +2094,60 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .settings-pane-migrate .migrate-more > summary::before {
   content: "›";
   display: inline-block;
-  margin-right: 6px;
+  margin-right: 5px;
   transition: transform 0.12s ease;
   color: var(--muted);
 }
 .settings-pane-migrate .migrate-more[open] > summary::before { transform: rotate(90deg); }
-.settings-pane-migrate .migrate-more[open] > summary { color: var(--text); }
+.settings-pane-migrate .migrate-more[open] > summary { color: color-mix(in srgb, var(--text) 78%, var(--muted)); }
 .settings-pane-migrate .migrate-more-body {
   display: grid;
-  gap: 12px;
-  padding: 0 12px 12px;
+  gap: 8px;
+  padding: 2px 0 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+  padding-top: 10px;
 }
 .settings-pane-migrate .migrate-more-actions {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
 }
 .settings-pane-migrate .migrate-more-actions .button {
-  width: 100%;
-  min-height: 34px;
+  width: auto;
+  min-height: 30px;
+  padding: 4px 12px;
   justify-content: center;
+  font-size: 12.5px;
+  font-weight: 550;
 }
 .settings-pane-migrate .migrate-options {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
 }
 .settings-pane-migrate .migrate-check {
   margin: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
 }
 .settings-pane-migrate .migrate-passphrase-fields {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface);
   box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-passphrase-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 8px;
 }
 .settings-pane-migrate .migrate-field {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   margin: 0;
   max-width: none;
   font-size: var(--font-caption);
@@ -2126,8 +2162,8 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   width: 100%;
   max-width: none;
   box-sizing: border-box;
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 32px;
+  padding: 5px 9px;
   border-radius: 6px;
   border: 1px solid var(--border-strong);
   background: var(--surface);
@@ -2136,57 +2172,59 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   font-weight: 500;
 }
 .settings-pane-migrate .migrate-check-nested {
-  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
 }
 .settings-pane-migrate .migrate-secret-warn {
   margin: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid color-mix(in srgb, var(--amber, #c47d1a) 30%, var(--border));
-  background: color-mix(in srgb, var(--amber, #c47d1a) 9%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--amber, #c47d1a) 28%, var(--border));
+  background: color-mix(in srgb, var(--amber, #c47d1a) 7%, var(--surface));
   color: var(--text);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.4;
   font-weight: 450;
 }
 .settings-pane-migrate .migrate-select-block {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 6px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 90%, var(--surface-2));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--surface-2));
 }
 .settings-pane-migrate .migrate-select-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+  margin-bottom: 2px;
 }
 .settings-pane-migrate .migrate-select-head strong {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 650;
   color: var(--text);
 }
 .settings-pane-migrate .migrate-select-actions {
   display: inline-flex;
-  gap: 6px;
+  gap: 4px;
 }
 .settings-pane-migrate .migrate-select-actions .button {
-  min-height: 28px;
-  padding: 2px 10px;
-  font-size: 12px;
+  min-height: 26px;
+  padding: 1px 8px;
+  font-size: 11.5px;
+  font-weight: 550;
 }
 .settings-pane-migrate .migrate-server-list {
   display: grid;
-  gap: 6px;
-  max-height: 160px;
+  gap: 4px;
+  max-height: 132px;
   overflow: auto;
-  padding: 2px;
+  padding: 0;
 }
 .settings-pane-migrate .migrate-server-list .migrate-check {
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 4px 7px;
+  border-radius: 5px;
   border: 1px solid transparent;
   background: var(--surface);
 }
@@ -2195,63 +2233,68 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 .settings-pane-migrate .migrate-advanced-lan {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface);
 }
 .settings-pane-migrate .migrate-advanced-label {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--text);
 }
 .settings-pane-migrate .migrate-lan-status {
   margin: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 6px;
   border: 1px dashed var(--border-strong);
-  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
-  font-size: 12px;
-  line-height: 1.45;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface));
+  font-size: 11.5px;
+  line-height: 1.4;
   word-break: break-all;
 }
 .settings-pane-migrate .migrate-lan-fetch-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  gap: 6px;
+}
+.settings-pane-migrate .migrate-lan-fetch-row .button {
+  min-height: 32px;
+  padding: 4px 12px;
+  font-size: 12.5px;
 }
 .settings-pane-migrate .migrate-import-preview {
   display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 5px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-2) 40%, var(--surface));
-  font-size: 12.5px;
-  line-height: 1.45;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) 35%, var(--surface));
+  font-size: 12px;
+  line-height: 1.4;
   text-align: left;
   width: 100%;
   box-sizing: border-box;
 }
 .settings-pane-migrate .migrate-import-preview strong {
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .settings-pane-migrate .migrate-import-mode {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   text-align: left;
 }
 .settings-pane-migrate .migrate-import-check {
   display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 7px;
   border: 1px solid var(--border);
   background: var(--surface);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.4;
   text-align: left;
   width: 100%;
   box-sizing: border-box;
