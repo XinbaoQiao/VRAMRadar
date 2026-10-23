@@ -59,7 +59,7 @@ Also available as [WebM](docs/assets/readme/vram-radar-demo.webm). Captions are 
 - **Leaner memory** — hover cards release on leave; WebView runs lighter with a capped cache.
 - **Gentler update checks** — longer backoff when the network is slow or offline.
 
-![Transfer config](docs/assets/readme/settings-migrate-zh.png)
+![Transfer config](docs/assets/readme/settings-migrate-en.png)
 
 
 ### GPU monitoring

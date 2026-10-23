@@ -680,7 +680,7 @@ function renderLiveTable(server) {
     ? `<div class="live-gpu-toolbar"><button class="button compact-button toggle-favorite-gpu-only${onlyFavorites ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${onlyFavorites}" title="${escapeHtml(localizedText(onlyFavorites ? '显示全部 GPU' : '只看收藏 GPU'))}">${escapeHtml(localizedText('只看收藏 GPU'))}</button></div>`
     : '';
   const emptyRow = onlyFavorites && !visibleGpus.length
-    ? `<tr class="gpu-filter-empty"><td colspan="6">${escapeHtml(localizedText('当前没有收藏的 GPU'))}</td></tr>`
+    ? `<tr class="gpu-filter-empty"><td colspan="6">${escapeHtml(localizedText('暂无收藏 GPU'))}</td></tr>`
     : '';
   const memoryTable = `${toolbar}<div class="table-wrap" role="region" aria-label="GPU 实时显存，可横向滚动"><table><caption class="sr-only">GPU 实时显存</caption><thead><tr><th scope="col">GPU</th><th scope="col">卡型</th><th scope="col">已用显存</th><th scope="col">空闲显存</th><th scope="col">利用率</th><th scope="col">温度</th></tr></thead><tbody>${visibleGpus.map(gpu => `<tr class="gpu-row" data-server-id="${escapeHtml(serverId)}" data-gpu-index="${escapeHtml(gpu.gpu_index)}"><td class="gpu-index-cell">${renderFavoriteGpuButton(serverId, gpu.gpu_index)}<span>GPU ${escapeHtml(gpu.gpu_index)}</span></td><td>${escapeHtml(gpu.gpu_type)}</td><td class="memory-cell"><div class="memory-values"><strong>${number(gpu.memory_used_gib)} GiB</strong><span>总量 ${number(gpu.memory_total_gib)} GiB</span></div>${memoryTrack(gpu.memory_used_gib, gpu.memory_total_gib)}</td><td>${number(gpu.memory_free_gib)} GiB</td><td>${gpu.utilization_percent == null ? '未知' : `${number(gpu.utilization_percent)}%`}</td><td>${gpu.temperature_c == null ? '未知' : `${number(gpu.temperature_c)} °C`}</td></tr>`).join('')}${emptyRow}</tbody></table></div>`;
   return memoryTable + renderCpuOverview(server) + renderDirectProcessModule(server);
@@ -2562,7 +2562,7 @@ async function applyCodexSettings(executable = currentProfile?.codex_executable 
 function renderNavigatorTaskWatches() {
   const watches = currentProfile?.task_completion_watches || [];
   const marker = count => `<span class="navigator-watch-marker" aria-hidden="true">${icon('bell')}<small>${number(count)}</small></span>`;
-  if (!watches.length) return `<div class="navigator-watch-empty">${marker(0)}<span class="navigator-watch-empty-copy">${escapeHtml(localizedText('还没有关注任务'))}<small>${escapeHtml(localizedText('可在任务表中逐项关注。'))}</small></span></div>`;
+  if (!watches.length) return `<div class="navigator-watch-empty">${marker(0)}<span class="navigator-watch-empty-copy">${escapeHtml(localizedText('暂无关注任务'))}<small>${escapeHtml(localizedText('可在任务表中关注。'))}</small></span></div>`;
   return `<details class="navigator-task-watches"${taskWatchesExpanded ? ' open' : ''}><summary>${marker(watches.length)}<span class="navigator-watch-summary-copy">${escapeHtml(localizedText('已关注任务'))}</span><span class="summary-action"><span class="when-closed">${escapeHtml(localizedText('展开'))}</span><span class="when-open">${escapeHtml(localizedText('收起'))}</span></span></summary><div class="navigator-task-watch-body"><div class="task-watch-heading"><span>${escapeHtml(localizedText('只在任务结束时提醒'))}</span><button class="clear-task-watches button compact-button" type="button">${escapeHtml(localizedText('全部移除'))}</button></div>${watches.map(watch => `<div class="task-watch-item"><span><strong>${escapeHtml(watch.label)}</strong><small>${escapeHtml(watch.server_id)} · ${escapeHtml(watch.task_kind === 'slurm' ? `${localizedText('任务')} ${watch.task_id}` : (watch.task_kind === 'local_process' ? `${localizedText('当前环境 PID')} ${watch.task_id}` : `PID ${watch.task_id}`))}${watch.owner ? ` · ${escapeHtml(watch.owner)}` : ''}</small></span><button class="remove-task-watch button compact-button" type="button" data-server-id="${escapeHtml(watch.server_id)}" data-task-key="${escapeHtml(watch.task_key)}" data-task-kind="${escapeHtml(watch.task_kind)}" data-task-id="${escapeHtml(watch.task_id)}" data-task-label="${escapeHtml(watch.label)}" data-task-owner="${escapeHtml(watch.owner || '')}" data-task-owner-scope="${escapeHtml(watch.owner_scope || 'unknown')}">${escapeHtml(localizedText('移除'))}</button></div>`).join('')}</div></details>`;
 }
 
@@ -3371,7 +3371,7 @@ function renderServerNavigator(servers) {
     const hasAnyFavorite = favoriteServerIds.size > 0 || favoriteGpuServerIds.size > 0;
     ui.serverNavigatorEmpty.textContent = hasAnyFavorite
       ? localizedText('没有匹配的服务器')
-      : localizedText('还没有收藏');
+      : localizedText('暂无收藏');
   } else if (allMatches.length === 0) {
     ui.serverNavigatorEmpty.textContent = localizedText('没有匹配的服务器');
   }
@@ -5098,7 +5098,7 @@ function setSettingsMode(mode) {
   ui.dialogKicker.textContent = onboarding ? '首次使用引导' : '';
   ui.dialogTitle.textContent = onboarding ? '欢迎使用显存雷达' : '设置';
   ui.dialogDescription.textContent = onboarding
-    ? '添加服务器后即可查看 GPU 状态。'
+    ? '添加服务器后即可查看。'
     : '按左侧分类管理服务器与界面。';
   ui.settingsDisclosureTools.hidden = onboarding;
   ui.closeSettings.hidden = onboarding;
@@ -5225,7 +5225,7 @@ function renderImportFeedback(count, paths = [], warnings = [], removedCount = 0
     : '没有找到可导入的服务器。';
   const nextStep = count
     ? '检查下方列表，再点击“保存并验证”。'
-    : '请换一个配置文件，或手动添加服务器。';
+    : '请换配置文件或手动添加。';
   const details = [
     ...(paths.length > 1 ? [`已合并读取 ${paths.length} 个配置文件。`, '多个配置文件不支持启动时自动同步。'] : []),
     ...(removedCount ? [`此前移除的 ${removedCount} 台服务器仍未添加。`] : []),
