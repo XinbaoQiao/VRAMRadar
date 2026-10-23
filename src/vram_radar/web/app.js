@@ -5590,8 +5590,8 @@ function readMigrateExportPassphrase() {
   if (!migrateWantsSecrets()) return '';
   const a = String(ui.migratePassphrase?.value || '');
   const b = String(ui.migratePassphraseConfirm?.value || '');
-  if (a.length < 8) throw new Error(localizedText('导出密码时，口令至少 8 位'));
-  if (a !== b) throw new Error(localizedText('两次两次口令不一致'));
+  if (a.length < 8) throw new Error(localizedText('导出密码时，保护密码至少 8 位'));
+  if (a !== b) throw new Error(localizedText('两次保护密码不一致'));
   return a;
 }
 
@@ -5694,8 +5694,8 @@ function updateMigrateSummary(preview) {
   const p = lastMigratePreview;
   if (!p || typeof p !== 'object') {
     ui.migrateSummary.textContent = migrateWantsSecrets()
-      ? localizedText('设置口令后生成含密码的二维码')
-      : localizedText('正在准备配置…');
+      ? localizedText('设好保护密码后再生成含密码的二维码')
+      : localizedText('正在准备…');
     return;
   }
   const line = formatMigratePreview(p);
@@ -5743,9 +5743,9 @@ function renderMigrateImportPreview(preview, {needsPass = false} = {}) {
   ];
   if (names) lines.push(`${localizedText('服务器')}：${names}`);
   if (preview.includes_secrets) {
-    lines.push(localizedText('含密码：导入后本机即失效，且有过期时间'));
+    lines.push(localizedText('含密码：导入后原码失效，且有过期时间'));
   }
-  if (needsPass) lines.push(localizedText('需要口令'));
+  if (needsPass) lines.push(localizedText('需要保护密码'));
   ui.migrateImportPreview.hidden = false;
   ui.migrateImportPreview.innerHTML = lines.filter(Boolean).join('<br>');
   if (ui.migrateImportModeWrap) ui.migrateImportModeWrap.hidden = false;
@@ -5907,7 +5907,7 @@ async function stageMigrateImportText(text) {
     return;
   }
   renderMigrateImportPreview(preview, {needsPass});
-  setMigrateStatus(ui.migrateImportStatus, localizedText('已就绪，请确认导入方式'));
+  setMigrateStatus(ui.migrateImportStatus, localizedText('已就绪，请选择覆盖或合并后确认'));
 }
 
 async function confirmMigrateImport() {
@@ -5922,7 +5922,7 @@ async function confirmMigrateImport() {
   if (needsPass) {
     passphrase = String(ui.migrateImportPassphrase?.value || '');
     if (!passphrase) {
-      setMigrateStatus(ui.migrateImportStatus, localizedText('请输入口令以导入加密内容'), {error: true});
+      setMigrateStatus(ui.migrateImportStatus, localizedText('请输入保护密码以导入'), {error: true});
       ui.migrateImportPassphrase?.focus();
       return;
     }
@@ -5930,8 +5930,8 @@ async function confirmMigrateImport() {
   const mode = migrateImportMode();
   const applyPrefs = ui.migrateApplyPrefs ? Boolean(ui.migrateApplyPrefs.checked) : true;
   const confirmText = mode === 'merge'
-    ? localizedText('导入会合并服务器配置，是否继续？')
-    : localizedText('导入会替换当前服务器和偏好，是否继续？');
+    ? localizedText('将合并到本机配置，是否继续？')
+    : localizedText('将替换本机配置，是否继续？');
   if (!window.confirm(confirmText)) return;
   migrateImportBusy = true;
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在导入…'));
@@ -6095,7 +6095,7 @@ async function fetchLanMigratePayload() {
   if (!api?.fetch_lan_migrate_payload) return;
   const url = String(ui.migrateLanUrl?.value || '').trim();
   if (!url) {
-    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入同一 Wi‑Fi 传送链接'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入传送链接'), {error: true});
     return;
   }
   setMigrateStatus(ui.migrateImportStatus, localizedText('正在获取…'));
@@ -6152,7 +6152,7 @@ function ensureMigrateQrForPane(paneId) {
       if (String(ui.migratePassphrase?.value || '').length < 8) {
         clearMigrateQr();
         if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = true;
-        setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置口令'));
+        setMigrateStatus(ui.migrateExportStatus, localizedText('请先设置保护密码'));
         return;
       }
     }

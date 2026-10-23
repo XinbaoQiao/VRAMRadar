@@ -84,7 +84,7 @@ def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
 
 def seal_secrets(passphrase: str, secrets: dict[str, str]) -> dict[str, Any]:
     if not isinstance(passphrase, str) or len(passphrase) < 8:
-        raise ConfigError("口令至少 8 位")
+        raise ConfigError("保护密码至少 8 位")
     if not secrets:
         raise ConfigError("没有可导出的登录密码")
     for ref, password in secrets.items():
@@ -114,7 +114,7 @@ def seal_secrets(passphrase: str, secrets: dict[str, str]) -> dict[str, Any]:
 
 def open_secrets(passphrase: str, sealed: dict[str, Any]) -> dict[str, str]:
     if not isinstance(passphrase, str) or not passphrase:
-        raise ConfigError("请输入口令")
+        raise ConfigError("请输入保护密码")
     if not isinstance(sealed, dict):
         raise ConfigError("加密内容无效")
     if sealed.get("v") != SEAL_VERSION or sealed.get("kdf") != "pbkdf2-sha256":
@@ -133,7 +133,7 @@ def open_secrets(passphrase: str, sealed: dict[str, Any]) -> dict[str, str]:
     enc_key, mac_key = material[:32], material[32:]
     expected = hmac.new(mac_key, b"vramradar-migrate-secrets-v1" + salt + nonce + ciphertext, hashlib.sha256).digest()
     if not hmac.compare_digest(expected, mac):
-        raise ConfigError("口令不正确，或文件已损坏")
+        raise ConfigError("保护密码不正确，或文件已损坏")
     plaintext = bytes(a ^ b for a, b in zip(ciphertext, _keystream(enc_key, nonce, len(ciphertext))))
     try:
         raw = json.loads(plaintext.decode("utf-8"))
@@ -311,7 +311,7 @@ def build_bundle(
     if include_keys and not include:
         raise ConfigError("导出私钥前请先勾选「含登录密码」")
     if (include or include_keys) and not passphrase:
-        raise ConfigError("导出密码时请设置口令")
+        raise ConfigError("导出密码时请设置保护密码")
     sealed = None
     exported, password_refs = _export_profile_dict(
         profile,
@@ -346,14 +346,14 @@ def build_bundle(
         expires_at = created + ttl
         pkg_id = str(package_id or uuid.uuid4())
     notes = [
-        "默认不含登录密码；可选口令加密后写入。",
+        "默认不含登录密码；可选保护密码加密后写入。",
         "私钥默认只保留路径；含私钥时体积变大。",
         "额度监测的本地登录态不会迁移；到新电脑后需重新授权。",
     ]
     if expires_at is not None:
         notes.append("含密码的迁移码有时限，请尽快在受信任设备上导入，勿长期留存。")
     if not include_prefs:
-        notes.append("本次仅导出服务器，未包含偏好设置。")
+        notes.append("本次仅导出服务器，未偏好设置。")
     return {
         "format": FORMAT,
         "created_at": created,
@@ -885,12 +885,12 @@ class LanMigrateTransfer:
 
         cleaned = str(url or "").strip()
         if not cleaned:
-            raise ConfigError("请输入同一 Wi‑Fi 传送链接")
+            raise ConfigError("请输入传送链接")
         parsed = urlparse(cleaned)
         if parsed.scheme != "http":
             raise ConfigError("同一 Wi‑Fi 传送仅支持 http 链接")
         if not parsed.path.startswith("/m/"):
-            raise ConfigError("同一 Wi‑Fi 传送链接无效")
+            raise ConfigError("传送链接无效")
         try:
             with urllib.request.urlopen(cleaned, timeout=timeout) as response:
                 raw = response.read()
