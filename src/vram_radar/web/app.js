@@ -5581,7 +5581,7 @@ function syncMigrateSecretFields() {
       ? (migrateWantsKeys()
         ? localizedText('已含密码和私钥（已加密）')
         : localizedText('已含密码（已加密）'))
-      : localizedText('默认不含登录密码和私钥');
+      : localizedText('默认带走全部偏好与服务器，不含密码');
   }
   updateMigrateSummary(lastMigratePreview);
 }
@@ -5614,7 +5614,7 @@ function drawMigrateQr(token) {
   }
   const modules = qr.getModuleCount();
   const quiet = 4;
-  const target = 240;
+  const target = 288;
   const cell = Math.max(3, Math.floor(target / (modules + quiet * 2)));
   const size = cell * (modules + quiet * 2);
   canvas.width = size;
@@ -5852,7 +5852,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
       setMigrateStatus(
         ui.migrateExportStatus,
         drew
-          ? [localizedText('复制二维码，到新电脑导入'), previewLine].filter(Boolean).join('\n')
+          ? [localizedText('请复制二维码'), previewLine].filter(Boolean).join('\n')
           : localizedText('无法生成二维码，请改为保存文件'),
         {error: !drew},
       );
