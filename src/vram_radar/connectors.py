@@ -460,12 +460,35 @@ def classify_process_error(
             retryable=False,
             state="misconfigured",
         )
+    # Generic remote exit (!=255): often a ProxyJump / mux flake mid-command with
+    # empty or transport-only stderr. Treat as retryable offline so cached data
+    # becomes "stale" instead of sticky "misconfigured" (which never auto-clears).
+    transient_transport = any(
+        token in lower
+        for token in (
+            "broken pipe",
+            "shared connection",
+            "mux_client_",
+            "session closed",
+            "channel closed",
+            "connection closed",
+            "kex_exchange_identification",
+            "banner exchange",
+        )
+    )
     if returncode != 255:
+        interrupted = not detail.strip() or transient_transport
         return ConnectorFailure(
             "remote_command_failed",
-            "SSH 已连接，但服务器环境检测命令执行失败",
-            retryable=False,
-            state="misconfigured",
+            (
+                "SSH 已连接，但环境检测命令中断（常见于 ProxyJump 中转波动），将自动重试"
+                if interrupted
+                else "SSH 已连接，但服务器环境检测命令执行失败；将自动重试，若持续失败请检查服务器环境"
+            ),
+            retryable=True,
+            state="offline",
+            remote_exit_code=returncode,
+            reason="remote_command_interrupted" if interrupted else "remote_exit_nonzero",
         )
     return ConnectorFailure("ssh_failed", "SSH 连接失败，未能识别具体原因；请稍后重试，或在终端中手动连接排查", retryable=True)
 

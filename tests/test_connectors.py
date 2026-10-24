@@ -1590,6 +1590,27 @@ printf '%s\n' '101|RUNNING|tester|00:01|01:00|2026-09-02T00:00:00|gpu-1|gpu-1|1|
         self.assertEqual(gateway.code, "interactive_gateway_required")
         self.assertEqual(gateway.reason, "interactive_gateway_or_second_hop_required")
 
+    def test_generic_remote_command_failure_is_retryable_offline(self):
+        empty = classify_process_error("", returncode=1)
+        self.assertEqual(empty.code, "remote_command_failed")
+        self.assertTrue(empty.retryable)
+        self.assertEqual(empty.state, "offline")
+        self.assertEqual(empty.remote_exit_code, 1)
+        self.assertEqual(empty.reason, "remote_command_interrupted")
+
+        mux = classify_process_error("mux_client_request_session: session closed", returncode=1)
+        self.assertEqual(mux.code, "remote_command_failed")
+        self.assertTrue(mux.retryable)
+        self.assertEqual(mux.state, "offline")
+        self.assertEqual(mux.reason, "remote_command_interrupted")
+
+        other = classify_process_error("unexpected collector boom", returncode=2)
+        self.assertEqual(other.code, "remote_command_failed")
+        self.assertTrue(other.retryable)
+        self.assertEqual(other.state, "offline")
+        self.assertEqual(other.reason, "remote_exit_nonzero")
+        self.assertEqual(other.remote_exit_code, 2)
+
     @patch("vram_radar.connectors._run_bounded_process")
     def test_remote_query_is_noninteractive_and_windowless(self, run):
         run.return_value = SimpleNamespace(returncode=0, stdout=b"ok", stderr=b"", stdout_truncated=False)

@@ -1146,7 +1146,7 @@ class DashboardService:
             last = self._failure_log_at.get(key)
             if last is None or now - last >= 600.0:
                 self._failure_log_at[key] = now
-                self.logger.warning("server=%s code=%s message=%s", server_id, failure.code, failure)
+                self.logger.warning("server=%s code=%s message=%s exit=%s reason=%s", server_id, failure.code, failure, failure.remote_exit_code, failure.reason)
 
     def refresh(
         self,
