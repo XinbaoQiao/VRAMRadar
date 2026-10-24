@@ -144,7 +144,7 @@
     assertions.import_diagnostics_can_be_expanded = importDetails.open;
     const emptyImportFeedback = renderImportFeedback(0);
     assertions.empty_import_gives_a_manual_next_step = emptyImportFeedback.includes('没有找到可导入的服务器。')
-      && emptyImportFeedback.includes('手动添加服务器') && !emptyImportFeedback.includes('保存并验证');
+      && emptyImportFeedback.includes('请换配置文件或手动添加') && !emptyImportFeedback.includes('保存并验证');
     window.VRAMRadarI18n.setLanguage('en');
     const translationProbe = document.createElement('div');
     translationProbe.textContent = '已取消收藏 GPU';
