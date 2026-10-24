@@ -21,12 +21,12 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>下载 v1.0.7</strong></a>
+  <a href="../../releases/latest"><strong>下载 v1.0.8</strong></a>
   · <a href="#演示">演示</a>
   · <a href="#安装">安装</a>
   · <a href="#使用">使用</a>
   · <a href="#常见问题">常见问题</a>
-  · <a href="docs/release-notes-v1.0.7.md">更新日志</a>
+  · <a href="docs/release-notes-v1.0.8.md">更新日志</a>
 </p>
 
 ![VRAM Radar GPU 总览（示例数据）](docs/assets/readme/overview-zh.png)
@@ -51,11 +51,11 @@ https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-d
 
 ## 功能
 
-### 1.0.7 新变化
+### 1.0.8 新变化
 
-- **多选整理** — 在已添加的服务器中勾选多台，批量暂停、恢复或移除。
-- **更省内存** — 悬停详情离开即释放；界面更精简，磁盘缓存有上限。
-- **更新检查更克制** — 网络不畅或超时时放缓重试。
+- **更省事的配置迁移** — 主路径更短，二维码更大，进阶选项收进「更多」。
+- **说明与截图同步** — README 迁移截图跟上当前界面，空状态提示更短更清楚。
+- **中转链路更稳** — 短暂波动会自动重试，并继续显示最近可用数据。
 
 ![配置迁移](docs/assets/readme/settings-migrate-zh.png)
 
@@ -115,8 +115,8 @@ https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-d
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.7.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
-| macOS | `VRAMRadar-1.0.7-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
+| Windows x64 | `VRAMRadar-Setup-1.0.8.exe` | 按用户安装，无需管理员权限。安装程序尚未代码签名，SmartScreen 可能提示“Windows 已保护你的电脑”；确认文件来源后选择 **更多信息 → 仍要运行**。 |
+| macOS | `VRAMRadar-1.0.8-macos.zip` | 包含 `VRAM Radar (Apple Silicon).app`（arm64，macOS 14+）和 `VRAM Radar (Intel).app`（x86_64，macOS 15+）。应用未使用 Apple Developer ID 签名，也未公证；首次启动请在 Finder 中右键应用并选择 **打开**。 |
 
 请勿全局关闭 SmartScreen 或 Gatekeeper。详见
 [Windows 安装与更新](docs/windows-install-and-update.md)、
@@ -211,7 +211,7 @@ bash Build-VramRadar-macOS.sh --skip-sync
 
 ## 文档
 
-- [更新日志：v1.0.7 发布说明](docs/release-notes-v1.0.7.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
+- [更新日志：v1.0.8 发布说明](docs/release-notes-v1.0.8.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
 - [SSH 配置发现](docs/server-config-discovery.md)
 - [额度监控](docs/subscription-usage.md) · [AI 应用支持说明](docs/ai-app-providers.md)
 - [Windows 安装与更新](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)

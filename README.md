@@ -21,12 +21,12 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><strong>Download v1.0.7</strong></a>
+  <a href="../../releases/latest"><strong>Download v1.0.8</strong></a>
   · <a href="#demo">Demo</a>
   · <a href="#installation">Installation</a>
   · <a href="#usage">Usage</a>
   · <a href="#troubleshooting">Troubleshooting</a>
-  · <a href="docs/release-notes-v1.0.7.md">Changelog</a>
+  · <a href="docs/release-notes-v1.0.8.md">Changelog</a>
 </p>
 
 ![VRAM Radar GPU overview (synthetic data)](docs/assets/readme/overview-en.png)
@@ -53,11 +53,11 @@ Also available as [WebM](docs/assets/readme/vram-radar-demo.webm). Captions are 
 
 ## Features
 
-### What’s new in 1.0.7
+### What’s new in 1.0.8
 
-- **Batch tidy** — multi-select Added servers to pause, resume, or remove many at once.
-- **Leaner memory** — hover cards release on leave; WebView runs lighter with a capped cache.
-- **Gentler update checks** — longer backoff when the network is slow or offline.
+- **Easier config transfer** — shorter main path, larger QR, advanced options tucked away.
+- **Matching docs** — README migrate screenshots match the UI; empty-state hints are shorter.
+- **Steadier jump-host links** — brief blips auto-retry while the last good reading stays on screen.
 
 ![Transfer config](docs/assets/readme/settings-migrate-en.png)
 
@@ -124,8 +124,8 @@ Download from the [latest release](../../releases/latest).
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows x64 | `VRAMRadar-Setup-1.0.7.exe` | Per-user installer, no administrator rights. The installer is not code-signed, so SmartScreen may show "Windows protected your PC"; choose **More info → Run anyway** after verifying the file. |
-| macOS | `VRAMRadar-1.0.7-macos.zip` | Contains `VRAM Radar (Apple Silicon).app` (arm64, macOS 14+) and `VRAM Radar (Intel).app` (x86_64, macOS 15+). Unsigned and unnotarized; see below. |
+| Windows x64 | `VRAMRadar-Setup-1.0.8.exe` | Per-user installer, no administrator rights. The installer is not code-signed, so SmartScreen may show "Windows protected your PC"; choose **More info → Run anyway** after verifying the file. |
+| macOS | `VRAMRadar-1.0.8-macos.zip` | Contains `VRAM Radar (Apple Silicon).app` (arm64, macOS 14+) and `VRAM Radar (Intel).app` (x86_64, macOS 15+). Unsigned and unnotarized; see below. |
 
 The latest release contains exactly the two files users need to download. On
 Windows, the installer is the recommended download: it preserves the Start-menu
@@ -234,7 +234,7 @@ Release validation should use an empty temporary Profile (`--home`, `--profile`,
 
 ## Documentation
 
-- [Changelog: v1.0.7 release notes](docs/release-notes-v1.0.7.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
+- [Changelog: v1.0.8 release notes](docs/release-notes-v1.0.8.md) · [v1.0.0](docs/release-notes-v1.0.0.md)
 - [SSH configuration discovery](docs/server-config-discovery.md)
 - [Quota monitoring](docs/subscription-usage.md) · [AI app providers](docs/ai-app-providers.md)
 - [Windows installation and updates](docs/windows-install-and-update.md) · [macOS](docs/macos-desktop.md)
