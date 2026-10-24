@@ -5579,9 +5579,9 @@ function syncMigrateSecretFields() {
   if (ui.migratePrivacy) {
     ui.migratePrivacy.textContent = on
       ? (migrateWantsKeys()
-        ? localizedText('已含密码和私钥（已加密）')
+        ? localizedText('已含密码和登录密钥（已加密）')
         : localizedText('已含密码（已加密）'))
-      : localizedText('默认带走全部偏好与服务器，不含密码');
+      : localizedText('默认带走全部偏好和服务器，不含密码');
   }
   updateMigrateSummary(lastMigratePreview);
 }
@@ -5590,7 +5590,7 @@ function readMigrateExportPassphrase() {
   if (!migrateWantsSecrets()) return '';
   const a = String(ui.migratePassphrase?.value || '');
   const b = String(ui.migratePassphraseConfirm?.value || '');
-  if (a.length < 8) throw new Error(localizedText('导出密码时，保护密码至少 8 位'));
+  if (a.length < 8) throw new Error(localizedText('保护密码至少 8 位'));
   if (a !== b) throw new Error(localizedText('两次保护密码不一致'));
   return a;
 }
@@ -5694,16 +5694,16 @@ function updateMigrateSummary(preview) {
   const p = lastMigratePreview;
   if (!p || typeof p !== 'object') {
     ui.migrateSummary.textContent = migrateWantsSecrets()
-      ? localizedText('设好保护密码后再生成含密码的二维码')
+      ? localizedText('先设置保护密码，再生成带密码的二维码')
       : localizedText('正在准备…');
     return;
   }
   const line = formatMigratePreview(p);
   const mode = migrateWantsSecrets()
     ? (migrateWantsKeys()
-      ? localizedText('含密码和私钥（已加密）')
+      ? localizedText('含密码和登录密钥（已加密）')
       : localizedText('含密码（已加密）'))
-    : localizedText('不含密码和私钥');
+    : localizedText('不含密码和登录密钥');
   const ttl = migrateWantsSecrets() && p.expires_in_seconds != null
     ? `${localizedText('剩余时间')} ${Math.max(0, Math.round(Number(p.expires_in_seconds) / 60))} ${localizedText('分钟')}`
     : '';
@@ -5720,7 +5720,7 @@ function formatMigratePreview(preview) {
   if (preview.includes_preferences === false) parts.push(localizedText('不含偏好'));
   if (preview.includes_secrets) {
     parts.push(preview.includes_private_keys
-      ? localizedText('已含密码和私钥（已加密）')
+      ? localizedText('已含密码和登录密钥（已加密）')
       : localizedText('已含密码（已加密）'));
     if (preview.expired) parts.push(localizedText('已过期'));
   }
@@ -5743,7 +5743,7 @@ function renderMigrateImportPreview(preview, {needsPass = false} = {}) {
   ];
   if (names) lines.push(`${localizedText('服务器')}：${names}`);
   if (preview.includes_secrets) {
-    lines.push(localizedText('含密码：导入后原码失效，且有过期时间'));
+    lines.push(localizedText('含密码：导入后原二维码失效，且有过期时间'));
   }
   if (needsPass) lines.push(localizedText('需要保护密码'));
   ui.migrateImportPreview.hidden = false;
@@ -5765,7 +5765,7 @@ function renderMigrateCheck(check) {
   for (const row of rows.slice(0, 12)) {
     const flags = [];
     if (row.missing_pw) flags.push(localizedText('缺密码'));
-    if (row.missing_key) flags.push(localizedText('缺私钥文件'));
+    if (row.missing_key) flags.push(localizedText('缺登录密钥文件'));
     const cls = flags.length ? 'is-bad' : 'is-ok';
     const detail = flags.length ? flags.join(' · ') : localizedText('就绪');
     lines.push(`<span class="${cls}">${row.display_name || row.id} — ${detail}</span>`);
@@ -5782,7 +5782,7 @@ async function loadMigrateExportTargets() {
     const previous = new Set(migrateSelectedServerIds() || []);
     ui.migrateServerList.innerHTML = '';
     if (!servers.length) {
-      ui.migrateServerList.innerHTML = `<p class="migrate-aside-hint">${localizedText('暂无服务器可带走')}</p>`;
+      ui.migrateServerList.innerHTML = `<p class="migrate-aside-hint">${localizedText('还没有可带走的服务器')}</p>`;
       migrateTargetsLoaded = true;
       return;
     }
@@ -5895,7 +5895,7 @@ async function stageMigrateImportText(text) {
   try {
     if (api.preview_migrate_payload) {
       const result = await api.preview_migrate_payload(payload);
-      if (!result?.ok) throw new Error(localizedText(result?.error || '无法读取迁移内容'));
+      if (!result?.ok) throw new Error(localizedText(result?.error || '无法读取配置内容'));
       needsPass = Boolean(result?.needs_passphrase);
       preview = result?.preview || null;
       if (ui.migrateImportPassWrap) ui.migrateImportPassWrap.hidden = !needsPass;
@@ -5903,11 +5903,11 @@ async function stageMigrateImportText(text) {
   } catch (error) {
     pendingMigrateImportText = '';
     renderMigrateImportPreview(null);
-    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法读取迁移内容'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法读取配置内容'), {error: true});
     return;
   }
   renderMigrateImportPreview(preview, {needsPass});
-  setMigrateStatus(ui.migrateImportStatus, localizedText('已就绪，请选择覆盖或合并后确认'));
+  setMigrateStatus(ui.migrateImportStatus, localizedText('已就绪，请选择「替换」或「合并」后确认'));
 }
 
 async function confirmMigrateImport() {
@@ -6032,7 +6032,7 @@ function renderLanTransferStatus(transfer) {
   const mins = Math.max(1, Math.round(Number(transfer.expires_in_seconds || 0) / 60));
   ui.migrateLanStatus.hidden = false;
   ui.migrateLanStatus.textContent = [
-    localizedText('同一 Wi‑Fi 传送已开启（不经公网）'),
+    localizedText('同一 Wi‑Fi 内传送已开启（不经公网）'),
     transfer.url || '',
     `${localizedText('约')} ${mins} ${localizedText('分钟后失效')} · ${localizedText('剩余次数')} ${transfer.downloads_left || 0}`,
   ].filter(Boolean).join('\n');
@@ -6052,7 +6052,7 @@ async function refreshLanTransferStatus() {
 
 async function startLanMigrateTransfer() {
   if (!api?.start_lan_migrate_transfer) {
-    showToast(localizedText('当前版本不支持同一 Wi‑Fi 传送'));
+    showToast(localizedText('当前版本不支持同一 Wi‑Fi 内传送'));
     return;
   }
   try {
@@ -6071,7 +6071,7 @@ async function startLanMigrateTransfer() {
       migrateWantsPrefs(),
       includeSecrets ? migrateTtlSeconds() : 600,
     );
-    if (!result?.ok) throw new Error(localizedText(result?.error || '无法启动同一 Wi‑Fi 传送'));
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法启动同一 Wi‑Fi 内传送'));
     renderLanTransferStatus(result.transfer);
     if (result.token) {
       lastMigrateToken = String(result.token || '');
@@ -6083,11 +6083,11 @@ async function startLanMigrateTransfer() {
         if (ui.migrateQrWrap) ui.migrateQrWrap.hidden = !lastMigrateQrReady;
       }
     }
-    showToast(localizedText('同一 Wi‑Fi 传送已开启'));
+    showToast(localizedText('同一 Wi‑Fi 内传送已开启'));
     if (migrateLanPollTimer) clearInterval(migrateLanPollTimer);
     migrateLanPollTimer = setInterval(() => { void refreshLanTransferStatus(); }, 5000);
   } catch (error) {
-    showToast(error?.message || localizedText('无法启动同一 Wi‑Fi 传送'));
+    showToast(error?.message || localizedText('无法启动同一 Wi‑Fi 内传送'));
   }
 }
 
@@ -6095,17 +6095,17 @@ async function fetchLanMigratePayload() {
   if (!api?.fetch_lan_migrate_payload) return;
   const url = String(ui.migrateLanUrl?.value || '').trim();
   if (!url) {
-    setMigrateStatus(ui.migrateImportStatus, localizedText('请输入传送链接'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, localizedText('请粘贴接收链接'), {error: true});
     return;
   }
-  setMigrateStatus(ui.migrateImportStatus, localizedText('正在获取…'));
+  setMigrateStatus(ui.migrateImportStatus, localizedText('正在接收…'));
   try {
     const result = await api.fetch_lan_migrate_payload(url);
-    if (!result?.ok) throw new Error(localizedText(result?.error || '无法获取同一 Wi‑Fi 迁移内容'));
-    setMigrateStatus(ui.migrateImportStatus, localizedText('已获取迁移内容'));
+    if (!result?.ok) throw new Error(localizedText(result?.error || '无法从同一 Wi‑Fi 接收配置'));
+    setMigrateStatus(ui.migrateImportStatus, localizedText('已收到配置'));
     await stageMigrateImportText(result.text || '');
   } catch (error) {
-    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法获取同一 Wi‑Fi 迁移内容'), {error: true});
+    setMigrateStatus(ui.migrateImportStatus, error?.message || localizedText('无法从同一 Wi‑Fi 接收配置'), {error: true});
   }
 }
 

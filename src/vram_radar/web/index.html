@@ -247,29 +247,29 @@
                         <section id="settings-pane-migrate" class="settings-pane settings-pane-migrate" data-settings-pane="migrate" aria-labelledby="settings-migrate-title" hidden>
               <header class="settings-pane-head">
                 <h3 id="settings-migrate-title">配置迁移</h3>
-                <p>复制二维码，在新电脑导入</p>
+                <p>在这台电脑复制，到新电脑粘贴导入</p>
               </header>
               <div id="migrate-panel" class="migrate-panel-body migrate-simple">
                 <div class="migrate-hero">
                   <div id="migrate-qr-wrap" class="migrate-qr-wrap" hidden>
                     <div class="migrate-qr-frame">
-                      <canvas id="migrate-qr-canvas" width="304" height="304" aria-label="配置迁移二维码"></canvas>
+                      <canvas id="migrate-qr-canvas" width="304" height="304" aria-label="配置二维码"></canvas>
                     </div>
                   </div>
                   <div id="migrate-export-status" class="migrate-status" role="status" aria-live="polite" hidden></div>
                   <p id="migrate-summary" class="migrate-summary">正在准备…</p>
                   <button id="migrate-copy-image" class="button primary migrate-primary" type="button">复制二维码</button>
-                  <p class="migrate-aside-hint">新电脑：粘贴或选择下方二维码</p>
+                  <p class="migrate-aside-hint">新电脑上：粘贴二维码，或选择图片</p>
                   <div class="migrate-import-row migrate-actions migrate-actions-import">
                     <button id="migrate-paste-image" class="button" type="button">粘贴二维码</button>
-                    <label class="button migrate-file-button"><input id="migrate-import-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/*,.vramradar-migrate,.json,application/json,text/plain" hidden><span>选择图片</span></label>
+                    <label class="button migrate-file-button"><input id="migrate-import-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/*,.vramradar-migrate,.json,application/json,text/plain" hidden><span>选择图片或文件</span></label>
                   </div>
                 </div>
 
                 <div id="migrate-import-preview" class="migrate-import-preview" hidden></div>
                 <div class="migrate-import-mode" id="migrate-import-mode-wrap" hidden>
-                  <label class="settings-pref check-label migrate-check"><input id="migrate-mode-overwrite" type="radio" name="migrate-import-mode" value="overwrite" checked><span class="settings-pref-text"><strong>覆盖</strong><small>替换本机配置</small></span></label>
-                  <label class="settings-pref check-label migrate-check"><input id="migrate-mode-merge" type="radio" name="migrate-import-mode" value="merge"><span class="settings-pref-text"><strong>合并</strong><small>加到本机；同名以导入为准</small></span></label>
+                  <label class="settings-pref check-label migrate-check"><input id="migrate-mode-overwrite" type="radio" name="migrate-import-mode" value="overwrite" checked><span class="settings-pref-text"><strong>替换</strong><small>替换本机配置</small></span></label>
+                  <label class="settings-pref check-label migrate-check"><input id="migrate-mode-merge" type="radio" name="migrate-import-mode" value="merge"><span class="settings-pref-text"><strong>合并</strong><small>保留现有服务器，同名用导入的</small></span></label>
                   <label class="settings-pref check-label migrate-check"><input id="migrate-apply-prefs" type="checkbox" checked><span class="settings-pref-text"><strong>应用偏好设置</strong><small>语言、刷新、通知等</small></span></label>
                 </div>
                 <label id="migrate-import-pass-wrap" class="settings-field migrate-field migrate-import-pass" hidden>
@@ -292,7 +292,7 @@
 
                     <div class="migrate-select-block">
                       <div class="migrate-select-head">
-                        <strong>自定义带走内容</strong>
+                        <strong>选择要带走的内容</strong>
                         <div class="migrate-select-actions">
                           <button id="migrate-select-all" class="button ghost" type="button">全选</button>
                           <button id="migrate-select-none" class="button ghost" type="button">全不选</button>
@@ -305,15 +305,15 @@
                           <small>语言、刷新、通知等</small>
                         </span>
                       </label>
-                      <div id="migrate-server-list" class="migrate-server-list" role="group" aria-label="要带走的服务器"></div>
+                      <div id="migrate-server-list" class="migrate-server-list" role="group" aria-label="要带走的服务器列表"></div>
                     </div>
 
                     <div class="migrate-options">
                       <label class="settings-pref check-label migrate-check">
                         <input id="migrate-include-secrets" type="checkbox">
                         <span class="settings-pref-text">
-                          <strong>含登录密码</strong>
-                          <small>需设保护密码；勿外传</small>
+                          <strong>带走登录密码</strong>
+                          <small>需设保护密码，请勿外传</small>
                         </span>
                       </label>
                       <div id="migrate-passphrase-fields" class="migrate-passphrase-fields" hidden>
@@ -339,30 +339,30 @@
                         <label class="settings-pref check-label migrate-check migrate-check-nested">
                           <input id="migrate-include-keys" type="checkbox">
                           <span class="settings-pref-text">
-                            <strong>含 SSH 私钥</strong>
-                            <small>太大时改用文件</small>
+                            <strong>带走登录密钥</strong>
+                            <small>太大时请改存为文件</small>
                           </span>
                         </label>
-                        <p class="migrate-secret-warn">含密码时只在可信设备间使用，并尽快导入；过期后失效。</p>
+                        <p class="migrate-secret-warn">含密码时仅在可信设备上使用，请尽快导入，过期即失效。</p>
                       </div>
                     </div>
 
                     <div class="migrate-advanced-lan">
-                      <strong class="migrate-advanced-label">同一 Wi‑Fi 传送</strong>
+                      <strong class="migrate-advanced-label">同一 Wi‑Fi 内传送</strong>
                       <button id="migrate-lan-start" class="button" type="button">开始传送</button>
                       <div id="migrate-lan-status" class="migrate-lan-status" hidden></div>
                       <label class="settings-field migrate-field">
-                        <span>传送链接</span>
+                        <span>接收链接</span>
                         <div class="migrate-lan-fetch-row">
                           <input id="migrate-lan-url" type="text" spellcheck="false" placeholder="http://192.168.x.x:port/m/…">
-                          <button id="migrate-lan-fetch" class="button" type="button">获取</button>
+                          <button id="migrate-lan-fetch" class="button" type="button">接收</button>
                         </div>
                       </label>
                     </div>
                   </div>
                 </details>
 
-                <p id="migrate-privacy" class="migrate-privacy">默认带走全部偏好与服务器，不含密码</p>
+                <p id="migrate-privacy" class="migrate-privacy">默认带走全部偏好和服务器，不含密码</p>
               </div>
             </section>
 

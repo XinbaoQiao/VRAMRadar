@@ -309,9 +309,9 @@ def build_bundle(
     if selected_ids is not None and not selected_ids:
         raise ConfigError("请至少选择一台服务器")
     if include_keys and not include:
-        raise ConfigError("导出私钥前请先勾选「含登录密码」")
+        raise ConfigError("带走登录密钥前请先勾选「带走登录密码」")
     if (include or include_keys) and not passphrase:
-        raise ConfigError("导出密码时请设置保护密码")
+        raise ConfigError("带走密码前请先设置保护密码")
     sealed = None
     exported, password_refs = _export_profile_dict(
         profile,
@@ -327,7 +327,7 @@ def build_bundle(
     if include_keys:
         keys = collect_private_keys(profile, server_ids=selected_ids)
         if not keys:
-            raise ConfigError("当前配置没有可读取的 SSH 私钥可导出")
+            raise ConfigError("当前没有可带走的登录密钥")
         secret_payload.update(keys)
     if include and not secret_payload:
         raise ConfigError("没有已保存的登录密码或私钥可导出")
@@ -346,14 +346,14 @@ def build_bundle(
         expires_at = created + ttl
         pkg_id = str(package_id or uuid.uuid4())
     notes = [
-        "默认不含登录密码；可选保护密码加密后写入。",
-        "私钥默认只保留路径；含私钥时体积变大。",
-        "额度监测的本地登录态不会迁移；到新电脑后需重新授权。",
+        "默认不带走登录密码；可选保护密码加密后写入。",
+        "默认只记下登录密钥路径；勾选带走登录密钥后体积会变大。",
+        "额度监测的本机登录状态不会带走；到新电脑后需要重新登录授权。",
     ]
     if expires_at is not None:
-        notes.append("含密码的迁移码有时限，请尽快在受信任设备上导入，勿长期留存。")
+        notes.append("带密码的二维码有时效，请尽快在可信设备上导入，勿长期保存。")
     if not include_prefs:
-        notes.append("本次仅导出服务器，未偏好设置。")
+        notes.append("本次只带走服务器，不含偏好设置。")
     return {
         "format": FORMAT,
         "created_at": created,
@@ -403,7 +403,7 @@ def encode_bundle_text(bundle: dict[str, Any]) -> str:
 
 def parse_migrate_text(text: str) -> dict[str, Any]:
     if not isinstance(text, str) or not text.strip():
-        raise ConfigError("迁移内容为空")
+        raise ConfigError("没有可带走的内容")
     cleaned = text.strip()
     if cleaned.startswith("\ufeff"):
         cleaned = cleaned.lstrip("\ufeff")
@@ -412,19 +412,19 @@ def parse_migrate_text(text: str) -> dict[str, Any]:
             raw = zlib.decompress(_b64d(cleaned[len(TOKEN_PREFIX):]))
             bundle = json.loads(raw.decode("utf-8"))
         except Exception as exc:
-            raise ConfigError("迁移码无效或已损坏") from exc
+            raise ConfigError("二维码无效或已损坏") from exc
     else:
         try:
             bundle = json.loads(cleaned)
         except Exception as exc:
-            raise ConfigError("迁移文件格式无效") from exc
+            raise ConfigError("配置文件格式无效") from exc
     if not isinstance(bundle, dict) or bundle.get("format") != FORMAT:
-        raise ConfigError("不是 VRAM Radar 的迁移文件")
+        raise ConfigError("不是本应用的配置文件")
     profile = bundle.get("profile")
     if not isinstance(profile, dict):
-        raise ConfigError("迁移文件缺少配置")
+        raise ConfigError("配置文件不完整")
     if bundle.get("includes_secrets") and not isinstance(bundle.get("secrets"), dict):
-        raise ConfigError("迁移文件声称含密码，但缺少加密内容")
+        raise ConfigError("文件标明含密码，但缺少加密数据")
     return bundle
 
 
@@ -542,11 +542,11 @@ def restore_private_keys(
         try:
             raw = base64.b64decode(blob_b64.encode("ascii"))
         except Exception:
-            warnings.append(f"服务器 {server.display_name or server.id} 的私钥无法解码")
+            warnings.append(f"服务器 {server.display_name or server.id} 的登录密钥无法解码")
             new_servers.append(server)
             continue
         if b"PRIVATE KEY" not in raw or len(raw) > MAX_PRIVATE_KEY_EXPORT_BYTES:
-            warnings.append(f"服务器 {server.display_name or server.id} 的私钥无效")
+            warnings.append(f"服务器 {server.display_name or server.id} 的登录密钥无效")
             new_servers.append(server)
             continue
         dest = keys_root / f"migrate-{server.id}-ed25519"
@@ -557,11 +557,11 @@ def restore_private_keys(
             except Exception:
                 pass
         except Exception:
-            warnings.append(f"服务器 {server.display_name or server.id} 的私钥未能写入本机")
+            warnings.append(f"服务器 {server.display_name or server.id} 的登录密钥未能写入本机")
             new_servers.append(server)
             continue
         new_servers.append(replace(server, identity_file=str(dest)))
-        warnings.append(f"已恢复私钥到 {dest}")
+        warnings.append(f"已恢复登录密钥到 {dest}")
     return replace(profile, servers=tuple(new_servers)), warnings
 
 
@@ -621,12 +621,12 @@ def assert_bundle_usable(
         try:
             expiry = float(expires_at)
         except Exception as exc:
-            raise ConfigError("迁移文件有效期无效") from exc
+            raise ConfigError("配置文件有效期无效") from exc
         if current > expiry:
-            raise ConfigError("含密码的迁移码已过期，请在原电脑重新生成")
+            raise ConfigError("带密码的二维码已过期，请在原电脑重新生成")
     package_id = str(bundle.get("package_id") or "").strip()
     if package_id and consumed_ids and package_id in consumed_ids:
-        raise ConfigError("此迁移码已在本机用过，请重新生成")
+        raise ConfigError("该二维码已在本机用过，请重新生成")
 
 
 def merge_profiles(
@@ -802,7 +802,7 @@ class LanMigrateTransfer:
         max_downloads: int = 1,
     ) -> dict[str, Any]:
         if not isinstance(payload_text, str) or not payload_text.strip():
-            raise ConfigError("没有可传送的迁移内容")
+            raise ConfigError("没有可传送的内容")
         ttl = _clamp_ttl(
             ttl_seconds,
             default=DEFAULT_LAN_TTL_SECONDS,
@@ -885,19 +885,19 @@ class LanMigrateTransfer:
 
         cleaned = str(url or "").strip()
         if not cleaned:
-            raise ConfigError("请输入传送链接")
+            raise ConfigError("请粘贴接收链接")
         parsed = urlparse(cleaned)
         if parsed.scheme != "http":
-            raise ConfigError("同一 Wi‑Fi 传送仅支持 http 链接")
+            raise ConfigError("同一 Wi‑Fi 内传送仅支持 http 链接")
         if not parsed.path.startswith("/m/"):
-            raise ConfigError("传送链接无效")
+            raise ConfigError("接收链接无效")
         try:
             with urllib.request.urlopen(cleaned, timeout=timeout) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
-                raise ConfigError("传送链接已失效或已取走") from exc
-            raise ConfigError("无法从同一 Wi‑Fi 获取迁移内容") from exc
+                raise ConfigError("接收链接已失效或已取走") from exc
+            raise ConfigError("无法从同一 Wi‑Fi 接收配置") from exc
         except Exception as exc:
             raise ConfigError("无法连接，请确认同一 Wi‑Fi，且对方仍在传送") from exc
         text = raw.decode("utf-8", errors="strict")
