@@ -5701,9 +5701,9 @@ function updateMigrateSummary(preview) {
   const line = formatMigratePreview(p);
   const mode = migrateWantsSecrets()
     ? (migrateWantsKeys()
-      ? localizedText('当前：含密码和私钥（已加密）')
-      : localizedText('当前：含密码（已加密）'))
-    : localizedText('当前：不含密码和私钥');
+      ? localizedText('含密码和私钥（已加密）')
+      : localizedText('含密码（已加密）'))
+    : localizedText('不含密码和私钥');
   const ttl = migrateWantsSecrets() && p.expires_in_seconds != null
     ? `${localizedText('剩余时间')} ${Math.max(0, Math.round(Number(p.expires_in_seconds) / 60))} ${localizedText('分钟')}`
     : '';
@@ -5716,7 +5716,7 @@ function formatMigratePreview(preview) {
   const name = String(preview.display_name || '').trim();
   if (name) parts.push(name);
   const serverCount = Number(preview.server_count) || 0;
-  parts.push(`${localizedText('服务器')} ${serverCount}`);
+  parts.push(localizedText(`共 ${serverCount} 台服务器`));
   if (preview.includes_preferences === false) parts.push(localizedText('不含偏好'));
   if (preview.includes_secrets) {
     parts.push(preview.includes_private_keys
@@ -5852,7 +5852,7 @@ async function generateMigrateExport({forceFile = false} = {}) {
       setMigrateStatus(
         ui.migrateExportStatus,
         drew
-          ? [localizedText('请复制二维码'), previewLine].filter(Boolean).join('\n')
+          ? [localizedText('请复制下方二维码'), previewLine].filter(Boolean).join('\n')
           : localizedText('无法生成二维码，请改为保存文件'),
         {error: !drew},
       );
