@@ -1736,7 +1736,7 @@ printf '%s\n' '101|RUNNING|tester|00:01|01:00|2026-09-02T00:00:00|gpu-1|gpu-1|1|
             run_remote(server, "remote script")
 
         message = str(raised.exception)
-        self.assertEqual(message, "SSH 已连接，但服务器环境检测命令执行失败")
+        self.assertEqual(message, "SSH 已连接，但服务器环境检测命令执行失败；将自动重试，若持续失败请检查服务器环境")
         self.assertNotIn(canary, message)
         self.assertNotIn(encoded, message)
 

@@ -81,7 +81,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("整机收藏", self.javascript)
         self.assertIn("server-navigator-favorite-kind", self.javascript)
         self.assertIn("收藏这张 GPU", self.javascript)
-        self.assertIn("还没有收藏", self.javascript)
+        self.assertIn("暂无收藏", self.javascript)
         self.assertNotIn("当前列表来自 GPU 收藏（尚未收藏整台服务器）", self.javascript)
         self.assertIn("收藏这台服务器", self.javascript)
         self.assertIn("取消收藏这台服务器", self.javascript)

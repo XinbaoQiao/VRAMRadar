@@ -1220,7 +1220,7 @@
     ['关于生成专用密钥', 'About generating a dedicated key'],
     ['系统生成独立的 Ed25519 密钥，不覆盖 ', 'The app generates a separate Ed25519 key without overwriting files in '],
     ['系统生成独立的 Ed25519 密钥，不覆盖', 'The app generates a separate Ed25519 key without overwriting files in'],
-    [' 中任何现有文件。为了后台自动连接，专用私钥不设置密钥口令，并依靠当前系统用户的文件权限保护；需要保护密码保护时请选择现有密钥并使用 ssh-agent。', '. To support background connections, the dedicated private key has no passphrase and is protected by current-user file permissions. To use a passphrase, choose an existing key and ssh-agent.'],
+    ['中任何现有文件。为了后台自动连接，专用私钥不设置密钥口令，并依靠当前系统用户的文件权限保护；需要口令保护时请选择现有密钥并使用 ssh-agent。', '. To support background connections, the dedicated private key has no passphrase and is protected by current-user file permissions. To use a passphrase, choose an existing key and ssh-agent.'],
     ['中任何现有文件。为了后台自动连接，专用私钥不设置密钥口令，并依靠当前系统用户的文件权限保护；需要保护密码保护时请选择现有密钥并使用 ssh-agent。', 'To support background connections, the dedicated private key has no passphrase and is protected by current-user file permissions. To use a passphrase, choose an existing key and ssh-agent.'],
     ['配置并验证', 'Configure and verify'],
     ['请先保存地址和用户名；如当前密钥不能登录，再保存一次服务器密码。', 'Save the address and username first. If the current key cannot sign in, save the server password once.'],
