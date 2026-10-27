@@ -42,6 +42,27 @@ gpu_types = ["A100-40G"]
 
 
 class ServerCatalogTests(unittest.TestCase):
+    def test_sync_preserves_complete_protected_acp_connection(self):
+        profile = Profile.from_dict({**Profile.empty("local").to_dict(), "servers": [{
+            "id": "ACP", "display_name": "Protected platform", "backend": "sensecore_acp",
+            "acp_workspace": "workspace", "acp_cluster": "cluster", "acp_zone": "zone",
+            "acp_profile": "protected", "acp_protected_auth": True,
+        }]}, expected_id="local")
+        sources = (
+            ("servers.toml", '[servers.acp]\nbackend="acp"\nacp_workspace="other"\nacp_cluster="other"\nacp_zone="other"\n'),
+            ("servers.toml", '[servers.acp]\nbackend="ssh"\nssh_alias="other"\n'),
+            ("config", 'Host acp\n  HostName example.invalid\n'),
+        )
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/"work") as temporary:
+            for name, content in sources:
+                with self.subTest(source=content):
+                    path = Path(temporary)/name
+                    path.write_text(("version=3\n" if name.endswith(".toml") else "") + content, encoding="utf-8")
+                    synchronized, warnings = profile_from_server_config(profile, path)
+                    self.assertEqual(synchronized.servers, profile.servers)
+                    self.assertTrue(any("protected ACP connection is host-only" in warning for warning in warnings))
+                    Profile.from_dict(synchronized.to_dict(), expected_id="local")
+
     def test_windows_untrusted_junction_uses_kernel_reported_ssh_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

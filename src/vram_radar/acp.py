@@ -1,0 +1,148 @@
+"""Read-only SenseCore ACP job inventory through the user's existing SCO profile.
+
+SCO list flags and SCO_ZONE are grounded in the archived 2026-10-23 CLI help.
+This module never initializes credentials, submits jobs or estimates free VRAM.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+from typing import Any
+
+from .models import ServerProfile
+from .connectors import (
+    ConnectorFailure, _REMOTE_CAPTURE_SLOTS, _run_bounded_process,
+    redact_command_preview,
+)
+
+PAGE_SIZE = 100
+MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+TERMINAL_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "CANCELED", "STOPPED", "SUSPENDED"})
+
+
+def _text(value: Any, limit: int = 256) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = "".join(ch for ch in value if ord(ch) >= 32 and ord(ch) != 127)
+    return redact_command_preview(text, limit=limit)[0]
+
+
+def build_list_command(server: ServerProfile) -> list[str]:
+    """Only this fixed read-only subcommand can be issued by the connector."""
+    return [
+        server.acp_sco_path, "--profile", server.acp_profile,
+        "acp", "jobs", "list", "--workspace-name=" + server.acp_workspace,
+        "--aec2-name=" + server.acp_cluster, "--format=json",
+        f"--page-size={PAGE_SIZE}", "--page-token=1",
+    ]
+
+
+def parse_jobs(payload: Any) -> list[dict[str, Any]]:
+    # SCO's observed JSON output is an array. Refuse schema drift instead of
+    # treating an API error object or unknown envelope as an empty queue.
+    if not isinstance(payload, list) or len(payload) > PAGE_SIZE:
+        raise ConnectorFailure("acp_parse_failed", "ACP returned an unsupported job-list schema", retryable=False)
+    jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in payload:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"]:
+            raise ConnectorFailure("acp_parse_failed", "ACP returned an invalid job identity", retryable=False)
+        job_id = _text(row["name"])
+        if not job_id or job_id in seen:
+            raise ConnectorFailure("acp_parse_failed", "ACP returned duplicate job identities", retryable=False)
+        seen.add(job_id)
+        ownership = row.get("ownership") if isinstance(row.get("ownership"), dict) else {}
+        pool = row.get("resource_pool") if isinstance(row.get("resource_pool"), dict) else {}
+        # GPU shape names and requested limits are not measured allocations.
+        # Until a documented numeric request field is supported, show unknown.
+        jobs.append({
+            "job_id": job_id,
+            "name": _text(row.get("display_name")) or job_id,
+            "state": _text(row.get("state"), 64).upper() or "UNKNOWN",
+            "user": _text(ownership.get("user_name")),
+            "owner_scope": "unknown",
+            "requested_gpus": None,
+            "gpu_count": None,
+            "cluster": _text(pool.get("name")),
+            "submitted_at": _text(row.get("create_time"), 80),
+            "reason": _text(row.get("reason"), 512),
+            "nodes": "",
+        })
+    return jobs
+
+
+def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
+    from .acp_transport import current_transport
+    transport = current_transport(server)
+    if transport is None and server.acp_protected_auth:
+        raise ConnectorFailure("acp_transport_config_invalid", "Required protected ACP authorization is unavailable",
+                               retryable=False, state="security_blocked")
+    input_data = None
+    cwd = None
+    if transport is not None:
+        argv = transport.command()
+        try:
+            input_data = transport.request(server)
+        except ValueError:
+            raise ConnectorFailure("acp_transport_config_invalid", "Protected ACP connection binding changed",
+                                   retryable=False, state="security_blocked") from None
+        cwd = transport.cwd
+    else:
+        argv = build_list_command(server)
+        executable = shutil.which(argv[0])
+        if executable is None or executable.lower().endswith((".cmd", ".bat", ".ps1", ".py")):
+            raise ConnectorFailure("acp_cli_missing", "SCO executable was not found; select an installed SCO client", retryable=False, state="misconfigured")
+        argv[0] = executable
+    env = dict(os.environ)
+    env["SCO_ZONE"] = server.acp_zone
+    # Explicit profile owns authentication; do not accidentally inherit another
+    # account's process-scoped credentials. Never inspect or copy profile files.
+    for key in ("SCO_ACCESS_KEY_ID", "SCO_ACCESS_KEY_SECRET"):
+        env.pop(key, None)
+    try:
+        with _REMOTE_CAPTURE_SLOTS:
+            result = _run_bounded_process(
+                argv, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
+                timeout=server.connect_timeout_seconds,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=env,
+                stdout_limit=MAX_OUTPUT_BYTES, stderr_limit=16384,
+                input_data=input_data, cwd=cwd,
+            )
+    except subprocess.TimeoutExpired as exc:
+        raise ConnectorFailure("acp_timeout", "ACP job query timed out", retryable=True) from exc
+    except OSError as exc:
+        raise ConnectorFailure("acp_cli_failed", "SCO could not be started", retryable=False, state="misconfigured") from exc
+    if result.stdout_truncated:
+        raise ConnectorFailure("acp_response_too_large", "ACP response exceeded the bounded capture limit", retryable=False)
+    if result.returncode:
+        # Raw CLI output may include credentials, command/env or signed URLs.
+        # Classify in memory, emit only fixed messages, never log raw stderr.
+        detail = bytes(result.stderr).decode("utf-8", errors="replace").lower()
+        if any(word in detail for word in ("unauthenticated", "unauthorized", "credential", "access key")):
+            raise ConnectorFailure("acp_auth_required", "SCO profile authentication failed; configure the selected profile outside Radar", retryable=False, state="misconfigured")
+        if any(word in detail for word in ("forbidden", "permission denied")):
+            raise ConnectorFailure("acp_access_denied", "ACP refused this query; verify profile, workspace and cluster", retryable=False)
+        raise ConnectorFailure("acp_query_failed", "SCO job-list query failed; check the selected CLI profile and platform settings", retryable=True)
+    try:
+        jobs = parse_jobs(json.loads(bytes(result.stdout).decode("utf-8-sig")))
+    except (ValueError, UnicodeError) as exc:
+        raise ConnectorFailure("acp_parse_failed", "SCO did not return a valid JSON job list", retryable=False) from exc
+    counts: dict[str, int] = {}
+    for job in jobs:
+        counts[job["state"]] = counts.get(job["state"], 0) + 1
+    return {
+        "server_id": server.id, "display_name": server.display_name,
+        "backend": "sensecore_acp", "view_kind": "platform",
+        "total_gpus": None, "free_gpus": None,
+        "total_vram_gib": None, "free_vram_gib": None,
+        "nodes": [], "gpus": [], "jobs": jobs,
+        "platform": {"workspace": server.acp_workspace, "cluster": server.acp_cluster,
+                     "zone": server.acp_zone, "job_scope": "workspace_visible",
+                     "page_size": transport.page_size if transport is not None else PAGE_SIZE, "list_complete": False,
+                     "live_vram_supported": False},
+        "tasks": {"current_user": "", "active": [j for j in jobs if j["state"] not in TERMINAL_STATES],
+                  "recent": [j for j in jobs if j["state"] in TERMINAL_STATES],
+                  "counts": counts, "history_supported": False, "history_window_hours": None},
+    }

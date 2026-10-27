@@ -90,6 +90,7 @@ from .secrets import SecretStore
 from .service import DashboardService, favorite_resource_matches
 from .ssh_recovery import HostSshRecovery
 from .ssh_transport import HostSshTransport
+from .acp_transport import HostAcpTransport
 from .ssh_keys import (
     INSTALL_AUTHORIZED_KEY_SCRIPT,
     VERIFY_SSH_KEY_SCRIPT,
@@ -704,7 +705,29 @@ def window_smoke_worker(
         result["shown"] = bool(window.events.shown.wait(remaining_seconds()))
         if not result["shown"]:
             result["error"] = "desktop window did not become visible before the smoke timeout"
-        elif verify_update_bridge:
+        else:
+            # `shown` precedes WebView2 navigation and Python bridge setup.
+            # Closing there can abort navigation with E_ABORT while falsely
+            # reporting a successful smoke. Wait for the actual dashboard.
+            ready = False
+            if window.events.loaded.wait(remaining_seconds()):
+                while remaining_seconds() > 0:
+                    try:
+                        ready = window_frontend_is_ready(window) and window.evaluate_js(
+                            "typeof currentProfile !== 'undefined' && currentProfile !== null && "
+                            "typeof currentSnapshot !== 'undefined' && currentSnapshot !== null"
+                        ) is True
+                    except Exception:
+                        # The bridge can briefly be unavailable during navigation.
+                        ready = False
+                    if ready:
+                        break
+                    time.sleep(min(0.05, remaining_seconds()))
+            result["frontend_ready"] = ready
+            if not ready:
+                result["shown"] = False
+                result["error"] = "desktop frontend did not become ready before the smoke timeout"
+        if result["shown"] and verify_update_bridge:
             completed = bool(
                 update_check_completed is not None
                 and update_check_completed.wait(remaining_seconds())
@@ -1543,6 +1566,8 @@ class AppApi:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
         if server.backend == "local":
             return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
+        if server.backend == "sensecore_acp":
+            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
         details = ssh_copy_details(server)
         argv = list(details.argv)
         command = _powershell_join(argv) if sys.platform == "win32" else shlex.join(argv)
@@ -1582,6 +1607,8 @@ class AppApi:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
         if server.backend == "local":
             return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
+        if server.backend == "sensecore_acp":
+            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
         argv = ssh_login_argv(server)
         try:
             if sys.platform == "win32":
@@ -1804,6 +1831,10 @@ class AppApi:
     @staticmethod
     def _active_tasks(server: dict[str, Any]) -> dict[str, dict[str, str]]:
         result: dict[str, dict[str, str]] = {}
+        if server.get("backend") == "sensecore_acp" or server.get("view_kind") == "platform":
+            # A bounded workspace page cannot prove ownership or completion
+            # when a job disappears from that page. Keep Slurm watches separate.
+            return result
         server_id = str(server.get("server_id") or "")
         tasks = server.get("tasks") or {}
         current_user = str(tasks.get("current_user") or "")
@@ -3006,7 +3037,7 @@ class AppApi:
             stages.append(
                 {
                     "id": "collection" if collection_failure else "connection",
-                    "label": "本地 GPU" if server.backend == "local" else ("资源读取" if collection_failure else "SSH 连接"),
+                    "label": "云平台任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else ("资源读取" if collection_failure else "SSH 连接")),
                     "state": "failed",
                     "message": str(exc),
                 }
@@ -3098,9 +3129,9 @@ class AppApi:
             [
                 {
                     "id": "connection",
-                    "label": "本地 GPU" if server.backend == "local" else "SSH 连接",
+                    "label": "云平台任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else "SSH 连接"),
                     "state": "passed",
-                    "message": "本地 GPU 读取成功" if server.backend == "local" else "SSH 连接和身份验证成功",
+                    "message": "平台任务列表读取成功" if server.backend == "sensecore_acp" else ("本地 GPU 读取成功" if server.backend == "local" else "SSH 连接和身份验证成功"),
                 },
                 {
                     "id": "collection",
@@ -3118,7 +3149,7 @@ class AppApi:
             "profile": persisted_profile,
             "summary": {
                 "backend": detected_backend,
-                "total_gpus": max(0, int(payload.get("total_gpus") or 0)),
+                "total_gpus": None if server.backend == "sensecore_acp" else max(0, int(payload.get("total_gpus") or 0)),
             },
             "stages": stages,
         }
@@ -3143,6 +3174,8 @@ class AppApi:
             server = next((item for item in self.profile.servers if item.id == normalized_id), None)
         if server is None:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
+        if server.backend == "sensecore_acp":
+            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
         if not server.enabled:
             return {
                 "ok": False,
@@ -3279,6 +3312,8 @@ class AppApi:
                 "error": "找不到这台已保存的服务器",
                 "stages": stages,
             }
+        if server.backend == "sensecore_acp":
+            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable", "stages": stages}
         if options is None:
             options = {}
         if not isinstance(options, dict):
@@ -3772,6 +3807,15 @@ class AppApi:
                 if old_id in candidate_ids:
                     raise ConfigError("服务器重命名后不能继续保留旧 ID")
 
+            # A form save (including older clients and renames) cannot silently
+            # downgrade a host-bound ACP connection to generic SCO credentials.
+            for row in server_rows:
+                if not isinstance(row, dict) or row.get("backend") != "sensecore_acp":
+                    continue
+                previous = old_by_id.get(renames.get(row.get("id"), row.get("id")))
+                if previous is not None and previous.acp_protected_auth:
+                    row["acp_protected_auth"] = True
+
             # Persist deletion intent before applying automatic synchronization.
             # Otherwise a Host removed from the editor is immediately appended
             # again from the still-valid SSH Config (and again after restart).
@@ -3859,6 +3903,10 @@ class AppApi:
                 server_id = row.get("id")
                 row.pop("auth_ref", None)
                 old_server = old_by_id.get(renames.get(server_id, server_id))
+                if row.get("backend") == "sensecore_acp":
+                    if updates.get(server_id) is not None:
+                        raise ConfigError("云平台任务认证属于本机已登录的平台命令配置")
+                    continue
                 if server_id in updates:
                     new_value = updates[server_id]
                     if new_value is not None:
@@ -5360,6 +5408,7 @@ def build_runtime(
         startup_notices=startup_notices,
         ssh_recovery=HostSshRecovery(paths.config / "ssh-recovery.json", profile.id),
         ssh_transport=HostSshTransport(paths.config / "ssh-transport.json", profile.id),
+        acp_transport=HostAcpTransport(paths.config / "acp-transport.json", profile.id),
     )
     return paths, store, profile, service
 

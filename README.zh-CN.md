@@ -125,6 +125,9 @@ https://github.com/XinbaoQiao/VRAMRadar/raw/main/docs/assets/readme/vram-radar-d
 
 ## 使用
 
+开发版新增 **云平台任务**监控（SenseCore ACP），配置和能力边界见
+[ACP 接入说明](docs/sensecore-acp.md)。此功能尚未发布到上述公共安装包。
+
 1. 启动 VRAM Radar，检查自动发现的 SSH 别名。
 2. 确认每台服务器是 Direct SSH 还是 Slurm，保存后打开资源视图。监控本机时，添加
    服务器并将连接类型选为 **本地 GPU（NVIDIA / AMD / Intel）**。

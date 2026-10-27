@@ -3199,6 +3199,10 @@ def query_server(
     password: str | None = None,
     identities_only: bool = False,
 ) -> dict[str, Any]:
+    if server.backend == "sensecore_acp":
+        from .acp import query_sensecore_acp
+
+        return query_sensecore_acp(server)
     if server.backend == "local":
         from .local_gpu import query_local_gpu
 

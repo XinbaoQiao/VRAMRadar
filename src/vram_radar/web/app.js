@@ -364,25 +364,26 @@ const stateLabel = state => ({
   connecting: '正在配置中', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
   security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '监控已暂停'
 })[state] || state;
-const backendLabel = backend => backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
+const backendLabel = backend => backend === 'sensecore_acp' ? '云平台任务' : backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
 const taskStateLabel = state => ({
-  PENDING: '排队中', RUNNING: '运行中', COMPLETING: '收尾中', CONFIGURING: '准备中', SUSPENDED: '已暂停',
-  COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消', TIMEOUT: '超时', OUT_OF_MEMORY: '任务内存不足'
+  PENDING: '排队中', QUEUEING: '排队中', WAIT_QUOTA: '等待额度', STARTING: '启动中',
+  RUNNING: '运行中', COMPLETING: '收尾中', CONFIGURING: '准备中', SUSPENDED: '已暂停',
+  COMPLETED: '已完成', SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消',
+  TIMEOUT: '超时', OUT_OF_MEMORY: '任务内存不足', UNKNOWN: '未知'
 })[state] || state;
 const taskStateClass = state => ({
-  PENDING: 'pending', RUNNING: 'running', COMPLETING: 'running', CONFIGURING: 'pending', SUSPENDED: 'warning',
-  COMPLETED: 'completed', FAILED: 'failed', CANCELLED: 'cancelled', TIMEOUT: 'failed', OUT_OF_MEMORY: 'failed'
+  PENDING: 'pending', QUEUEING: 'pending', WAIT_QUOTA: 'pending', STARTING: 'pending',
+  RUNNING: 'running', COMPLETING: 'running', CONFIGURING: 'pending', SUSPENDED: 'warning',
+  COMPLETED: 'completed', SUCCEEDED: 'completed', FAILED: 'failed', CANCELLED: 'cancelled',
+  TIMEOUT: 'failed', OUT_OF_MEMORY: 'failed', UNKNOWN: 'neutral'
 })[state] || 'neutral';
 const taskStateIcon = state => ({
-  PENDING: 'clock', RUNNING: 'play', COMPLETING: 'clock', CONFIGURING: 'clock', SUSPENDED: 'pause',
-  COMPLETED: 'check', FAILED: 'alert', CANCELLED: 'cancelled', TIMEOUT: 'clock', OUT_OF_MEMORY: 'memory'
+  PENDING: 'clock', QUEUEING: 'clock', WAIT_QUOTA: 'clock', STARTING: 'clock',
+  RUNNING: 'play', COMPLETING: 'clock', CONFIGURING: 'clock', SUSPENDED: 'pause',
+  COMPLETED: 'check', SUCCEEDED: 'check', FAILED: 'alert', CANCELLED: 'cancelled',
+  TIMEOUT: 'clock', OUT_OF_MEMORY: 'memory', UNKNOWN: 'clock'
 })[state] || 'clock';
 
-function clampUiZoom(value) {
-  const numberValue = Number(value);
-  if (!Number.isFinite(numberValue)) return 1;
-  return Math.min(UI_ZOOM_MAX, Math.max(UI_ZOOM_MIN, Math.round(numberValue * 100) / 100));
-}
 
 function loadUiZoomPreference() {
   try {
@@ -531,9 +532,10 @@ function statusTonePalette(tone) {
 }
 
 function capacityTape(summary) {
+  const freeKnown = summary.free_vram_gib != null;
   const free = Math.max(0, Number(summary.free_vram_gib) || 0);
   const total = Number(summary.total_vram_gib);
-  const totalKnown = Number.isFinite(total) && total > 0;
+  const totalKnown = freeKnown && Number.isFinite(total) && total > 0;
   const percent = totalKnown ? Math.max(0, Math.min(100, Math.round(free / total * 100))) : null;
   const tone = percent == null ? 'unknown' : percent <= 15 ? 'critical' : percent <= 30 ? 'warning' : 'healthy';
   const toneLabel = tone === 'critical' ? '紧张' : tone === 'warning' ? '偏低' : tone === 'healthy' ? '充足' : '未知';
@@ -564,12 +566,16 @@ function capacityTape(summary) {
   const totalLabel = totalKnown ? `总量 ${number(total)} GiB` : '总量待补充';
   const accessible = totalKnown
     ? `在线显存池，可用 ${number(free)} GiB，共 ${number(total)} GiB，可用率 ${percent}%，状态${toneLabel}`
-    : `在线显存池，可用 ${number(free)} GiB，总量暂不可用`;
-  return `<div class="capacity-visual ${tone}" role="img" aria-label="${escapeHtml(accessible)}"><div class="capacity-visual-head"><span>可用比例</span><strong>${percentLabel}</strong></div><svg class="capacity-tape" viewBox="0 0 320 72" aria-hidden="true" focusable="false"><defs>${cellGrads.join('')}</defs><rect class="tape-frame" x="8" y="14" width="304" height="46" rx="4"></rect>${cells}<path class="tape-baseline" d="M8 66h304"></path><path class="tape-ticks" d="M8 66v4M104 66v4M200 66v4M312 66v4"></path></svg><div class="capacity-scale"><span>0 GiB</span><span>${escapeHtml(totalLabel)}</span></div></div>`;
+    : freeKnown ? `在线显存池，可用 ${number(free)} GiB，总量暂不可用` : '平台未提供实时显存';
+  return `<div class="capacity-visual ${tone}" role="img" aria-label="${escapeHtml(accessible)}"><div class="capacity-visual-head"><span>可用比例</span><strong>${percentLabel}</strong></div><svg class="capacity-tape" viewBox="0 0 320 72" aria-hidden="true" focusable="false"><defs>${cellGrads.join('')}</defs><rect class="tape-frame" x="8" y="14" width="304" height="46" rx="4"></rect>${cells}<path class="tape-baseline" d="M8 66h304"></path><path class="tape-ticks" d="M8 66v4M104 66v4M200 66v4M312 66v4"></path></svg><div class="capacity-scale"><span>${freeKnown ? '0 GiB' : '—'}</span><span>${escapeHtml(totalLabel)}</span></div></div>`;
 }
 
 function renderSummary(summary) {
-  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">所有监控就绪 GPU 合计</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">连接就绪 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span data-i18n-count="${escapeHtml(String(summary.total_gpus ?? ''))}">块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
+  const unknownPlatforms = Number(summary.unknown_capacity_servers) || 0;
+  const capacityScope = unknownPlatforms
+    ? `<span>已知 GPU 合计</span> · <span>容量未知的平台：</span>${number(unknownPlatforms)}`
+    : '所有监控就绪 GPU 合计';
+  return `<article class="metric capacity-metric"><div class="metric-copy"><div class="metric-label">当前可用显存</div><div class="metric-value"><strong>${number(summary.free_vram_gib)}</strong><span>GiB</span></div><div class="metric-detail">${capacityScope}</div></div>${capacityTape(summary)}</article><div class="metric-stack"><article class="metric compact-metric"><div class="metric-label">监控就绪</div><div class="metric-value"><strong>${number(summary.online_servers)}</strong><span>/ ${number(summary.total_servers)}</span></div><div class="metric-detail">连接就绪 / 资源已读取</div></article><article class="metric compact-metric"><div class="metric-label">已读取 GPU</div><div class="metric-value"><strong>${number(summary.total_gpus)}</strong><span data-i18n-count="${escapeHtml(String(summary.total_gpus ?? ''))}">块</span></div><div class="metric-detail">仅统计当前成功读取的数据</div></article></div>`;
 }
 
 function setRefreshClock(text, active = false) {
@@ -1162,6 +1168,7 @@ function accountForServer(server) {
 }
 
 function renderAccountOverview(server) {
+  if (server.backend === 'sensecore_acp') return '';
   const account = accountForServer(server);
   if (!account.username && !account.home_directory) return '';
   const user = account.username
@@ -1941,7 +1948,7 @@ function renderDirectoryRootBar(serverId, state) {
 }
 
 function renderDirectoryModule(server) {
-  if (server.backend === 'local') return '';
+  if (server.backend === 'sensecore_acp' || server.backend === 'local') return '';
   const account = accountForServer(server);
   const state = directoryTrees.get(server.server_id);
   if (!account.home_directory && state?.status !== 'loaded') return '';
@@ -2232,6 +2239,7 @@ function renderError(server) {
 }
 
 function renderConfiguring(server) {
+  if (server.backend === 'sensecore_acp') return '<div class="configuring-panel" role="status">正在读取平台任务（只读，不会提交任务）。</div>';
   if (server.backend === 'local') {
     return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在读取本地 GPU</div><div class="configuring-copy">只读显存、GPU 利用率和温度；不会启动计算任务。</div></div></div>`;
   }
@@ -2285,8 +2293,8 @@ function renderServerQuickActions(server) {
   const favorite = favoriteServerIds.has(serverId);
   const pinned = pinnedServerIds.has(serverId);
   const enabled = serverIsEnabled(serverId);
-  const copySsh = server.backend !== 'local' && api?.get_ssh_command ? `<button class="button compact-button copy-server-ssh" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="复制 SSH 命令" title="复制 SSH 命令">${icon('copy')}<span>复制 SSH</span></button>` : '';
-  const openTerminal = server.backend !== 'local' && api?.open_terminal
+  const copySsh = server.backend !== 'local' && server.backend !== 'sensecore_acp' && api?.get_ssh_command ? `<button class="button compact-button copy-server-ssh" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="复制 SSH 命令" title="复制 SSH 命令">${icon('copy')}<span>复制 SSH</span></button>` : '';
+  const openTerminal = server.backend !== 'local' && server.backend !== 'sensecore_acp' && api?.open_terminal
     ? `<button class="button compact-button open-terminal" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="打开服务器终端" title="打开终端">${icon('terminal')}<span>打开终端</span></button>`
     : '';
   return `<div class="server-quick-actions"><button class="button compact-button pin-server${pinned ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${pinned}" aria-label="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668') : localizedText('\u7f6e\u9876\u8fd9\u53f0\u670d\u52a1\u5668')}" title="${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}">${icon('pin')}<span>${pinned ? localizedText('\u53d6\u6d88\u7f6e\u9876') : localizedText('\u7f6e\u9876')}</span></button><button class="button compact-button favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${favorite}" aria-label="${favorite ? '取消收藏服务器' : '收藏服务器'}" title="${favorite ? '取消收藏' : '收藏服务器'}">${icon('star')}<span>${favorite ? '已收藏' : '收藏'}</span></button><button class="button compact-button collapse-server-modules" type="button" data-server-id="${escapeHtml(serverId)}" aria-label="收起模块" title="收起模块"><span>收起模块</span></button>${copySsh}${openTerminal}<button class="button compact-button toggle-server-monitoring" type="button" data-server-id="${escapeHtml(serverId)}" aria-pressed="${enabled}" aria-label="${enabled ? '暂停监控这台服务器' : '恢复监控这台服务器'}" title="${enabled ? '暂停监控' : '恢复监控'}">${icon(enabled ? 'pause' : 'play')}<span>${enabled ? '暂停' : '恢复'}</span></button></div>`;
@@ -3036,10 +3044,12 @@ function serverNavigatorOwnActivity(server) {
 }
 
 function serverNavigatorActivityCount(server) {
+  if (server.backend === 'sensecore_acp') return (server.tasks?.active || []).length;
   return serverNavigatorOwnActivity(server).length;
 }
 
 function serverNavigatorOwnTaskSummary(server) {
+  if (server.backend === 'sensecore_acp') return ''; // Workspace-visible jobs are not necessarily mine.
   const ownActivity = serverNavigatorOwnActivity(server);
   if (!ownActivity.length) return '';
   if (server.backend === 'slurm_ssh') {
@@ -3059,6 +3069,7 @@ function serverNavigatorOwnTaskSummary(server) {
 }
 
 function serverNavigatorResourceSummary(server) {
+  if (server.backend === 'sensecore_acp' && server.connection?.state === 'online') return '已读取平台任务 · 无实时显存';
   if (server.connection?.state !== 'online') return stateLabel(server.connection?.state || 'offline');
   const gpus = Number(server.total_gpus) || 0;
   if (server.backend === 'slurm_ssh' && server.slurm_capabilities?.node_allocation_detail === false) {
@@ -3073,6 +3084,7 @@ function serverNavigatorResourceSummary(server) {
 }
 
 function serverNavigatorHasAvailableResource(server) {
+  if (server.backend === 'sensecore_acp') return false;
   if (server.connection?.state !== 'online') return false;
   if (server.backend === 'slurm_ssh' && server.free_gpus != null) return Number(server.free_gpus) > 0;
   return Number(server.free_vram_gib) > 0;
@@ -3436,11 +3448,36 @@ function navigateRelativeServer(offset) {
   navigateToServer(visibleIds[targetIndex]);
 }
 
+function renderAcpPlatform(server) {
+  const platform = server.platform || {};
+  const jobs = Array.isArray(server.jobs) ? server.jobs : [];
+  const metaParts = [];
+  if (platform.workspace) metaParts.push(`工作区 ${platform.workspace}`);
+  if (platform.cluster) metaParts.push(`集群 ${platform.cluster}`);
+  if (platform.zone) metaParts.push(`可用区 ${platform.zone}`);
+  const meta = metaParts.length
+    ? `<p class="acp-platform-meta">${escapeHtml(metaParts.join(' · '))}</p>`
+    : '';
+  const count = `<p class="acp-platform-count">本页共 ${number(jobs.length)} 条任务</p>`;
+  const rows = jobs.map(job => {
+    const title = job.name || job.job_id || '';
+    const id = job.job_id || '';
+    const state = job.state || 'UNKNOWN';
+    const gpus = job.requested_gpus == null ? '—' : number(job.requested_gpus);
+    const reason = job.reason ? escapeHtml(job.reason) : '—';
+    const nameCell = `<div class="acp-job-name">${escapeHtml(title)}</div>${id && id !== title ? `<div class="acp-job-id">${escapeHtml(id)}</div>` : ''}`;
+    const stateCell = `<span class="task-badge ${escapeHtml(taskStateClass(state))}">${icon(taskStateIcon(state), 'ui-icon task-state-icon')}<strong>${escapeHtml(taskStateLabel(state))}</strong></span>`;
+    return `<tr><td>${nameCell}</td><td>${stateCell}</td><td class="acp-job-gpus">${gpus}</td><td class="acp-job-reason">${reason}</td></tr>`;
+  }).join('');
+  return `<div class="acp-platform-note" role="note"><strong>工作区任务（只读）</strong>${meta}<p>这里列出工作区里能看到的任务。申请 GPU 数量不代表已分到的空闲显存。</p><p>实时显存未提供；列表最多显示一页，不代表完整任务清单。</p>${count}</div><div class="table-wrap acp-job-table" role="region" aria-label="平台任务列表，可横向滚动"><table><caption class="sr-only">平台任务列表</caption><thead><tr><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">申请 GPU</th><th scope="col">说明</th></tr></thead><tbody>${rows || '<tr><td colspan="4">本次查询未返回任务</td></tr>'}</tbody></table></div>`;
+}
+
+
 function renderServer(server, index = 0) {
   const state = server.connection.state;
   const hasData = Boolean(server.view_kind);
   const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : state === 'connecting' ? '正在首次读取数据' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
-  const data = hasData ? (server.view_kind === 'live-memory' ? renderLiveTable(server) : renderSchedulerTable(server)) : '';
+  const data = hasData ? (server.backend === 'sensecore_acp' ? renderAcpPlatform(server) : server.view_kind === 'live-memory' ? renderLiveTable(server) : renderSchedulerTable(server)) : '';
   const body = state === 'online'
     ? data
     : state === 'connecting'
@@ -4220,11 +4257,21 @@ function scheduleResourceWatchEvaluation() {
   resourceWatchDebounceTimer = setTimeout(() => void evaluateResourceWatch(), 250);
 }
 
+function acpProfileFromDraft(draft, existing = {}) {
+  const text = key => String(draft[key] || '').trim();
+  return {id: text('id'), display_name: text('display_name'), backend: 'sensecore_acp',
+    enabled: draft.enabled !== false, connect_timeout_seconds: Number(existing.connect_timeout_seconds || 30),
+    acp_workspace: text('acp_workspace'), acp_cluster: text('acp_cluster'),
+    acp_zone: text('acp_zone'), acp_sco_path: text('acp_sco_path') || 'sco',
+    acp_profile: text('acp_profile') || 'default',
+    acp_protected_auth: existing.acp_protected_auth === true || draft.acp_protected_auth === true};
+}
+
 function serverDraftFromValue(server = {}, options = {}) {
   return {
     ...server,
     backend: server.auto_detect_backend ? 'auto' : (server.backend || 'auto'),
-    _detected_backend: server.backend === 'local' ? 'local' : server.backend === 'slurm_ssh' ? 'slurm_ssh' : 'direct_ssh',
+    _detected_backend: server.backend === 'sensecore_acp' ? 'sensecore_acp' : server.backend === 'local' ? 'local' : server.backend === 'slurm_ssh' ? 'slurm_ssh' : 'direct_ssh',
     _original_id: server.id || '',
     _original_ssh_alias: server.ssh_alias || '',
     _imported_candidate: options.importedCandidate === true,
@@ -4435,6 +4482,7 @@ function serverEditorHasUnsavedConnectionChanges(editor, savedServer) {
   const value = name => editor.querySelector(`[data-field="${name}"]`).value.trim();
   return value('id') !== String(savedServer.id || '')
     || value('backend') !== String(savedServer.backend || '')
+    || ['acp_workspace', 'acp_cluster', 'acp_zone', 'acp_sco_path', 'acp_profile'].some(field => value(field) !== String(savedServer[field] || ''))
     || value('ssh_alias') !== String(savedServer.ssh_alias || '')
     || value('host') !== String(savedServer.host || '')
     || Number(value('port') || 22) !== Number(savedServer.port || 22)
@@ -4805,16 +4853,21 @@ function addServerEditor(server = {}, options = {}) {
   refreshKeyMode();
   const refreshCapabilities = () => {
     const backend = editor.querySelector('[data-field="backend"]').value;
+    const acp = backend === 'sensecore_acp';
     const local = backend === 'local';
+    editor.querySelectorAll('[data-acp-setting]').forEach(field => { field.hidden = !acp; });
     ['ssh_alias', 'host'].forEach(field => {
-      editor.querySelector(`[data-field="${field}"]`).closest('label').hidden = local;
+      editor.querySelector(`[data-field="${field}"]`).closest('label').hidden = local || acp;
     });
-    editor.querySelector('.primary-help').hidden = local;
-    editor.querySelector('.ssh-key-setup').hidden = local;
-    editor.querySelector('.server-command-setting').hidden = local;
-    editor.querySelector('.server-editor-more-body > .editor-help').hidden = local;
+    editor.querySelector('[data-field="backend"]').closest('label').querySelector('small').hidden = acp || local;
+    editor.querySelector('[data-auth-overview]').hidden = acp;
+    editor.querySelector('.server-editor-more > summary strong').textContent = acp ? '本地标识' : '登录与高级设置';
+    editor.querySelector('.primary-help').hidden = local || acp;
+    editor.querySelector('.ssh-key-setup').hidden = local || acp;
+    editor.querySelector('.server-command-setting').hidden = local || acp;
+    editor.querySelector('.server-editor-more-body > .editor-help').hidden = local || acp;
     editor.querySelector('.server-editor-more-body').querySelectorAll('label').forEach(label => {
-      if (!label.querySelector('[data-field="id"]')) label.hidden = local;
+      if (!label.querySelector('[data-field="id"]')) label.hidden = local || acp;
     });
     const slurm = backend === 'slurm_ssh' || (backend === 'auto' && values._detected_backend === 'slurm_ssh');
     editor.querySelectorAll('[data-slurm-environment]').forEach(field => { field.hidden = !slurm; });
@@ -4920,8 +4973,13 @@ function invalidServerDraft() {
     const serverIdKey = serverId.toLowerCase();
     if (seenIds.has(serverIdKey)) return {index, field: 'id', message: '服务器 ID 与前面的服务器重复（不区分大小写）'};
     seenIds.add(serverIdKey);
-    if (draft.backend !== 'local' && !String(draft.ssh_alias || '').trim() && !String(draft.host || '').trim()) {
+    if (draft.backend !== 'local' && draft.backend !== 'sensecore_acp' && !String(draft.ssh_alias || '').trim() && !String(draft.host || '').trim()) {
       return {index, field: 'ssh_alias', message: 'OpenSSH 别名与主机地址至少填写一个'};
+    }
+    if (draft.backend === 'sensecore_acp') {
+      for (const field of ['acp_workspace', 'acp_cluster', 'acp_zone']) {
+        if (!String(draft[field] || '').trim()) return {index, field, message: '请填写 工作区、集群和可用区'};
+      }
     }
     const port = Number(draft.port || 22);
     if (!Number.isInteger(port) || port < 1 || port > 65535) return {index, field: 'port', message: '端口必须在 1 到 65535 之间'};
@@ -5307,6 +5365,9 @@ function collectProfile() {
     const existingId = draft._original_id || value('id');
     const existing = currentProfile?.servers?.find(item => item.id === existingId);
     const selectedBackend = value('backend');
+    if (selectedBackend === 'sensecore_acp') {
+      return acpProfileFromDraft(draft, existing);
+    }
     if (selectedBackend === 'local') {
       return {id: value('id'), display_name: value('display_name'), backend: 'local',
         enabled: draft.enabled !== false, connect_timeout_seconds: 5};
@@ -5367,6 +5428,7 @@ function collectPasswordUpdates() {
   syncVisibleServerDrafts();
   const updates = {};
   settingsServerDrafts.forEach(draft => {
+    if (draft.backend === 'sensecore_acp') return;
     const serverId = String(draft.id || '').trim();
     const enteredValue = draft._password || '';
     const clearRequested = Boolean(draft._clear_password);

@@ -534,8 +534,13 @@ def _prepare_runtime_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("server payload must be an object")
     prepared = dict(payload)
     view_kind = prepared.get("view_kind")
-    if view_kind not in {"scheduler", "live-memory"}:
+    if view_kind not in {"scheduler", "live-memory", "platform"}:
         raise ValueError("server payload has an unsupported view kind")
+    if view_kind == "platform":
+        jobs = prepared.get("jobs", [])
+        if not isinstance(jobs, list) or len(jobs) > 10000 or not all(isinstance(item, dict) for item in jobs):
+            raise ValueError("platform payload has an invalid job list")
+        return prepared
     if view_kind != "scheduler":
         gpus = prepared.get("gpus", [])
         if not isinstance(gpus, list) or len(gpus) > 16_384 or not all(isinstance(item, dict) for item in gpus):
@@ -567,6 +572,9 @@ def connection_fingerprint(server: ServerProfile) -> str:
     payload = server.to_dict()
     for local_only in ("display_name", "enabled", "auth_ref", "default_work_directory", "auto_imported"):
         payload.pop(local_only, None)
+    if server.backend == "sensecore_acp":
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     config_path = (
         resolve_ssh_config_path(server)
         if server.ssh_config_file
@@ -615,6 +623,22 @@ def _accepts_keyword(operation: Callable[..., Any], keyword: str) -> bool:
         parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == keyword
         for parameter in parameters
     )
+
+
+def platform_refresh_seconds(refresh_seconds: int, *, backend: str, payload_changed: bool) -> int:
+    """Return the next poll delay for one server.
+
+    SenseCore ACP only lists platform jobs (no live VRAM). When the page is
+    unchanged, wait longer so steady monitoring barely touches the remote API.
+    Active change still polls, but not faster than a 30s floor. Other backends
+    keep the profile interval.
+    """
+    delay = max(5, int(refresh_seconds))
+    if backend != "sensecore_acp":
+        return delay
+    if payload_changed:
+        return min(300, max(delay, 30))
+    return min(300, max(delay * 4, 60))
 
 
 @dataclass
@@ -673,6 +697,7 @@ class DashboardService:
         profile_persist: Callable[[Profile], bool] | None = None,
         ssh_recovery: Callable[[ServerProfile], bool | None] | None = None,
         ssh_transport: Callable | None = None,
+        acp_transport: Callable | None = None,
     ) -> None:
         self.profile = profile
         self.cache = cache
@@ -686,6 +711,7 @@ class DashboardService:
         self.profile_persist = profile_persist
         self.ssh_recovery = ssh_recovery
         self.ssh_transport = ssh_transport
+        self.acp_transport = acp_transport
         # server ids already warned for a stale host-transport pin (avoid log spam)
         self._transport_config_warned: set[str] = set()
         self.profile_mutation_lock = threading.RLock()
@@ -893,7 +919,11 @@ class DashboardService:
             runtime.error = None
             runtime.failure_count = 0
             runtime.retry_at = None
-            runtime.next_attempt_monotonic = self.clock() + self.profile.refresh_seconds
+            runtime.next_attempt_monotonic = self.clock() + platform_refresh_seconds(
+                self.profile.refresh_seconds,
+                backend=runtime.server.backend,
+                payload_changed=payload_changed,
+            )
             self._touch_locked()
             should_persist = payload_changed or connection_recovered or runtime.cache_dirty
             server_for_cache = runtime.server
@@ -1270,6 +1300,17 @@ class DashboardService:
         server: ServerProfile,
         operation: Callable[..., dict[str, Any]],
     ) -> dict[str, Any]:
+        if server.backend == "sensecore_acp":
+            # An explicit host-only bridge takes precedence over ordinary SCO
+            # profiles; a broken registration must never fall back to another
+            # account. Neither route uses SSH/password recovery.
+            from .acp_transport import transport_scope
+            transport = self.acp_transport(server) if self.acp_transport is not None else None
+            if transport is None and server.acp_protected_auth:
+                raise ConnectorFailure("acp_transport_config_invalid", "Required protected ACP authorization is unavailable",
+                                       retryable=False, state="security_blocked")
+            with transport_scope(server, transport):
+                return operation(server)
         # Resolve an optional host password-transport registration without
         # letting a stale pin block OpenSSH key/agent auth.  Order is always:
         # key/config first, then host transport, then secret-store password.
@@ -1464,6 +1505,8 @@ class DashboardService:
             if not runtime.server.enabled:
                 return {"ok": False, "error": "这台服务器已暂停监控", "code": "server_disabled"}
             server = runtime.server
+            if server.backend == "sensecore_acp":
+                return {"ok": False, "error": "ACP 文件访问请使用平台存储工具", "code": "platform_directory_unavailable"}
             selected_root = root_path if root_path is not None else (server.default_work_directory or None)
             root_source = "requested" if root_path is not None else (
                 "pinned" if server.default_work_directory else "auto"
@@ -1777,6 +1820,7 @@ class DashboardService:
             ]
             online = [item for item in servers if item["connection"]["state"] == "online"]
             online_with_gpus = [item for item in online if int(item.get("total_gpus") or 0) > 0]
+            unknown_capacity_servers = sum(item.get("view_kind") == "platform" for item in online)
             capacity_totals = [item.get("total_vram_gib") for item in online_with_gpus]
             total_capacity_known = all(value is not None for value in capacity_totals)
             total_vram_gib = (
@@ -1791,6 +1835,9 @@ class DashboardService:
                 if free_capacity_known
                 else None
             )
+            if unknown_capacity_servers and not online_with_gpus:
+                total_vram_gib = None
+                free_vram_gib = None
             data_age_seconds = max(0.0, self.clock() - self._last_updated_monotonic)
             return {
                 "app": "vram-radar",
@@ -1815,7 +1862,8 @@ class DashboardService:
                     "total_servers": len(servers),
                     "online_servers": len(online),
                     "stale_servers": sum(item["connection"]["state"] == "stale" for item in servers),
-                    "total_gpus": sum(int(item.get("total_gpus") or 0) for item in online),
+                    "total_gpus": None if unknown_capacity_servers and not online_with_gpus else sum(int(item.get("total_gpus") or 0) for item in online),
+                    "unknown_capacity_servers": unknown_capacity_servers,
                     "total_vram_gib": total_vram_gib,
                     "free_vram_gib": free_vram_gib,
                 },

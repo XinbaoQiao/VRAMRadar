@@ -1995,6 +1995,36 @@ class ShellApiTests(unittest.TestCase):
             self.assertEqual(store.load("local").ui_language, "en")
             tray_controller.refresh_menu.assert_called_once_with()
 
+    def test_profile_save_cannot_drop_protected_acp_auth(self):
+        for rename in (False, True):
+            for supplied in (None, False):
+                with self.subTest(rename=rename, supplied=supplied), tempfile.TemporaryDirectory() as temporary:
+                    raw = Profile.empty("local").to_dict()
+                    raw["servers"] = [{
+                        "id": "acp", "backend": "sensecore_acp", "display_name": "ACP",
+                        "acp_workspace": "workspace", "acp_cluster": "cluster",
+                        "acp_zone": "zone", "acp_profile": "default",
+                        "acp_protected_auth": True,
+                    }]
+                    profile = Profile.from_dict(raw)
+                    paths = storage_paths(Path(temporary))
+                    store = ProfileStore(paths)
+                    api = AppApi(profile, store, paths, Mock())
+                    candidate = profile.to_dict()
+                    row = candidate["servers"][0]
+                    row.pop("acp_protected_auth")
+                    if supplied is not None:
+                        row["acp_protected_auth"] = supplied
+                    if rename:
+                        row["id"] = "renamed"
+                    result = api.save_profile(
+                        self.versioned_profile(api, candidate),
+                        renamed_server_ids={"renamed": "acp"} if rename else {},
+                    )
+                    self.assertTrue(result["ok"], result)
+                    self.assertTrue(result["profile"]["servers"][0]["acp_protected_auth"])
+                    self.assertTrue(store.load("local").servers[0].acp_protected_auth)
+
     def test_auto_sync_save_applies_catalog_immediately_and_matches_restart(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "profile-home"
@@ -3555,16 +3585,46 @@ class ShellApiTests(unittest.TestCase):
         shown = threading.Event()
         shown.set()
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = shown
         result = {}
 
         window_smoke_worker(window, result, timeout_seconds=0.1)
 
-        self.assertEqual(result, {"shown": True})
+        self.assertEqual(result, {"shown": True, "frontend_ready": True})
+        window.destroy.assert_called_once_with()
+
+    def test_gui_smoke_waits_for_frontend_after_shown(self):
+        window = Mock()
+        window.events.shown.wait.return_value = True
+        window.events.loaded.wait.return_value = True
+        window.evaluate_js.side_effect = [RuntimeError("bridge starting"), True, False, True, True]
+        result = {}
+
+        with patch("vram_radar.shell.time.sleep"):
+            window_smoke_worker(window, result, timeout_seconds=1)
+
+        self.assertTrue(result["frontend_ready"])
+        self.assertEqual(window.evaluate_js.call_count, 5)
+        window.destroy.assert_called_once_with()
+
+    def test_gui_smoke_visible_but_uninitialized_is_failure(self):
+        window = Mock()
+        window.events.shown.wait.return_value = True
+        window.events.loaded.wait.return_value = False
+        result = {}
+
+        window_smoke_worker(window, result, timeout_seconds=0.01)
+
+        self.assertFalse(result["shown"])
+        self.assertFalse(result["frontend_ready"])
+        self.assertIn("frontend", result["error"])
+        window.evaluate_js.assert_not_called()
         window.destroy.assert_called_once_with()
 
     def test_gui_smoke_times_out_and_still_closes_the_window(self):
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = threading.Event()
         result = {}
 
@@ -3576,6 +3636,7 @@ class ShellApiTests(unittest.TestCase):
 
     def test_gui_update_smoke_shares_one_timeout_budget(self):
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = Mock()
         window.events.shown.wait.return_value = True
         completed = Mock()
@@ -3584,7 +3645,7 @@ class ShellApiTests(unittest.TestCase):
 
         with patch(
             "vram_radar.shell.time.monotonic",
-            side_effect=[10.0, 10.01, 10.035],
+            side_effect=[10.0, 10.01, 10.02, 10.03, 10.035],
         ):
             window_smoke_worker(
                 window,
@@ -3605,6 +3666,7 @@ class ShellApiTests(unittest.TestCase):
         shown = threading.Event()
         shown.set()
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = shown
         completed = threading.Event()
         completed.set()
@@ -3627,13 +3689,14 @@ class ShellApiTests(unittest.TestCase):
         self.assertTrue(result["shown"])
         self.assertTrue(result["update_bridge"]["ok"])
         self.assertEqual(result["update_bridge_status"], "passed")
-        window.evaluate_js.assert_not_called()
+        self.assertEqual(window.evaluate_js.call_count, 2)
         window.destroy.assert_called_once_with()
 
     def test_gui_update_smoke_accepts_rate_limit_only_with_sibling_proof(self):
         shown = threading.Event()
         shown.set()
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = shown
         completed = threading.Event()
         completed.set()
@@ -3961,6 +4024,7 @@ class ShellApiTests(unittest.TestCase):
         shown = threading.Event()
         shown.set()
         window = Mock()
+        window.evaluate_js.return_value = True
         window.events.shown = shown
         request_shutdown = Mock()
         result = {}
@@ -3972,7 +4036,7 @@ class ShellApiTests(unittest.TestCase):
             request_shutdown=request_shutdown,
         )
 
-        self.assertEqual(result, {"shown": True})
+        self.assertEqual(result, {"shown": True, "frontend_ready": True})
         request_shutdown.assert_called_once_with()
         window.destroy.assert_not_called()
 

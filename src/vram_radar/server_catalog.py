@@ -42,7 +42,7 @@ SENSITIVE_KEY = re.compile(
     re.IGNORECASE,
 )
 MEMORY_SUFFIX = re.compile(r"(\d+(?:\.\d+)?)\s*G(?:B)?(?:$|[^A-Z])", re.IGNORECASE)
-BACKEND_MAP = {"ssh": "direct_ssh", "slurm": "slurm_ssh"}
+BACKEND_MAP = {"ssh": "direct_ssh", "slurm": "slurm_ssh", "acp": "sensecore_acp", "sensecore_acp": "sensecore_acp"}
 OPENSSH_PATTERN_CHARACTERS = frozenset("*!?[]")
 REMOTE_SSH_SETTINGS = (
     "Code/User/settings.json",
@@ -577,7 +577,7 @@ def import_server_catalog(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
         if backend is None:
             warnings.append(f"{server_id}: 不支持 backend={raw.get('backend')!r}，已跳过")
             continue
-        if not isinstance(alias, str) or not alias.strip():
+        if backend != "sensecore_acp" and (not isinstance(alias, str) or not alias.strip()):
             warnings.append(f"{server_id}: 缺少 OpenSSH Alias，已跳过")
             continue
         payload: dict[str, Any] = {
@@ -588,8 +588,22 @@ def import_server_catalog(path: str | Path) -> tuple[tuple[ServerProfile, ...], 
             # truthiness conversion would silently enable a server the author
             # explicitly intended to keep disabled.
             "enabled": raw.get("enabled", False),
-            "ssh_alias": alias.strip(),
+            "ssh_alias": alias.strip() if isinstance(alias, str) else "",
         }
+        if backend == "sensecore_acp":
+            if raw.get("acp_protected_auth", False) is not False:
+                warnings.append(f"{server_id}: protected ACP authentication is host-only and cannot be imported from a catalog")
+                continue
+            # Harness credentialctl registrations are not ordinary SCO profiles.
+            # Import only explicit portable monitor fields, never credentials or
+            # nested host-specific execution/profile configuration.
+            payload["ssh_alias"] = ""
+            for key in ("acp_workspace", "acp_cluster", "acp_zone", "acp_sco_path", "acp_profile"):
+                if key in raw:
+                    payload[key] = raw[key]
+            if not all(payload.get(key) for key in ("acp_workspace", "acp_cluster", "acp_zone")):
+                warnings.append(f"{server_id}: ACP requires explicit monitor workspace, cluster, zone and an authenticated local SCO profile; host credential profiles are not imported")
+                continue
         if backend == "slurm_ssh":
             payload["gpu_memory_gib"] = _memory_map(raw)
         try:
@@ -1366,7 +1380,12 @@ def profile_from_server_configs(
     for server_id in preserved_ids:
         imported = imported_by_id[server_id]
         existing = existing_by_id[server_id]
-        if imported_is_openssh[server_id]:
+        if existing.acp_protected_auth:
+            # Local authorization is bound to this complete connection. An
+            # imported row must never downgrade it or add SSH transport fields.
+            preserved.append(existing)
+            warnings.append(f"{existing.display_name}: protected ACP connection is host-only; imported changes were ignored")
+        elif imported_is_openssh[server_id]:
             # OpenSSH does not describe VRAMRadar semantics. Keep the user's
             # reviewed direct/Slurm choice and local display settings on sync.
             # Sibling-alias binding seeds the imported row with the local alias

@@ -65,9 +65,24 @@ class UsageParserTests(unittest.TestCase):
                 parse_usage(account, {})
 
 
+class _UsageFixtureDirectory(tempfile.TemporaryDirectory):
+    def cleanup(self):
+        # Windows may release a reaped child's cwd handle just after wait().
+        # Retry only that sharing violation; all other cleanup errors and a
+        # persistent lock remain failures. The fixture still asserts reaping.
+        deadline = time.monotonic() + 2.0
+        while True:
+            try:
+                return super().cleanup()
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != 32 or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+
 class UsageProcessTests(unittest.TestCase):
     def run_fixture(self, mode="ok", timeout=2, cancel=None):
-        with tempfile.TemporaryDirectory() as directory:
+        with _UsageFixtureDirectory() as directory:
             runtime = Path(directory)
             script = runtime / "fixture.py"
             script.write_text('''import sys, json, time, os

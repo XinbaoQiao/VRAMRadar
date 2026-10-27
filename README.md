@@ -141,6 +141,10 @@ Do not disable SmartScreen or Gatekeeper globally. See
 
 ## Usage
 
+The development build adds **cloud platform job** monitoring (SenseCore ACP) through an existing
+local SCO profile. See [setup and limitations](docs/sensecore-acp.md).
+This feature is not yet included in the public download linked above.
+
 1. Start VRAM Radar and review the SSH aliases it finds.
 2. Confirm whether each server uses Direct SSH or Slurm, save, and open the
    resource view. To monitor this computer, add a server and choose

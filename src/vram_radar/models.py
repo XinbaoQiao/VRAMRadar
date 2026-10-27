@@ -8,7 +8,7 @@ from typing import Any
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SAFE_SLURM_MODULE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/@:-]{0,255}$")
-SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh", "local"})
+SUPPORTED_BACKENDS = frozenset({"direct_ssh", "slurm_ssh", "local", "sensecore_acp"})
 SUPPORTED_CLOSE_BEHAVIORS = frozenset({"tray", "exit"})
 SUPPORTED_UI_LANGUAGES = frozenset({"zh-CN", "en"})
 SUPPORTED_SAVED_VIEW_FILTERS = frozenset({"all", "available", "tasks", "issues"})
@@ -304,6 +304,12 @@ class ServerProfile:
     auto_detect_backend: bool = False
     auto_imported: bool = False
     gpu_memory_gib: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_MEMORY_MAP))
+    acp_workspace: str = ""
+    acp_cluster: str = ""
+    acp_zone: str = ""
+    acp_sco_path: str = "sco"
+    acp_profile: str = "default"
+    acp_protected_auth: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "ServerProfile":
@@ -315,8 +321,28 @@ class ServerProfile:
             raise ConfigError(f"server {server_id} backend must be one of {sorted(SUPPORTED_BACKENDS)}")
         alias = require_optional_ssh_token(raw.get("ssh_alias", ""), f"server {server_id} ssh_alias")
         host = require_optional_ssh_token(raw.get("host", ""), f"server {server_id} host")
-        if backend != "local" and not alias and not host:
+        if backend not in {"local", "sensecore_acp"} and not alias and not host:
             raise ConfigError(f"server {server_id} requires ssh_alias or host")
+        acp_settings: dict[str, Any] = {}
+        protected_auth = require_bool(raw.get("acp_protected_auth", False), f"server {server_id} acp_protected_auth")
+        if protected_auth and backend != "sensecore_acp":
+            raise ConfigError("Protected ACP authentication requires the ACP backend")
+        if backend == "sensecore_acp":
+            acp_settings["acp_protected_auth"] = protected_auth
+            if any(raw.get(key) for key in (
+                "ssh_alias", "host", "username", "identity_file", "ssh_config_file", "auth_ref",
+                "slurm_module", "slurm_bin_directory", "slurm_init_script", "auto_detect_backend",
+            )):
+                raise ConfigError(f"server {server_id} ACP monitoring does not use SSH settings")
+            for key in ("acp_workspace", "acp_cluster", "acp_zone", "acp_profile"):
+                value = raw.get(key, "default" if key == "acp_profile" else "")
+                if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value):
+                    raise ConfigError(f"server {server_id} {key} must be a platform identifier")
+                acp_settings[key] = value
+            executable = require_optional_local_path(raw.get("acp_sco_path", "sco"), "ACP SCO executable")
+            if not executable or executable.lower().endswith((".cmd", ".bat", ".ps1", ".py")):
+                raise ConfigError("ACP SCO path must name a native executable, not a shell script")
+            acp_settings["acp_sco_path"] = executable
         if backend == "local" and any(raw.get(key) for key in (
             "ssh_alias", "host", "username", "identity_file", "ssh_config_file", "auth_ref",
             "slurm_module", "slurm_bin_directory", "slurm_init_script", "auto_detect_backend",
@@ -412,6 +438,7 @@ class ServerProfile:
                 f"server {server_id} auto_imported",
             ),
             gpu_memory_gib=memory,
+            **acp_settings,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -449,6 +476,11 @@ class ServerProfile:
                 result[key] = value
         if self.backend == "slurm_ssh":
             result["gpu_memory_gib"] = self.gpu_memory_gib
+        if self.backend == "sensecore_acp":
+            for key in ("acp_workspace", "acp_cluster", "acp_zone", "acp_sco_path", "acp_profile"):
+                result[key] = getattr(self, key)
+            if self.acp_protected_auth:
+                result["acp_protected_auth"] = True
         return result
 
 
