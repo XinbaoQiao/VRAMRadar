@@ -74,6 +74,7 @@ console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',clu
         self.assertIn("只读", result)
         self.assertIn("acp-platform-tag", result)
         self.assertIn("acp-job-main", result)
+        self.assertIn("acp-state", result)
         self.assertIn("&lt;script&gt;", result)
         self.assertIn("排队", result)
 

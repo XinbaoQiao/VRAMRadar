@@ -369,12 +369,14 @@ const taskStateLabel = state => ({
   PENDING: '排队', QUEUEING: '排队', WAIT_QUOTA: '等配额', STARTING: '启动',
   RUNNING: '运行', COMPLETING: '收尾', CONFIGURING: '准备', SUSPENDED: '暂停',
   COMPLETED: '完成', SUCCEEDED: '完成', FAILED: '失败', CANCELLED: '取消',
+  DELETING: '删除中', DELETED: '已删除',
   TIMEOUT: '超时', OUT_OF_MEMORY: '内存不足', UNKNOWN: '—'
 })[state] || state;
 const taskStateClass = state => ({
   PENDING: 'pending', QUEUEING: 'pending', WAIT_QUOTA: 'pending', STARTING: 'pending',
   RUNNING: 'running', COMPLETING: 'running', CONFIGURING: 'pending', SUSPENDED: 'warning',
   COMPLETED: 'completed', SUCCEEDED: 'completed', FAILED: 'failed', CANCELLED: 'cancelled',
+  DELETING: 'neutral', DELETED: 'neutral',
   TIMEOUT: 'failed', OUT_OF_MEMORY: 'failed', UNKNOWN: 'neutral'
 })[state] || 'neutral';
 const taskStateIcon = state => ({
@@ -2235,7 +2237,7 @@ function renderError(server) {
   const cached = connection.data_origin === 'cache';
   const securityBlocked = error.code === 'host_key_changed';
   const revalidate = disabled || securityBlocked ? '' : `<button class="button primary retry-server" type="button" data-server-id="${escapeHtml(server.server_id)}">重新验证</button>`;
-  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。上次读取的数据仅供参考，不计入顶部当前统计。' : '。当前没有可显示的 GPU 数据。'}</div></div><div class="error-actions">${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
+  return `<div class="error-panel"><div class="error-symbol" aria-hidden="true">${icon('alert')}</div><div><div class="error-title">${escapeHtml(error.message)}</div><div class="error-copy">错误代码：${escapeHtml(error.code)}${cached ? ` · 最后成功：${escapeHtml(formatTime(connection.last_success_at))}` : ''}${retry ? ` · ${escapeHtml(retry)}` : ''}${cached ? '。上次读取的数据仅供参考，不计入顶部当前统计。' : (server.backend === 'sensecore_acp' ? '。当前没有可显示的任务列表。' : '。当前没有可显示的 GPU 数据。')}</div></div><div class="error-actions">${revalidate}<button class="button open-settings" type="button">连接设置</button>${api?.get_redacted_diagnostics ? `<button class="button copy-server-diagnostics" type="button" data-server-id="${escapeHtml(server.server_id)}">复制诊断</button>` : ''}${api?.open_logs_directory ? '<button class="button open-logs" type="button">打开日志</button>' : ''}</div></div>`;
 }
 
 function renderConfiguring(server) {
@@ -3455,6 +3457,7 @@ function renderAcpPlatform(server) {
   if (platform.workspace) metaBits.push(platform.workspace);
   if (platform.cluster) metaBits.push(platform.cluster);
   if (platform.zone) metaBits.push(platform.zone);
+  const showGpus = jobs.some(job => job.requested_gpus != null || job.gpu_count != null);
   const meta = metaBits.length
     ? `<div class="acp-platform-meta">${escapeHtml(metaBits.join(' · '))}</div>`
     : '';
@@ -3462,26 +3465,31 @@ function renderAcpPlatform(server) {
     const title = job.name || job.job_id || '';
     const id = job.job_id || '';
     const state = job.state || 'UNKNOWN';
-    const gpus = job.requested_gpus == null ? '—' : number(job.requested_gpus);
+    const gpuValue = job.requested_gpus != null ? job.requested_gpus
+      : (job.gpu_count != null ? job.gpu_count : null);
+    const gpus = gpuValue == null ? '—' : number(gpuValue);
     const reason = job.reason ? escapeHtml(job.reason) : '';
-    const idLine = (id && id !== title)
-      ? `<div class="acp-job-id">${escapeHtml(id)}</div>`
+    const idBit = (id && id !== title)
+      ? `<span class="acp-job-id">${escapeHtml(id)}</span>`
       : '';
     const reasonLine = reason
       ? `<div class="acp-job-reason">${reason}</div>`
       : '';
+    const gpuCell = showGpus ? `<td class="acp-job-gpus">${gpus}</td>` : '';
     return `<tr>
-      <td class="acp-job-main"><div class="acp-job-name">${escapeHtml(title)}</div>${idLine}${reasonLine}</td>
-      <td class="acp-job-state"><span class="task-badge ${escapeHtml(taskStateClass(state))}">${icon(taskStateIcon(state), 'ui-icon task-state-icon')}<strong>${escapeHtml(taskStateLabel(state))}</strong></span></td>
-      <td class="acp-job-gpus">${gpus}</td>
+      <td class="acp-job-main"><div class="acp-job-name">${escapeHtml(title)}${idBit}</div>${reasonLine}</td>
+      <td class="acp-job-state"><span class="task-badge acp-state ${escapeHtml(taskStateClass(state))}"><strong>${escapeHtml(taskStateLabel(state))}</strong></span></td>
+      ${gpuCell}
     </tr>`;
   }).join('');
-  const empty = `<tr class="acp-job-empty"><td colspan="3">暂无任务</td></tr>`;
+  const colCount = showGpus ? 3 : 2;
+  const empty = `<tr class="acp-job-empty"><td colspan="${colCount}">暂无任务</td></tr>`;
+  const gpuHead = showGpus ? '<th scope="col">GPU</th>' : '';
   return `<section class="acp-platform" aria-label="云任务">
     <header class="acp-platform-head">
       <div class="acp-platform-title">
         <strong>云任务</strong>
-        <span class="acp-platform-count">${number(jobs.length)}</span>
+        <span class="acp-platform-count">${number(jobs.length)} 条</span>
         <span class="acp-platform-tag">只读</span>
       </div>
       ${meta}
@@ -3489,7 +3497,7 @@ function renderAcpPlatform(server) {
     <div class="table-wrap acp-job-table" role="region" aria-label="任务列表">
       <table>
         <caption class="sr-only">任务列表</caption>
-        <thead><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">GPU</th></tr></thead>
+        <thead><tr><th scope="col">任务</th><th scope="col">状态</th>${gpuHead}</tr></thead>
         <tbody>${rows || empty}</tbody>
       </table>
     </div>
@@ -3500,7 +3508,14 @@ function renderAcpPlatform(server) {
 function renderServer(server, index = 0) {
   const state = server.connection.state;
   const hasData = Boolean(server.view_kind);
-  const metadata = `${backendLabel(server.backend)} · ${state === 'online' ? '刚刚更新' : state === 'connecting' ? '正在首次读取数据' : `最后成功：${formatTime(server.connection.last_success_at)}`}`;
+    const freshness = state === 'online'
+    ? '刚刚更新'
+    : state === 'connecting'
+      ? '正在首次读取…'
+      : `最后成功：${formatTime(server.connection.last_success_at)}`;
+  const metadata = server.backend === 'sensecore_acp'
+    ? freshness
+    : `${backendLabel(server.backend)} · ${freshness}`;
   const data = hasData ? (server.backend === 'sensecore_acp' ? renderAcpPlatform(server) : server.view_kind === 'live-memory' ? renderLiveTable(server) : renderSchedulerTable(server)) : '';
   const body = state === 'online'
     ? data
@@ -3508,7 +3523,7 @@ function renderServer(server, index = 0) {
       ? `${renderConfiguring(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`
       : `${renderError(server)}${hasData ? `<div class="stale-data">${data}</div>` : ''}`;
   const position = String(index + 1).padStart(2, '0');
-  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card${serverIsPaused(server) ? ' is-paused' : ''} ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><div class="server-head-sentinel" aria-hidden="true"></div><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div><div class="server-location-strip" aria-live="polite"><span class="server-location-text"></span><button type="button" class="button compact-button server-location-home" data-server-id="${escapeHtml(server.server_id)}">回到本机</button></div></header>${body}${renderDirectoryModule(server)}</div></article>`;
+  return `<article id="${escapeHtml(serverCardAnchor(server.server_id))}" class="server-card${serverIsPaused(server) ? ' is-paused' : ''}${server.backend === 'sensecore_acp' ? ' is-acp' : ''} ${escapeHtml(state)}" data-server-id="${escapeHtml(server.server_id)}"><aside class="server-rail" aria-hidden="true"><span>${position}</span>${serverGlyph(server.backend)}</aside><div class="server-surface"><div class="server-head-sentinel" aria-hidden="true"></div><header class="server-head"><div class="server-identity"><h3 class="server-name">${escapeHtml(server.display_name)}</h3><div class="server-meta">${escapeHtml(metadata)}</div></div>${renderAccountOverview(server)}<div class="server-head-controls"><span class="server-status"><i class="status-dot ${escapeHtml(state)}"></i><span class="server-status-label">${escapeHtml(stateLabel(state))}</span></span>${renderServerQuickActions(server)}</div><div class="server-location-strip" aria-live="polite"><span class="server-location-text"></span><button type="button" class="button compact-button server-location-home" data-server-id="${escapeHtml(server.server_id)}">回到本机</button></div></header>${body}${renderDirectoryModule(server)}</div></article>`;
 }
 
 function serverCardRenderSignature(server, index) {

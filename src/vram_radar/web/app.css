@@ -1856,8 +1856,8 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .cpu-overview-help-body p + p { margin-top: 12px; }
 
 /* All peer panels share the same edges, including cached-data wrappers. */
-.server-surface > :is(.server-head, .table-wrap, .cpu-overview, .cluster-module, .large-cluster-overview, .error-panel),
-.server-surface > .stale-data > :is(.table-wrap, .cpu-overview, .cluster-module, .large-cluster-overview, .error-panel) {
+.server-surface > :is(.server-head, .table-wrap, .cpu-overview, .cluster-module, .large-cluster-overview, .error-panel, .acp-platform),
+.server-surface > .stale-data > :is(.table-wrap, .cpu-overview, .cluster-module, .large-cluster-overview, .error-panel, .acp-platform) {
   margin-inline: var(--server-content-inset);
   min-width: 0;
 }
@@ -2311,30 +2311,35 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 
 
-/* ACP cloud-task panel — compact practical layout */
+/* ACP cloud-task panel — quiet ops list, aligned to card inset */
 .acp-platform {
   display: grid;
-  gap: 10px;
+  gap: 0;
   margin: 0;
+  padding: 0 0 8px;
   text-align: left;
+  border-top: 1px solid var(--border);
 }
 
 .acp-platform-head {
-  display: grid;
-  gap: 4px;
+  display: block;
+  padding: 10px 0 6px;
 }
 
 .acp-platform-title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   min-width: 0;
+  width: 100%;
 }
 
 .acp-platform-title strong {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--muted);
+  letter-spacing: 0.01em;
 }
 
 .acp-platform-count {
@@ -2344,19 +2349,26 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 
 .acp-platform-tag {
-  margin-left: auto;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  margin-left: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.35;
+  background: transparent;
+}
+
+.acp-platform-tag::before {
+  content: "· ";
 }
 
 .acp-platform-meta {
-  margin: 0;
+  margin: 2px 0 0;
+  max-width: 100%;
   color: var(--muted);
-  font-size: var(--font-caption, 12px);
+  font-family: var(--data-font);
+  font-size: 11px;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2370,65 +2382,317 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .acp-job-table table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .acp-job-table th,
 .acp-job-table td {
-  padding: 8px 10px;
+  padding: 5px 0;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  vertical-align: middle;
   text-align: left;
 }
 
 .acp-job-table th {
+  padding-top: 0;
+  padding-bottom: 6px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   text-transform: none;
+  white-space: nowrap;
+}
+
+.acp-job-table th:nth-child(2),
+.acp-job-table td.acp-job-state {
+  width: 4.75rem;
+  padding-left: 12px;
+}
+
+.acp-job-table th:nth-child(3),
+.acp-job-table td.acp-job-gpus {
+  width: 3.25rem;
+  padding-left: 10px;
+  text-align: right;
 }
 
 .acp-job-table tbody tr:last-child td {
   border-bottom: none;
 }
 
+.acp-job-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--text) 2.5%, transparent);
+}
+
 .acp-job-main {
   min-width: 0;
+  white-space: normal;
 }
 
 .acp-job-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  line-height: 1.35;
+  line-height: 1.4;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
-.acp-job-id,
+.acp-job-id {
+  margin-top: 0;
+  color: var(--muted);
+  font-family: var(--data-font);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
 .acp-job-reason {
-  margin-top: 2px;
+  margin-top: 3px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
   word-break: break-word;
+  white-space: normal;
 }
 
 .acp-job-state {
-  width: 1%;
+  width: 4.75rem;
   white-space: nowrap;
 }
 
+.acp-job-state .task-badge.acp-state {
+  min-height: 22px;
+  padding: 1px 6px;
+  gap: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.acp-job-state .task-badge.acp-state .ui-icon,
+.acp-job-state .task-badge.acp-state .task-state-icon {
+  display: none;
+}
+
 .acp-job-gpus {
-  width: 1%;
+  width: 3.25rem;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  color: var(--text);
-  font-size: 13px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
 }
 
 .acp-job-empty td {
   color: var(--muted);
   font-size: 12px;
-  padding: 14px 10px;
+  padding: 16px 0;
   text-align: center;
+  border-bottom: none;
+  white-space: normal;
+}
+
+/* Quieter failure strip on ACP cards — less alarm chrome */
+.server-card.is-acp > .server-surface > .error-panel,
+.server-card.is-acp > .server-surface > .stale-data > .error-panel {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 0 12px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+
+.server-card.is-acp .error-panel .error-symbol {
+  display: none;
+}
+
+.server-card.is-acp .error-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.server-card.is-acp .error-copy {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.server-card.is-acp .error-actions {
+  justify-content: flex-start;
+  align-content: start;
+}
+
+.server-card.is-acp .error-actions > button.button.primary {
+  background: var(--cyan-text);
+  border-color: var(--cyan-text);
+  color: var(--surface);
+  font-weight: 650;
+}
+
+/* ACP polish pass4 */
+.acp-job-table table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.acp-job-table th:first-child,
+.acp-job-table td.acp-job-main {
+  width: auto;
+}
+
+.acp-job-table th:nth-child(2),
+.acp-job-table td.acp-job-state {
+  width: 5.5em;
+  padding-left: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.acp-job-table td.acp-job-state .task-badge {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 3.2em;
+}
+
+.server-card.is-acp .error-panel {
+  gap: 6px;
+  padding: 8px 0 10px;
+}
+
+.server-card.is-acp .error-copy {
+  max-width: 62ch;
+}
+
+.server-card.is-acp .error-actions .button:not(.primary) {
+  background: transparent;
+  color: var(--muted);
+  border-color: transparent;
+}
+
+.server-card.is-acp .error-actions .button:not(.primary):hover {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+.server-card.is-acp .acp-platform-head {
+  margin-bottom: 2px;
+}
+
+.server-card.is-acp .acp-platform-title strong {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+
+.server-card.is-acp > .server-surface > .stale-data {
+  border-top: none;
+}
+
+.server-card.is-acp > .server-surface > .stale-data > .acp-platform {
+  border-top: none;
+  opacity: 0.82;
+}
+
+
+/* ACP polish pass5 */
+.server-card.is-acp .error-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.server-card.is-acp .error-panel {
+  border-bottom-color: var(--border);
+}
+
+.acp-job-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.acp-job-id {
+  margin-left: 6px;
+  color: var(--muted);
+  font-family: var(--data-font, var(--mono-font));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.acp-job-table thead th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding-bottom: 6px;
+  border-bottom-color: var(--border);
+}
+
+.acp-job-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.server-card.is-acp .stale-data {
+  opacity: 0.88;
+}
+
+.task-badge.acp-state.neutral {
+  color: var(--muted);
+  border-color: var(--border);
+  background: var(--surface-2);
+}
+
+
+/* ACP polish pass6 */
+.acp-platform {
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+
+.acp-platform-head {
+  margin-bottom: 6px;
+  gap: 2px;
+}
+
+.acp-platform-count {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.acp-platform-tag {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+
+.acp-job-name {
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.acp-job-table thead th {
+  padding-top: 0;
+  padding-bottom: 4px;
+}
+
+.server-card.is-acp .error-actions {
+  gap: 4px 10px;
+}
+
+.server-card.is-acp .error-actions > button.button.primary {
+  padding: 5px 12px;
 }

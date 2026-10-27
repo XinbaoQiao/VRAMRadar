@@ -16,6 +16,8 @@
     ['容量未知：', 'Unknown capacity: '],
     ['本地标识', 'Local identifier'],
     ["云任务", "Cloud jobs"],
+    ["已删除", "Deleted"],
+    ["删除中", "Deleting"],
     ["云任务", "Cloud jobs"],
     ["云任务查询超时", "Cloud job query timed out"],
     ["云任务列表格式不受支持", "Cloud job list format is not supported"],
