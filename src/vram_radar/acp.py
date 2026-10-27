@@ -43,15 +43,15 @@ def parse_jobs(payload: Any) -> list[dict[str, Any]]:
     # SCO's observed JSON output is an array. Refuse schema drift instead of
     # treating an API error object or unknown envelope as an empty queue.
     if not isinstance(payload, list) or len(payload) > PAGE_SIZE:
-        raise ConnectorFailure("acp_parse_failed", "ACP returned an unsupported job-list schema", retryable=False)
+        raise ConnectorFailure("acp_parse_failed", "云任务列表格式不受支持", retryable=False)
     jobs: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in payload:
         if not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"]:
-            raise ConnectorFailure("acp_parse_failed", "ACP returned an invalid job identity", retryable=False)
+            raise ConnectorFailure("acp_parse_failed", "云任务返回了无效的任务标识", retryable=False)
         job_id = _text(row["name"])
         if not job_id or job_id in seen:
-            raise ConnectorFailure("acp_parse_failed", "ACP returned duplicate job identities", retryable=False)
+            raise ConnectorFailure("acp_parse_failed", "云任务返回了重复的任务标识", retryable=False)
         seen.add(job_id)
         ownership = row.get("ownership") if isinstance(row.get("ownership"), dict) else {}
         pool = row.get("resource_pool") if isinstance(row.get("resource_pool"), dict) else {}
@@ -77,7 +77,7 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
     from .acp_transport import current_transport
     transport = current_transport(server)
     if transport is None and server.acp_protected_auth:
-        raise ConnectorFailure("acp_transport_config_invalid", "Required protected ACP authorization is unavailable",
+        raise ConnectorFailure("acp_transport_config_invalid", "受保护的云任务授权不可用",
                                retryable=False, state="security_blocked")
     input_data = None
     cwd = None
@@ -86,14 +86,14 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
         try:
             input_data = transport.request(server)
         except ValueError:
-            raise ConnectorFailure("acp_transport_config_invalid", "Protected ACP connection binding changed",
+            raise ConnectorFailure("acp_transport_config_invalid", "云任务连接绑定已变更",
                                    retryable=False, state="security_blocked") from None
         cwd = transport.cwd
     else:
         argv = build_list_command(server)
         executable = shutil.which(argv[0])
         if executable is None or executable.lower().endswith((".cmd", ".bat", ".ps1", ".py")):
-            raise ConnectorFailure("acp_cli_missing", "SCO executable was not found; select an installed SCO client", retryable=False, state="misconfigured")
+            raise ConnectorFailure("acp_cli_missing", "未找到 sco，请选择本机已安装的 sco", retryable=False, state="misconfigured")
         argv[0] = executable
     env = dict(os.environ)
     env["SCO_ZONE"] = server.acp_zone
@@ -111,24 +111,24 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
                 input_data=input_data, cwd=cwd,
             )
     except subprocess.TimeoutExpired as exc:
-        raise ConnectorFailure("acp_timeout", "ACP job query timed out", retryable=True) from exc
+        raise ConnectorFailure("acp_timeout", "云任务查询超时", retryable=True) from exc
     except OSError as exc:
-        raise ConnectorFailure("acp_cli_failed", "SCO could not be started", retryable=False, state="misconfigured") from exc
+        raise ConnectorFailure("acp_cli_failed", "无法启动 sco", retryable=False, state="misconfigured") from exc
     if result.stdout_truncated:
-        raise ConnectorFailure("acp_response_too_large", "ACP response exceeded the bounded capture limit", retryable=False)
+        raise ConnectorFailure("acp_response_too_large", "云任务响应超过长度上限", retryable=False)
     if result.returncode:
         # Raw CLI output may include credentials, command/env or signed URLs.
         # Classify in memory, emit only fixed messages, never log raw stderr.
         detail = bytes(result.stderr).decode("utf-8", errors="replace").lower()
         if any(word in detail for word in ("unauthenticated", "unauthorized", "credential", "access key")):
-            raise ConnectorFailure("acp_auth_required", "SCO profile authentication failed; configure the selected profile outside Radar", retryable=False, state="misconfigured")
+            raise ConnectorFailure("acp_auth_required", "sco 配置认证失败，请在本机 sco 中完成登录", retryable=False, state="misconfigured")
         if any(word in detail for word in ("forbidden", "permission denied")):
-            raise ConnectorFailure("acp_access_denied", "ACP refused this query; verify profile, workspace and cluster", retryable=False)
-        raise ConnectorFailure("acp_query_failed", "SCO job-list query failed; check the selected CLI profile and platform settings", retryable=True)
+            raise ConnectorFailure("acp_access_denied", "云任务拒绝本次查询，请核对配置名、工作区和集群", retryable=False)
+        raise ConnectorFailure("acp_query_failed", "云任务列表查询失败，请检查 sco 配置与平台设置", retryable=True)
     try:
         jobs = parse_jobs(json.loads(bytes(result.stdout).decode("utf-8-sig")))
     except (ValueError, UnicodeError) as exc:
-        raise ConnectorFailure("acp_parse_failed", "SCO did not return a valid JSON job list", retryable=False) from exc
+        raise ConnectorFailure("acp_parse_failed", "sco 未返回有效的任务列表", retryable=False) from exc
     counts: dict[str, int] = {}
     for job in jobs:
         counts[job["state"]] = counts.get(job["state"], 0) + 1

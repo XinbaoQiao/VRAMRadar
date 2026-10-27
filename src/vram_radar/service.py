@@ -40,6 +40,8 @@ from .storage import SnapshotCache
 
 
 RETRY_SECONDS = (15, 30, 60, 120, 300)
+# SenseCore ACP: longer gaps after failures; never burst-retry the remote CLI.
+ACP_RETRY_SECONDS = (60, 120, 300, 600, 900)
 # Beyond these bounds, serializing every Slurm node on every dashboard refresh
 # produces a material UI and IPC cost. Either dimension independently enables
 # compact mode so dense eight-GPU clusters are covered well before 1,000 GPUs.
@@ -629,16 +631,16 @@ def platform_refresh_seconds(refresh_seconds: int, *, backend: str, payload_chan
     """Return the next poll delay for one server.
 
     SenseCore ACP only lists platform jobs (no live VRAM). When the page is
-    unchanged, wait longer so steady monitoring barely touches the remote API.
-    Active change still polls, but not faster than a 30s floor. Other backends
-    keep the profile interval.
+    unchanged, wait much longer so steady monitoring barely touches the remote
+    API. Active change still polls, but not faster than a 60s floor. Other
+    backends keep the profile interval.
     """
     delay = max(5, int(refresh_seconds))
     if backend != "sensecore_acp":
         return delay
     if payload_changed:
-        return min(300, max(delay, 30))
-    return min(300, max(delay * 4, 60))
+        return min(300, max(delay, 60))
+    return min(600, max(delay * 8, 120))
 
 
 @dataclass
@@ -1150,9 +1152,18 @@ class DashboardService:
             runtime = self.states[server_id]
             runtime.failure_count += 1
             runtime.process_timing.clear()
-            delay = RETRY_SECONDS[min(runtime.failure_count - 1, len(RETRY_SECONDS) - 1)] if failure.retryable else None
-            if delay is not None:
+            if failure.retryable:
+                table = (
+                    ACP_RETRY_SECONDS
+                    if runtime.server.backend == "sensecore_acp"
+                    else RETRY_SECONDS
+                )
+                delay = table[min(runtime.failure_count - 1, len(table) - 1)]
                 delay = max(delay, self.profile.refresh_seconds)
+                if runtime.server.backend == "sensecore_acp":
+                    delay = max(delay, 60)
+            else:
+                delay = None
             if delay is not None and failure.retry_after_seconds is not None:
                 delay = max(delay, min(3600, max(0, failure.retry_after_seconds)))
             runtime.next_attempt_monotonic = self.clock() + delay if delay is not None else float("inf")

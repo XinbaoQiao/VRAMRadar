@@ -132,5 +132,5 @@ class HostAcpTransport:
                                 str(_directory(cwd)), credential_profile, fingerprint, page_size)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             raise ConnectorFailure("acp_transport_config_invalid",
-                                   "Protected ACP connection authorization changed; repair the local registration",
+                                   "云任务授权已变更，请修复本机注册",
                                    retryable=False, state="security_blocked") from None

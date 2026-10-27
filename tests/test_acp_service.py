@@ -76,7 +76,13 @@ if __name__ == '__main__':
 class PlatformRefreshSecondsTests(unittest.TestCase):
     def test_acp_stable_page_waits_longer_than_profile_interval(self):
         from vram_radar.service import platform_refresh_seconds
-        self.assertEqual(platform_refresh_seconds(15, backend="sensecore_acp", payload_changed=False), 60)
-        self.assertEqual(platform_refresh_seconds(15, backend="sensecore_acp", payload_changed=True), 30)
+        self.assertEqual(platform_refresh_seconds(15, backend="sensecore_acp", payload_changed=False), 120)
+        self.assertEqual(platform_refresh_seconds(15, backend="sensecore_acp", payload_changed=True), 60)
         self.assertEqual(platform_refresh_seconds(15, backend="direct_ssh", payload_changed=False), 15)
-        self.assertEqual(platform_refresh_seconds(90, backend="sensecore_acp", payload_changed=False), 300)
+        self.assertEqual(platform_refresh_seconds(90, backend="sensecore_acp", payload_changed=False), 600)
+
+    def test_acp_retry_table_starts_slower_than_ssh(self):
+        from vram_radar.service import ACP_RETRY_SECONDS, RETRY_SECONDS
+        self.assertGreaterEqual(ACP_RETRY_SECONDS[0], 60)
+        self.assertGreater(ACP_RETRY_SECONDS[0], RETRY_SECONDS[0])
+        self.assertGreaterEqual(ACP_RETRY_SECONDS[-1], 900)
