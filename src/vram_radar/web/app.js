@@ -3451,25 +3451,49 @@ function navigateRelativeServer(offset) {
 function renderAcpPlatform(server) {
   const platform = server.platform || {};
   const jobs = Array.isArray(server.jobs) ? server.jobs : [];
-  const metaParts = [];
-  if (platform.workspace) metaParts.push(`\u5de5\u4f5c\u533a ${platform.workspace}`);
-  if (platform.cluster) metaParts.push(`\u96c6\u7fa4 ${platform.cluster}`);
-  if (platform.zone) metaParts.push(`\u53ef\u7528\u533a ${platform.zone}`);
-  const meta = metaParts.length
-    ? `<p class="acp-platform-meta">${escapeHtml(metaParts.join(' \u00b7 '))}</p>`
+  const metaBits = [];
+  if (platform.workspace) metaBits.push(platform.workspace);
+  if (platform.cluster) metaBits.push(platform.cluster);
+  if (platform.zone) metaBits.push(platform.zone);
+  const meta = metaBits.length
+    ? `<div class="acp-platform-meta">${escapeHtml(metaBits.join(' · '))}</div>`
     : '';
-  const count = `<span class="acp-platform-count">${number(jobs.length)} \u6761</span>`;
   const rows = jobs.map(job => {
     const title = job.name || job.job_id || '';
     const id = job.job_id || '';
     const state = job.state || 'UNKNOWN';
-    const gpus = job.requested_gpus == null ? '\u2014' : number(job.requested_gpus);
-    const reason = job.reason ? escapeHtml(job.reason) : '\u2014';
-    const nameCell = `<div class="acp-job-name">${escapeHtml(title)}</div>${id && id !== title ? `<div class="acp-job-id">${escapeHtml(id)}</div>` : ''}`;
-    const stateCell = `<span class="task-badge ${escapeHtml(taskStateClass(state))}">${icon(taskStateIcon(state), 'ui-icon task-state-icon')}<strong>${escapeHtml(taskStateLabel(state))}</strong></span>`;
-    return `<tr><td>${nameCell}</td><td>${stateCell}</td><td class="acp-job-gpus">${gpus}</td><td class="acp-job-reason">${reason}</td></tr>`;
+    const gpus = job.requested_gpus == null ? '—' : number(job.requested_gpus);
+    const reason = job.reason ? escapeHtml(job.reason) : '';
+    const idLine = (id && id !== title)
+      ? `<div class="acp-job-id">${escapeHtml(id)}</div>`
+      : '';
+    const reasonLine = reason
+      ? `<div class="acp-job-reason">${reason}</div>`
+      : '';
+    return `<tr>
+      <td class="acp-job-main"><div class="acp-job-name">${escapeHtml(title)}</div>${idLine}${reasonLine}</td>
+      <td class="acp-job-state"><span class="task-badge ${escapeHtml(taskStateClass(state))}">${icon(taskStateIcon(state), 'ui-icon task-state-icon')}<strong>${escapeHtml(taskStateLabel(state))}</strong></span></td>
+      <td class="acp-job-gpus">${gpus}</td>
+    </tr>`;
   }).join('');
-  return `<div class="acp-platform-note" role="note"><div class="acp-platform-head"><strong>\u4efb\u52a1 \u00b7 \u53ea\u8bfb</strong>${count}</div>${meta}<p class="acp-platform-hint">\u65e0\u5b9e\u65f6\u663e\u5b58\uff1b\u4e00\u9875\uff1b\u7533\u8bf7 GPU \u975e\u7a7a\u95f2\u91cf</p></div><div class="table-wrap acp-job-table" role="region" aria-label="\u4efb\u52a1\u5217\u8868"><table><caption class="sr-only">\u4efb\u52a1\u5217\u8868</caption><thead><tr><th scope="col">\u540d\u79f0</th><th scope="col">\u72b6\u6001</th><th scope="col">GPU</th><th scope="col">\u8bf4\u660e</th></tr></thead><tbody>${rows || '<tr><td colspan="4">\u65e0\u4efb\u52a1</td></tr>'}</tbody></table></div>`;
+  const empty = `<tr class="acp-job-empty"><td colspan="3">暂无任务</td></tr>`;
+  return `<section class="acp-platform" aria-label="云任务">
+    <header class="acp-platform-head">
+      <div class="acp-platform-title">
+        <strong>云任务</strong>
+        <span class="acp-platform-count">${number(jobs.length)}</span>
+        <span class="acp-platform-tag">只读</span>
+      </div>
+      ${meta}
+    </header>
+    <div class="table-wrap acp-job-table" role="region" aria-label="任务列表">
+      <table>
+        <caption class="sr-only">任务列表</caption>
+        <thead><tr><th scope="col">任务</th><th scope="col">状态</th><th scope="col">GPU</th></tr></thead>
+        <tbody>${rows || empty}</tbody>
+      </table>
+    </div>
+  </section>`;
 }
 
 

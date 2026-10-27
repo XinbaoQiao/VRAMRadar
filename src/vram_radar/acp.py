@@ -120,11 +120,21 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
         # Raw CLI output may include credentials, command/env or signed URLs.
         # Classify in memory, emit only fixed messages, never log raw stderr.
         detail = bytes(result.stderr).decode("utf-8", errors="replace").lower()
+        if "sco-timeout" in detail:
+            raise ConnectorFailure("acp_timeout", "云任务查询超时", retryable=True)
         if any(word in detail for word in ("unauthenticated", "unauthorized", "credential", "access key")):
             raise ConnectorFailure("acp_auth_required", "sco 配置认证失败，请在本机 sco 中完成登录", retryable=False, state="misconfigured")
         if any(word in detail for word in ("forbidden", "permission denied")):
             raise ConnectorFailure("acp_access_denied", "云任务拒绝本次查询，请核对配置名、工作区和集群", retryable=False)
+        if "protected-child-refused" in detail:
+            raise ConnectorFailure(
+                "acp_transport_config_invalid",
+                "受保护查询通道未授权或已变更",
+                retryable=False,
+                state="security_blocked",
+            )
         raise ConnectorFailure("acp_query_failed", "云任务列表查询失败，请检查 sco 配置与平台设置", retryable=True)
+
     try:
         jobs = parse_jobs(json.loads(bytes(result.stdout).decode("utf-8-sig")))
     except (ValueError, UnicodeError) as exc:
