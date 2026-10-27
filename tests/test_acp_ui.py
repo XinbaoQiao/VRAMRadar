@@ -61,7 +61,7 @@ acpProfileFromDraft({id:'new'})]));
 const escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 const number = value => String(value);
 const icon = () => '';
-const taskStateLabel = state => ({PENDING:'排队中', QUEUEING:'排队中', WAIT_QUOTA:'等待额度', STARTING:'启动中', RUNNING:'运行中', SUCCEEDED:'已完成', FAILED:'失败', UNKNOWN:'未知'})[state] || state;
+const taskStateLabel = state => ({PENDING:'排队', QUEUEING:'排队', WAIT_QUOTA:'等配额', STARTING:'启动', RUNNING:'运行', SUCCEEDED:'完成', FAILED:'失败', UNKNOWN:'—'})[state] || state;
 const taskStateClass = state => 'pending';
 const taskStateIcon = () => 'clock';
 console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',cluster:'c',zone:'z'},
@@ -69,11 +69,11 @@ console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',clu
 """)
         self.assertNotIn("<script>", result)
         self.assertNotIn("<img onerror", result)
-        self.assertIn("申请 GPU", result)
-        self.assertIn("不代表完整任务清单", result)
-        self.assertIn("实时显存未提供", result)
-        self.assertIn("工作区任务", result)
-        self.assertIn("排队中", result)
+        self.assertIn(">GPU<", result)
+        self.assertIn("申请 GPU 非空闲量", result)
+        self.assertIn("无实时显存", result)
+        self.assertIn("任务 · 只读", result)
+        self.assertIn("排队", result)
 
     def test_acp_has_no_directory_module_or_account_ssh_summary(self):
         result = self.run_js(["renderDirectoryModule", "renderAccountOverview"], """

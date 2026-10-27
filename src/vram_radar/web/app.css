@@ -2312,20 +2312,31 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 
 .acp-platform-note {
   display: grid;
-  gap: 6px;
-  margin: 0 0 12px;
-  padding: 12px 14px;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface) 88%, var(--cyan) 12%);
+  background: var(--surface);
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   text-align: left;
-  line-height: 1.45;
+  line-height: 1.4;
 }
-.acp-platform-note > strong {
-  font-size: 14px;
-  font-weight: 700;
+.acp-platform-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.acp-platform-note strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.acp-platform-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-caption, 12px);
 }
 .acp-platform-note p {
   margin: 0;
@@ -2342,7 +2353,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   vertical-align: top;
 }
 .acp-job-name {
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.35;
   overflow-wrap: anywhere;
   word-break: break-word;

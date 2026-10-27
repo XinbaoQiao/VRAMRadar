@@ -1567,7 +1567,7 @@ class AppApi:
         if server.backend == "local":
             return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
         if server.backend == "sensecore_acp":
-            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
+            return {"ok": False, "error": "云任务不使用 SSH", "code": "platform_ssh_unavailable"}
         details = ssh_copy_details(server)
         argv = list(details.argv)
         command = _powershell_join(argv) if sys.platform == "win32" else shlex.join(argv)
@@ -1608,7 +1608,7 @@ class AppApi:
         if server.backend == "local":
             return {"ok": False, "error": "本地 GPU 监控不使用 SSH", "code": "local_ssh_unavailable"}
         if server.backend == "sensecore_acp":
-            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
+            return {"ok": False, "error": "云任务不使用 SSH", "code": "platform_ssh_unavailable"}
         argv = ssh_login_argv(server)
         try:
             if sys.platform == "win32":
@@ -3037,7 +3037,7 @@ class AppApi:
             stages.append(
                 {
                     "id": "collection" if collection_failure else "connection",
-                    "label": "云平台任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else ("资源读取" if collection_failure else "SSH 连接")),
+                    "label": "云任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else ("资源读取" if collection_failure else "SSH 连接")),
                     "state": "failed",
                     "message": str(exc),
                 }
@@ -3129,9 +3129,9 @@ class AppApi:
             [
                 {
                     "id": "connection",
-                    "label": "云平台任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else "SSH 连接"),
+                    "label": "云任务" if server.backend == "sensecore_acp" else ("本地 GPU" if server.backend == "local" else "SSH 连接"),
                     "state": "passed",
-                    "message": "平台任务列表读取成功" if server.backend == "sensecore_acp" else ("本地 GPU 读取成功" if server.backend == "local" else "SSH 连接和身份验证成功"),
+                    "message": "云任务读取成功" if server.backend == "sensecore_acp" else ("本地 GPU 读取成功" if server.backend == "local" else "SSH 连接和身份验证成功"),
                 },
                 {
                     "id": "collection",
@@ -3175,7 +3175,7 @@ class AppApi:
         if server is None:
             return {"ok": False, "error": "找不到这台服务器", "code": "server_not_found"}
         if server.backend == "sensecore_acp":
-            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable"}
+            return {"ok": False, "error": "云任务不使用 SSH", "code": "platform_ssh_unavailable"}
         if not server.enabled:
             return {
                 "ok": False,
@@ -3313,7 +3313,7 @@ class AppApi:
                 "stages": stages,
             }
         if server.backend == "sensecore_acp":
-            return {"ok": False, "error": "云平台任务不使用 SSH", "code": "platform_ssh_unavailable", "stages": stages}
+            return {"ok": False, "error": "云任务不使用 SSH", "code": "platform_ssh_unavailable", "stages": stages}
         if options is None:
             options = {}
         if not isinstance(options, dict):
@@ -3905,7 +3905,7 @@ class AppApi:
                 old_server = old_by_id.get(renames.get(server_id, server_id))
                 if row.get("backend") == "sensecore_acp":
                     if updates.get(server_id) is not None:
-                        raise ConfigError("云平台任务认证属于本机已登录的平台命令配置")
+                        raise ConfigError("云任务使用本机已登录的 sco 配置")
                     continue
                 if server_id in updates:
                     new_value = updates[server_id]

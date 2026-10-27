@@ -575,15 +575,15 @@
         </div>
       <div class="field-grid server-primary-fields">
         <label><span>显示名称</span><input data-field="display_name" required maxlength="80" placeholder="4090 实验服务器"></label>
-        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="sensecore_acp">云平台任务</option><option value="local">本地 GPU（NVIDIA / AMD / Intel）</option></select><small>保存后会自动识别；失败时可手动选择。</small></label>
+        <label><span>连接类型</span><select data-field="backend"><option value="auto">自动识别（推荐）</option><option value="direct_ssh">SSH 直连 / nvidia-smi</option><option value="slurm_ssh">Slurm / SSH</option><option value="sensecore_acp">云任务</option><option value="local">本地 GPU（NVIDIA / AMD / Intel）</option></select><small>保存后会自动识别；失败时可手动选择。</small></label>
         <label><span>OpenSSH 别名（优先）</span><input data-field="ssh_alias" placeholder="gpu-lab"></label>
         <label><span>主机地址</span><input data-field="host" placeholder="gpu.example.edu"></label>
         <label data-acp-setting hidden><span>工作区</span><input data-field="acp_workspace" placeholder="workspace"></label>
         <label data-acp-setting hidden><span>集群</span><input data-field="acp_cluster" placeholder="cluster"></label>
         <label data-acp-setting hidden><span>可用区</span><input data-field="acp_zone" placeholder="cn-sh-01g"></label>
-        <label data-acp-setting hidden><span>本机命令路径（sco）</span><input data-field="acp_sco_path" placeholder="sco"></label>
-        <label data-acp-setting hidden><span>命令配置名称（可选）</span><input data-field="acp_profile" placeholder="default"></label>
-        <p class="editor-help" data-acp-setting hidden>使用本机已登录的平台命令读取任务，只读。不必填写 SSH 地址或 API 密钥。换电脑后需重新登录。</p>
+        <label data-acp-setting hidden><span>sco 路径</span><input data-field="acp_sco_path" placeholder="sco"></label>
+        <label data-acp-setting hidden><span>配置名</span><input data-field="acp_profile" placeholder="default"></label>
+        <p class="editor-help" data-acp-setting hidden>本机已登录 sco 只读任务；无需 SSH 或密钥。</p>
         <p class="editor-help primary-help">填写 SSH 别名或主机地址即可。导入的服务器会沿用原有 SSH 配置。</p>
       </div>
       <div class="connection-test-result" role="status" aria-live="polite" hidden></div>

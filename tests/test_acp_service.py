@@ -49,7 +49,7 @@ class AcpServiceTests(unittest.TestCase):
         result = api.test_connection('acp')
         self.assertTrue(result['ok'])
         self.assertIsNone(result['summary']['total_gpus'])
-        self.assertEqual(result['stages'][1]['label'], '云平台任务')
+        self.assertEqual(result['stages'][1]['label'], '云任务')
 
     def test_page_disappearance_never_becomes_slurm_completion(self):
         self.assertEqual(AppApi._active_tasks({'backend': 'sensecore_acp', 'tasks': {

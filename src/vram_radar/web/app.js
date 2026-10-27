@@ -364,12 +364,12 @@ const stateLabel = state => ({
   connecting: '正在配置中', online: '监控就绪', stale: '数据已过期', offline: '网络不可达', auth_required: '需要认证',
   security_blocked: '安全阻止', misconfigured: '配置异常', disabled: '监控已暂停'
 })[state] || state;
-const backendLabel = backend => backend === 'sensecore_acp' ? '云平台任务' : backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
+const backendLabel = backend => backend === 'sensecore_acp' ? '云任务' : backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
 const taskStateLabel = state => ({
-  PENDING: '排队中', QUEUEING: '排队中', WAIT_QUOTA: '等待额度', STARTING: '启动中',
-  RUNNING: '运行中', COMPLETING: '收尾中', CONFIGURING: '准备中', SUSPENDED: '已暂停',
-  COMPLETED: '已完成', SUCCEEDED: '已完成', FAILED: '失败', CANCELLED: '已取消',
-  TIMEOUT: '超时', OUT_OF_MEMORY: '任务内存不足', UNKNOWN: '未知'
+  PENDING: '排队', QUEUEING: '排队', WAIT_QUOTA: '等配额', STARTING: '启动',
+  RUNNING: '运行', COMPLETING: '收尾', CONFIGURING: '准备', SUSPENDED: '暂停',
+  COMPLETED: '完成', SUCCEEDED: '完成', FAILED: '失败', CANCELLED: '取消',
+  TIMEOUT: '超时', OUT_OF_MEMORY: '内存不足', UNKNOWN: '—'
 })[state] || state;
 const taskStateClass = state => ({
   PENDING: 'pending', QUEUEING: 'pending', WAIT_QUOTA: 'pending', STARTING: 'pending',
@@ -2239,7 +2239,7 @@ function renderError(server) {
 }
 
 function renderConfiguring(server) {
-  if (server.backend === 'sensecore_acp') return '<div class="configuring-panel" role="status">正在读取平台任务（只读，不会提交任务）。</div>';
+  if (server.backend === 'sensecore_acp') return '<div class="configuring-panel" role="status">正在读取云任务…</div>';
   if (server.backend === 'local') {
     return `<div class="configuring-panel" role="status"><div class="configuring-symbol" aria-hidden="true">${icon('clock')}</div><div><div class="configuring-title">正在读取本地 GPU</div><div class="configuring-copy">只读显存、GPU 利用率和温度；不会启动计算任务。</div></div></div>`;
   }
@@ -3069,7 +3069,7 @@ function serverNavigatorOwnTaskSummary(server) {
 }
 
 function serverNavigatorResourceSummary(server) {
-  if (server.backend === 'sensecore_acp' && server.connection?.state === 'online') return '已读取平台任务 · 无实时显存';
+  if (server.backend === 'sensecore_acp' && server.connection?.state === 'online') return '云任务 · 无实时显存';
   if (server.connection?.state !== 'online') return stateLabel(server.connection?.state || 'offline');
   const gpus = Number(server.total_gpus) || 0;
   if (server.backend === 'slurm_ssh' && server.slurm_capabilities?.node_allocation_detail === false) {
@@ -3452,24 +3452,24 @@ function renderAcpPlatform(server) {
   const platform = server.platform || {};
   const jobs = Array.isArray(server.jobs) ? server.jobs : [];
   const metaParts = [];
-  if (platform.workspace) metaParts.push(`工作区 ${platform.workspace}`);
-  if (platform.cluster) metaParts.push(`集群 ${platform.cluster}`);
-  if (platform.zone) metaParts.push(`可用区 ${platform.zone}`);
+  if (platform.workspace) metaParts.push(`\u5de5\u4f5c\u533a ${platform.workspace}`);
+  if (platform.cluster) metaParts.push(`\u96c6\u7fa4 ${platform.cluster}`);
+  if (platform.zone) metaParts.push(`\u53ef\u7528\u533a ${platform.zone}`);
   const meta = metaParts.length
-    ? `<p class="acp-platform-meta">${escapeHtml(metaParts.join(' · '))}</p>`
+    ? `<p class="acp-platform-meta">${escapeHtml(metaParts.join(' \u00b7 '))}</p>`
     : '';
-  const count = `<p class="acp-platform-count">本页共 ${number(jobs.length)} 条任务</p>`;
+  const count = `<span class="acp-platform-count">${number(jobs.length)} \u6761</span>`;
   const rows = jobs.map(job => {
     const title = job.name || job.job_id || '';
     const id = job.job_id || '';
     const state = job.state || 'UNKNOWN';
-    const gpus = job.requested_gpus == null ? '—' : number(job.requested_gpus);
-    const reason = job.reason ? escapeHtml(job.reason) : '—';
+    const gpus = job.requested_gpus == null ? '\u2014' : number(job.requested_gpus);
+    const reason = job.reason ? escapeHtml(job.reason) : '\u2014';
     const nameCell = `<div class="acp-job-name">${escapeHtml(title)}</div>${id && id !== title ? `<div class="acp-job-id">${escapeHtml(id)}</div>` : ''}`;
     const stateCell = `<span class="task-badge ${escapeHtml(taskStateClass(state))}">${icon(taskStateIcon(state), 'ui-icon task-state-icon')}<strong>${escapeHtml(taskStateLabel(state))}</strong></span>`;
     return `<tr><td>${nameCell}</td><td>${stateCell}</td><td class="acp-job-gpus">${gpus}</td><td class="acp-job-reason">${reason}</td></tr>`;
   }).join('');
-  return `<div class="acp-platform-note" role="note"><strong>工作区任务（只读）</strong>${meta}<p>这里列出工作区里能看到的任务。申请 GPU 数量不代表已分到的空闲显存。</p><p>实时显存未提供；列表最多显示一页，不代表完整任务清单。</p>${count}</div><div class="table-wrap acp-job-table" role="region" aria-label="平台任务列表，可横向滚动"><table><caption class="sr-only">平台任务列表</caption><thead><tr><th scope="col">任务名称</th><th scope="col">状态</th><th scope="col">申请 GPU</th><th scope="col">说明</th></tr></thead><tbody>${rows || '<tr><td colspan="4">本次查询未返回任务</td></tr>'}</tbody></table></div>`;
+  return `<div class="acp-platform-note" role="note"><div class="acp-platform-head"><strong>\u4efb\u52a1 \u00b7 \u53ea\u8bfb</strong>${count}</div>${meta}<p class="acp-platform-hint">\u65e0\u5b9e\u65f6\u663e\u5b58\uff1b\u4e00\u9875\uff1b\u7533\u8bf7 GPU \u975e\u7a7a\u95f2\u91cf</p></div><div class="table-wrap acp-job-table" role="region" aria-label="\u4efb\u52a1\u5217\u8868"><table><caption class="sr-only">\u4efb\u52a1\u5217\u8868</caption><thead><tr><th scope="col">\u540d\u79f0</th><th scope="col">\u72b6\u6001</th><th scope="col">GPU</th><th scope="col">\u8bf4\u660e</th></tr></thead><tbody>${rows || '<tr><td colspan="4">\u65e0\u4efb\u52a1</td></tr>'}</tbody></table></div>`;
 }
 
 
