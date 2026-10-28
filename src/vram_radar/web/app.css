@@ -11,17 +11,17 @@
   --muted: light-dark(#647680, #9baeb9);
   --cyan: light-dark(#138578, #5dceba);
   --green: light-dark(#27876c, #61c6a0);
-  --amber: light-dark(#be852b, #e0b064);
-  --red: light-dark(#ca6270, #ed8995);
+  --amber: light-dark(#9a7d4a, #c4a873);
+  --red: light-dark(#a56a70, #c99298);
   --cyan-text: light-dark(#087368, #82dfcf);
   --green-text: light-dark(#237459, #88daba);
-  --amber-text: light-dark(#754a00, #f0bd70);
-  --red-text: light-dark(#9f303a, #ff9ea5);
-  /* Job/process status: running uses true sky-blue; completed stays green (global --cyan is teal and was too close to --green). */
-  --status-running: light-dark(#1a7fbf, #4db3ef);
-  --status-running-text: light-dark(#0b5f96, #8fd0f8);
-  --status-completed: light-dark(#15985d, #48c987);
-  --status-completed-text: light-dark(#086b41, #6fdda0);
+  --amber-text: light-dark(#6b5630, #d4b98a);
+  --red-text: light-dark(#7a454c, #d4a8ad);
+  /* Job/process status: muted practical tones (not candy sky/amber/rose). */
+  --status-running: light-dark(#5a7a8c, #7a9aab);
+  --status-running-text: light-dark(#3d5a6a, #a8c0cc);
+  --status-completed: light-dark(#5a7d6a, #7a9e88);
+  --status-completed-text: light-dark(#3d5f4c, #a5c4b0);
   --instrument: light-dark(#edf7f4, #1c302d);
   --instrument-2: light-dark(#edf7f4, #1c302d);
   --instrument-text: var(--text);
@@ -584,10 +584,10 @@ tr:last-child td { border-bottom: 0; }
 .task-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 27px; padding: 3px 7px; border-radius: var(--radius-sm); border: 1px solid var(--border); color: var(--muted); background: var(--surface-2); font-family: var(--data-font); font-size: var(--font-caption); font-weight: 600; line-height: 1.35; white-space: nowrap; }
 .task-badge strong { font-weight: 700; font-variant-numeric: tabular-nums; }
 .badge-icon { width: 13px; height: 13px; stroke-width: 2; }
-.task-badge.pending, .task-badge.warning { color: var(--amber-text); border-color: color-mix(in srgb, var(--amber) 44%, var(--border)); background: color-mix(in srgb, var(--amber) 10%, var(--surface)); }
-.task-badge.running { color: var(--status-running-text); border-color: color-mix(in srgb, var(--status-running) 50%, var(--border)); background: color-mix(in srgb, var(--status-running) 12%, var(--surface)); }
-.task-badge.completed { color: var(--status-completed-text); border-color: color-mix(in srgb, var(--status-completed) 44%, var(--border)); background: color-mix(in srgb, var(--status-completed) 10%, var(--surface)); }
-.task-badge.failed, .task-badge.cancelled { color: var(--red-text); border-color: color-mix(in srgb, var(--red) 44%, var(--border)); background: color-mix(in srgb, var(--red) 10%, var(--surface)); }
+.task-badge.pending, .task-badge.warning { color: var(--amber-text); border-color: color-mix(in srgb, var(--amber) 26%, var(--border)); background: color-mix(in srgb, var(--amber) 6%, var(--surface)); }
+.task-badge.running { color: var(--status-running-text); border-color: color-mix(in srgb, var(--status-running) 28%, var(--border)); background: color-mix(in srgb, var(--status-running) 7%, var(--surface)); }
+.task-badge.completed { color: var(--status-completed-text); border-color: color-mix(in srgb, var(--status-completed) 26%, var(--border)); background: color-mix(in srgb, var(--status-completed) 6%, var(--surface)); }
+.task-badge.failed, .task-badge.cancelled { color: var(--red-text); border-color: color-mix(in srgb, var(--red) 26%, var(--border)); background: color-mix(in srgb, var(--red) 6%, var(--surface)); }
 .cluster-content { padding: 12px 16px 16px; display: grid; gap: 10px; background: color-mix(in srgb, var(--surface-2) 18%, var(--surface)); }
 .task-group { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .task-group > summary { list-style: none; min-height: 46px; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; }
@@ -2383,15 +2383,15 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   bottom: 8px;
   width: 3px;
   border-radius: 999px;
-  background: #c5d0d8;
+  background: color-mix(in srgb, var(--muted) 35%, var(--border));
 }
 
-.acp-job-card.is-running::before { background: #1a7fbf; }
+.acp-job-card.is-running::before { background: color-mix(in srgb, var(--status-running) 55%, var(--border-strong)); }
 .acp-job-card.is-pending::before,
-.acp-job-card.is-warning::before { background: #be852b; }
-.acp-job-card.is-completed::before { background: #15985d; }
+.acp-job-card.is-warning::before { background: color-mix(in srgb, var(--amber) 55%, var(--border-strong)); }
+.acp-job-card.is-completed::before { background: color-mix(in srgb, var(--status-completed) 55%, var(--border-strong)); }
 .acp-job-card.is-failed::before,
-.acp-job-card.is-cancelled::before { background: #ca6270; }
+.acp-job-card.is-cancelled::before { background: color-mix(in srgb, var(--red) 55%, var(--border-strong)); }
 
 .acp-job-main {
   min-width: 0;
@@ -2467,29 +2467,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   display: none;
 }
 
-.acp-job-state .task-badge.acp-state.running {
-  color: #0b5f96;
-  border-color: #9ec9e4;
-  background: #e7f3fb;
-}
-.acp-job-state .task-badge.acp-state.pending,
-.acp-job-state .task-badge.acp-state.warning {
-  color: #754a00;
-  border-color: #e2c48a;
-  background: #fbf3e4;
-}
-.acp-job-state .task-badge.acp-state.completed {
-  color: #086b41;
-  border-color: #9ad4b5;
-  background: #e8f7ef;
-}
-.acp-job-state .task-badge.acp-state.failed,
-.acp-job-state .task-badge.acp-state.cancelled {
-  color: #9f303a;
-  border-color: #e3a8b0;
-  background: #fbebea;
-}
-
+/* ACP status pills inherit global muted .task-badge.* colors */
 .acp-job-empty {
   border: 1px dashed #d5dee6;
   border-radius: 10px;
