@@ -3453,55 +3453,114 @@ function navigateRelativeServer(offset) {
 function renderAcpPlatform(server) {
   const platform = server.platform || {};
   const jobs = Array.isArray(server.jobs) ? server.jobs : [];
-  const metaBits = [];
-  if (platform.workspace) metaBits.push(platform.workspace);
-  if (platform.cluster) metaBits.push(platform.cluster);
-  if (platform.zone) metaBits.push(platform.zone);
+  const metaBits = [platform.workspace, platform.cluster, platform.zone].filter(Boolean);
   const showGpus = jobs.some(job => job.requested_gpus != null || job.gpu_count != null);
-  const meta = metaBits.length
-    ? `<div class="acp-platform-meta">${escapeHtml(metaBits.join(' · '))}</div>`
-    : '';
-  const rows = jobs.map(job => {
-    const title = job.name || job.job_id || '';
-    const id = job.job_id || '';
+
+  const buckets = {running: [], pending: [], done: []};
+  const countBy = {running: 0, pending: 0, completed: 0, failed: 0, other: 0};
+  for (const job of jobs) {
+    const cls = taskStateClass(job.state || 'UNKNOWN');
+    if (cls === 'running') {
+      buckets.running.push(job);
+      countBy.running += 1;
+    } else if (cls === 'pending' || cls === 'warning') {
+      buckets.pending.push(job);
+      countBy.pending += 1;
+    } else if (cls === 'completed') {
+      buckets.done.push(job);
+      countBy.completed += 1;
+    } else if (cls === 'failed' || cls === 'cancelled') {
+      buckets.done.push(job);
+      countBy.failed += 1;
+    } else {
+      buckets.done.push(job);
+      countBy.other += 1;
+    }
+  }
+
+  const summaryBits = [];
+  if (countBy.running) summaryBits.push(`<span class="task-badge running"><span>运行</span><strong>${number(countBy.running)}</strong></span>`);
+  if (countBy.pending) summaryBits.push(`<span class="task-badge pending"><span>排队</span><strong>${number(countBy.pending)}</strong></span>`);
+  if (countBy.completed) summaryBits.push(`<span class="task-badge completed"><span>完成</span><strong>${number(countBy.completed)}</strong></span>`);
+  if (countBy.failed) summaryBits.push(`<span class="task-badge failed"><span>异常</span><strong>${number(countBy.failed)}</strong></span>`);
+  if (countBy.other) summaryBits.push(`<span class="task-badge neutral"><span>其他</span><strong>${number(countBy.other)}</strong></span>`);
+  const summary = summaryBits.length
+    ? summaryBits.join('')
+    : '<span class="task-summary-empty">暂无任务</span>';
+
+  const renderJobCard = (job) => {
+    const rawName = String(job.name || '').trim();
+    const id = String(job.job_id || '').trim();
     const state = job.state || 'UNKNOWN';
+    const cls = taskStateClass(state);
+    const titleSource = rawName || id || '未命名任务';
+    let title = titleSource;
+    const stamp = titleSource.search(/-\d{8}[-_]/);
+    if (stamp > 8) title = titleSource.slice(0, stamp);
+    if (title.length > 40) title = `${title.slice(0, 38)}…`;
+    const idShow = (id && id !== title)
+      ? (id.length > 28 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id)
+      : '';
     const gpuValue = job.requested_gpus != null ? job.requested_gpus
       : (job.gpu_count != null ? job.gpu_count : null);
-    const gpus = gpuValue == null ? '—' : number(gpuValue);
-    const reason = job.reason ? escapeHtml(job.reason) : '';
-    const idBit = (id && id !== title)
-      ? `<span class="acp-job-id">${escapeHtml(id)}</span>`
+    const metaParts = [];
+    if (idShow) metaParts.push(`<span class="acp-job-id" title="${escapeHtml(id)}">${escapeHtml(idShow)}</span>`);
+    if (showGpus && gpuValue != null) {
+      metaParts.push(`<span class="acp-job-gpus"><span>GPU</span> × ${number(gpuValue)}</span>`);
+    } else if (showGpus) {
+      metaParts.push(`<span class="acp-job-gpus"><span>GPU</span> —</span>`);
+    }
+    const meta = metaParts.length
+      ? `<div class="acp-job-meta">${metaParts.join('<span class="acp-job-meta-sep" aria-hidden="true">·</span>')}</div>`
       : '';
-    const reasonLine = reason
-      ? `<div class="acp-job-reason">${reason}</div>`
+    const reason = job.reason
+      ? `<div class="acp-job-reason">${escapeHtml(job.reason)}</div>`
       : '';
-    const gpuCell = showGpus ? `<td class="acp-job-gpus">${gpus}</td>` : '';
-    return `<tr>
-      <td class="acp-job-main"><div class="acp-job-name">${escapeHtml(title)}${idBit}</div>${reasonLine}</td>
-      <td class="acp-job-state"><span class="task-badge acp-state ${escapeHtml(taskStateClass(state))}"><strong>${escapeHtml(taskStateLabel(state))}</strong></span></td>
-      ${gpuCell}
-    </tr>`;
-  }).join('');
-  const colCount = showGpus ? 3 : 2;
-  const empty = `<tr class="acp-job-empty"><td colspan="${colCount}">暂无任务</td></tr>`;
-  const gpuHead = showGpus ? '<th scope="col">GPU</th>' : '';
-  return `<section class="acp-platform" aria-label="云任务">
-    <header class="acp-platform-head">
-      <div class="acp-platform-title">
-        <strong>云任务</strong>
-        <span class="acp-platform-count">${number(jobs.length)} 条</span>
-        <span class="acp-platform-tag">只读</span>
+    return `<article class="acp-job-card is-${escapeHtml(cls)}" role="listitem">
+      <div class="acp-job-main">
+        <div class="acp-job-name" title="${escapeHtml(titleSource)}">${escapeHtml(title)}</div>
+        ${meta}${reason}
       </div>
-      ${meta}
-    </header>
-    <div class="table-wrap acp-job-table" role="region" aria-label="任务列表">
-      <table>
-        <caption class="sr-only">任务列表</caption>
-        <thead><tr><th scope="col">任务</th><th scope="col">状态</th>${gpuHead}</tr></thead>
-        <tbody>${rows || empty}</tbody>
-      </table>
+      <div class="acp-job-state">
+        <span class="task-badge acp-state ${escapeHtml(cls)}"><strong>${escapeHtml(taskStateLabel(state))}</strong></span>
+      </div>
+    </article>`;
+  };
+
+  const renderPeriod = (title, list) => {
+    if (!list.length) return '';
+    const cards = list.map(renderJobCard).join('');
+    return `<section class="task-period acp-period">
+      <header class="task-period-head"><h6>${escapeHtml(title)}</h6><span>${number(list.length)} 条</span></header>
+      <div class="acp-job-stack" role="list">${cards}</div>
+    </section>`;
+  };
+
+  const periods = [
+    renderPeriod('运行中', buckets.running),
+    renderPeriod('排队与启动', buckets.pending),
+    renderPeriod('已结束', buckets.done),
+  ].join('');
+
+  const empty = '<div class="module-empty acp-job-empty">暂无云任务</div>';
+  const place = metaBits.length ? escapeHtml(metaBits.join(' · ')) : 'SenseCore / SLAI';
+  return `<details class="cluster-module acp-module" data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}" open aria-label="云任务">
+    <summary>
+      <span class="cluster-heading">
+        <h4>云任务</h4>
+        <small>${place}</small>
+      </span>
+      <span class="task-summary">${summary}<span class="acp-platform-tag">只读</span></span>
+      <span class="details-chevron">${icon('chevron')}</span>
+    </summary>
+    <div class="cluster-content">
+      ${periods || empty}
+      <details class="module-context" data-context-note="acp-scope">
+        <summary>说明</summary>
+        <p>只读查看云平台任务列表，不提供 SSH、目录浏览或实时显存。名称过长时会自动缩短，完整标识可在悬停时查看。</p>
+      </details>
     </div>
-  </section>`;
+  </details>`;
 }
 
 
