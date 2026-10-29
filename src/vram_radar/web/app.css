@@ -324,7 +324,7 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px; margin: 0 au
 .server-head-controls { grid-column: 3; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .server-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; font-weight: 620; max-width: 100%; z-index: 1; }
 .server-status-label { display: inline; overflow: visible; text-overflow: clip; white-space: nowrap; }
-.server-quick-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.server-quick-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .server-quick-actions .button { min-height: 30px; min-width: 30px; padding: 3px 6px; border-color: transparent; background: transparent; box-shadow: none; font-size: 12px; color: var(--muted); }
 .pin-server.active { color: var(--cyan-text); border-color: color-mix(in srgb, var(--cyan) 45%, var(--border)); background: color-mix(in srgb, var(--cyan) 12%, var(--surface)); }
 .server-card.is-paused { opacity: .88; background: color-mix(in srgb, var(--surface-2) 40%, var(--surface)); box-shadow: none; }
@@ -516,7 +516,7 @@ tr:last-child td { border-bottom: 0; }
 .cluster-group dt { color: var(--muted); font-size: var(--font-caption); }
 .cluster-group dd { margin: 1px 0 0; font-family: var(--data-font); font-size: var(--font-small); font-weight: 650; }
 .cluster-group .issue dd { color: var(--red-text); }
-.large-cluster-empty { padding: 14px; color: var(--muted); text-align: center; }
+.large-cluster-empty { padding: 20px 16px; color: var(--muted); font-size: var(--font-small); line-height: 1.45; text-align: center; }
 .cluster-node-filters { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(2, minmax(130px, .7fr)) auto auto auto; align-items: end; gap: 8px; }
 .cluster-node-filters input, .cluster-node-filters select { min-height: 38px; padding: 6px 8px; font-size: var(--font-small); }
 .cluster-node-filters .check-label { min-height: 36px; margin: 0; white-space: nowrap; }
@@ -574,15 +574,15 @@ tr:last-child td { border-bottom: 0; }
 .directory-node-actions .button { min-height: 30px; padding: 3px 8px; font-size: var(--font-caption); }
 .directory-file { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 11px; border-bottom: 1px solid var(--border); }
 .directory-file:last-child { border-bottom: 0; }
-.directory-empty { padding: 10px 11px; color: var(--muted); font-size: var(--font-small); }
+.directory-empty { padding: 12px 14px; color: var(--muted); font-size: var(--font-small); line-height: 1.45; }
 .directory-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; color: var(--red-text); border: 1px solid color-mix(in srgb, var(--red) 32%, var(--border)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--red) 5%, var(--surface)); font-size: var(--font-small); }
 .directory-inline-error { margin: 7px 10px; padding: 7px 9px; color: var(--red-text); border: 1px solid color-mix(in srgb, var(--red) 28%, var(--border)); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--red) 5%, var(--surface)); font-size: var(--font-caption); }
 .directory-placeholder, .directory-loading { border: 1px dashed var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .directory-unavailable { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .process-summary-pill { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 8px; color: var(--cyan-text); background: color-mix(in srgb, var(--cyan) 7%, var(--surface)); border: 1px solid color-mix(in srgb, var(--cyan) 32%, var(--border)); border-radius: var(--radius-sm); font-family: var(--data-font); font-size: var(--font-caption); font-weight: 650; white-space: nowrap; }
 .task-summary { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
-.task-summary-empty { color: var(--muted); font-size: var(--font-small); }
-.task-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 27px; padding: 3px 7px; border-radius: var(--radius-badge); border: 1px solid var(--border); color: var(--muted); background: var(--surface-2); font-family: var(--data-font); font-size: var(--font-caption); font-weight: 600; line-height: 1.35; white-space: nowrap; }
+.task-summary-empty { color: var(--muted); font-size: var(--font-small); line-height: 1.4; letter-spacing: 0.01em; }
+.task-badge { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 26px; padding: 3px 8px; border-radius: var(--radius-badge); border: 1px solid var(--border); color: var(--muted); background: var(--surface-2); font-family: var(--data-font); font-size: var(--font-caption); font-weight: 600; line-height: 1.35; white-space: nowrap; }
 .task-badge strong { font-weight: 700; font-variant-numeric: tabular-nums; }
 .badge-icon { width: 13px; height: 13px; stroke-width: 2; }
 .task-badge.pending, .task-badge.warning { color: var(--amber-text); border-color: color-mix(in srgb, var(--amber) 36%, var(--border)); background: color-mix(in srgb, var(--amber) 6%, var(--surface)); }
@@ -668,7 +668,7 @@ tr:last-child td { border-bottom: 0; }
 .node-state.partial::before { background: var(--cyan); }
 .node-state.busy::before { background: var(--amber); }
 .node-state.unavailable::before { background: var(--red); }
-.module-empty { padding: 18px 12px; color: var(--muted); font-size: 13px; text-align: center; }
+.module-empty { padding: 20px 16px; color: var(--muted); font-size: var(--font-small); line-height: 1.45; text-align: center; }
 .memory-cell { min-width: 205px; }
 .memory-values { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .memory-values strong { font-weight: 600; }
@@ -744,11 +744,13 @@ dialog::backdrop { background: color-mix(in srgb, #07100d 58%, transparent); }
   line-height: 1.45;
 }
 #settings-dialog .section-heading {
-  margin-top: 4px;
+  margin-top: 10px;
+  margin-bottom: 2px;
 }
 #settings-dialog .section-heading p {
-  margin-top: 3px;
-  line-height: 1.4;
+  margin-top: 4px;
+  line-height: 1.45;
+  max-width: 42em;
 }
 
 .dialog-content { min-width: 0; padding: 16px; overflow-x: hidden; overflow-y: auto; }
@@ -1048,10 +1050,10 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
 .settings-pane[hidden] { display: none !important; }
 .settings-pane-head {
   display: grid;
-  gap: 5px;
-  padding-bottom: 12px;
+  gap: 6px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 .settings-pane-head h3 {
   margin: 0;
@@ -2341,20 +2343,21 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 
 .server-card.is-acp .acp-period {
-  border: 1px solid var(--border-strong, #d9e2e7);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm, 8px);
   background: var(--surface);
   overflow: hidden;
 }
 
 .server-card.is-acp .acp-period .task-period-head {
-  padding: 9px 12px;
+  padding: 10px 12px;
   background: var(--surface-3);
+  gap: 10px;
 }
 
 .server-card.is-acp .acp-period .acp-job-stack {
   padding: 10px;
-  gap: 8px;
+  gap: 9px;
   background: var(--surface-2);
 }
 
@@ -2368,12 +2371,17 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px 14px;
   align-items: center;
-  padding: 12px 14px 12px 16px;
+  padding: 11px 14px 11px 16px;
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
   position: relative;
+  transition: border-color .15s var(--motion-ease), background .15s var(--motion-ease);
+}
+.acp-job-card:hover {
+  border-color: color-mix(in srgb, var(--cyan) 22%, var(--border-strong));
+  background: color-mix(in srgb, var(--cyan) 3%, var(--surface));
 }
 
 .acp-job-card::before {
@@ -2403,9 +2411,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 .acp-job-name {
   margin: 0;
   font-family: var(--display-font);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 650;
   line-height: 1.35;
+  letter-spacing: 0.01em;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2473,6 +2482,11 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
   background: var(--surface);
+  padding: 22px 16px;
+  color: var(--muted);
+  font-size: var(--font-small);
+  line-height: 1.45;
+  text-align: center;
 }
 
 .server-card.is-acp .error-panel .error-symbol {

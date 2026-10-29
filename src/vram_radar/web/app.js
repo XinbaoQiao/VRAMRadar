@@ -367,8 +367,8 @@ const stateLabel = state => ({
 const backendLabel = backend => backend === 'sensecore_acp' ? '云任务' : backend === 'local' ? '本地 GPU 实时显存' : backend === 'slurm_ssh' ? 'Slurm GPU 调度状态' : 'GPU 实时显存';
 const taskStateLabel = state => ({
   PENDING: '排队', QUEUEING: '排队', WAIT_QUOTA: '等配额', STARTING: '启动',
-  RUNNING: '运行', COMPLETING: '收尾', CONFIGURING: '准备', SUSPENDED: '暂停',
-  COMPLETED: '完成', SUCCEEDED: '完成', FAILED: '失败', CANCELLED: '取消',
+  RUNNING: '运行', COMPLETING: '收尾', CONFIGURING: '准备', SUSPENDED: '挂起',
+  COMPLETED: '完成', SUCCEEDED: '完成', FAILED: '失败', CANCELLED: '已取消',
   DELETING: '删除中', DELETED: '已删除',
   TIMEOUT: '超时', OUT_OF_MEMORY: '内存不足', UNKNOWN: '—'
 })[state] || state;
@@ -3064,7 +3064,7 @@ function serverNavigatorOwnTaskSummary(server) {
     const summary = [];
     if (running) summary.push(`${number(running)} 运行`);
     if (counts.PENDING) summary.push(`${number(counts.PENDING)} 排队`);
-    if (counts.SUSPENDED) summary.push(`${number(counts.SUSPENDED)} 暂停`);
+    if (counts.SUSPENDED) summary.push(`${number(counts.SUSPENDED)} 挂起`);
     return summary.join(' · ');
   }
   return `${number(ownActivity.length)} 个我的 GPU 进程`;
