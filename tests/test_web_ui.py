@@ -58,6 +58,22 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("return 2", rank)
         self.assertIn(".server-card.is-paused", self.styles)
 
+    def test_acp_jobs_module_respects_collapse_state(self):
+        """ACP 云任务 must use moduleOpen so 收起 survives refresh/pause."""
+        acp = self.javascript[
+            self.javascript.index("function renderAcpPlatform"):
+            self.javascript.index("function renderAcpPlatform") + 8000
+        ]
+        # Find the details opener near the end of renderAcpPlatform
+        self.assertIn("moduleOpen(server.server_id, 'acp-jobs', true)", self.javascript)
+        self.assertIn('data-module="acp-jobs"', self.javascript)
+        self.assertNotIn(
+            'data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}" open ',
+            self.javascript,
+        )
+        self.assertIn("function collapseServerModules", self.javascript)
+        self.assertIn("collapse-server-modules", self.javascript)
+
     def test_pause_resume_gives_immediate_click_feedback(self):
         """Pause/resume must feel clicked: optimistic paint, toast, in-card notice."""
         enabled = self.javascript[
@@ -435,9 +451,12 @@ class WebUiContractTests(unittest.TestCase):
             'data-context-note="${escapeHtml(key)}"',
             "moduleOpen(server.server_id, 'gpu-processes', false)",
             "moduleOpen(server.server_id, 'cluster-tasks', false)",
+            "moduleOpen(server.server_id, 'acp-jobs', true)",
             "processes: groups.others, currentUser, defaultOpen: false",
         ):
             self.assertIn(contract, self.javascript)
+        # ACP must honor collapse across refresh (not hardcode open).
+        self.assertNotIn('data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}" open aria-label="云任务"', self.javascript)
         self.assertNotIn("function renderNodeTopology", self.javascript)
         self.assertNotIn('<section class="module-section">', self.javascript)
         self.assertNotIn("GPU 集群状态", self.javascript)

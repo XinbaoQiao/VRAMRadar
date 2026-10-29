@@ -3606,7 +3606,7 @@ function renderAcpPlatform(server) {
 
   const empty = '<div class="module-empty acp-job-empty">暂无云任务</div>';
   const place = metaBits.length ? escapeHtml(metaBits.join(' · ')) : 'SenseCore / SLAI';
-  return `<details class="cluster-module acp-module" data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}" open aria-label="云任务">
+  return `<details class="cluster-module acp-module" data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}"${moduleOpen(server.server_id, 'acp-jobs', true)} aria-label="云任务">
     <summary>
       <span class="cluster-heading">
         <h4>云任务</h4>
