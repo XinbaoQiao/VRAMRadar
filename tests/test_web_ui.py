@@ -983,6 +983,12 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("NAVIGATOR_MAIN_RESERVE_PX", self.javascript)
         self.assertIn("NAVIGATOR_WIDTH_HARD_MAX = 420", self.javascript)
         self.assertIn("translate3d(calc(-100% + var(--navigator-rail-width))", self.styles)
+
+        self.assertIn("max-width: var(--navigator-rail-width)", self.styles)
+        self.assertIn(".server-navigator-panel { position: relative; box-sizing: border-box; width: 100%;", self.styles)
+        self.assertIn(".server-navigator:is(:hover, :focus-within, .dragging, .resizing) .server-navigator-panel { width: min(var(--navigator-panel-width)", self.styles)
+        self.assertIn(".server-navigator.has-custom-size:is(:hover, :focus-within, .dragging, .resizing)", self.styles)
+        self.assertNotIn(".server-navigator.has-custom-size, .server-navigator.has-custom-size .server-navigator-panel { max-height:", self.styles)
         self.assertIn("overflow-x: hidden", self.styles)
         self.assertIn("function repairNavigatorSizeIfNeeded", self.javascript)
         self.assertIn("Width-only drags must not invent a custom height", self.javascript)
