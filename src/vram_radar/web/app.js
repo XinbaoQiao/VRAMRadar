@@ -3385,11 +3385,13 @@ function ensureActiveNavigatorItemVisible(item) {
   // stays in view when a lower server becomes current.
   const list = ui.serverNavigatorList;
   if (!list || !item?.isConnected) return;
+  const entry = item.closest('.server-navigator-entry') || item;
   const listRect = list.getBoundingClientRect();
-  const itemRect = item.getBoundingClientRect();
+  const itemRect = entry.getBoundingClientRect();
   if (listRect.height <= 0 || itemRect.height <= 0) return;
-  if (itemRect.top < listRect.top) list.scrollTop += itemRect.top - listRect.top;
-  else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom;
+  const pad = Math.min(24, listRect.height * 0.12);
+  if (itemRect.top < listRect.top + pad) list.scrollTop += itemRect.top - listRect.top - pad;
+  else if (itemRect.bottom > listRect.bottom - pad) list.scrollTop += itemRect.bottom - listRect.bottom + pad;
 }
 
 function pauseServerNavigationSync(ms = 520) {
@@ -3458,47 +3460,25 @@ function syncActiveServerFromScroll() {
     || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
     || 62;
   const availableHeight = Math.max(160, window.innerHeight - titlebar);
-  // Keep the same landing line as scrollServerIntoVisualCenter so a sidebar
-  // jump to a lower server does not hand the rail marker back to the tall card above.
+  // Match scrollServerIntoVisualCenter. Spy the sticky .server-head, not the tall
+  // card box — otherwise a long previous card keeps the cyan rail marker stuck up top.
   const focusLine = titlebar + availableHeight * 0.32;
-  const activeCard = serverNavigationCardsById.get(activeServerId);
-  if (activeCard) {
-    const head = activeCard.querySelector('.server-head') || activeCard;
-    const headRect = head.getBoundingClientRect();
-    const activeRect = activeCard.getBoundingClientRect();
-    if (headRect.top <= focusLine + 56 && activeRect.bottom > focusLine - 24) return;
-  }
   let low = 0;
   let high = serverNavigationCards.length - 1;
-  let precedingIndex = -1;
+  let activeIndex = 0;
   while (low <= high) {
     const middle = (low + high) >> 1;
-    if (serverNavigationCards[middle].getBoundingClientRect().top <= focusLine) {
-      precedingIndex = middle;
+    const card = serverNavigationCards[middle];
+    const head = card.querySelector('.server-head') || card;
+    if (head.getBoundingClientRect().top <= focusLine) {
+      activeIndex = middle;
       low = middle + 1;
     } else {
       high = middle - 1;
     }
   }
-  const candidateIndexes = precedingIndex < 0
-    ? [0]
-    : precedingIndex >= serverNavigationCards.length - 1
-      ? [serverNavigationCards.length - 1]
-      : [precedingIndex, precedingIndex + 1];
-  // Prefer the nearest server heading. A tall previous card may still cover the
-  // focus line after a lower-server jump; heading distance keeps the marker moving.
-  let closest = null;
-  let closestDistance = Number.POSITIVE_INFINITY;
-  candidateIndexes.forEach(index => {
-    const card = serverNavigationCards[index];
-    const head = card.querySelector('.server-head') || card;
-    const distance = Math.abs(head.getBoundingClientRect().top - focusLine);
-    if (distance < closestDistance) {
-      closest = card;
-      closestDistance = distance;
-    }
-  });
-  if (closest) setActiveServer(closest.dataset.serverId);
+  const nextId = serverNavigationCards[activeIndex]?.dataset?.serverId;
+  if (nextId) setActiveServer(nextId);
 }
 
 function scheduleServerNavigationSync() {
@@ -3568,7 +3548,9 @@ function renderServerNavigator(servers) {
     navigatorHtml,
   ]);
   if (lastNavigatorRenderSignature !== navigatorSignature) {
+    const priorScrollTop = ui.serverNavigatorList.scrollTop;
     ui.serverNavigatorList.innerHTML = navigatorHtml;
+    ui.serverNavigatorList.scrollTop = priorScrollTop;
     lastNavigatorRenderSignature = navigatorSignature;
     uiRenderMetrics.navigatorBuilds += 1;
   }
@@ -3616,7 +3598,7 @@ function navigateToServer(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId))
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
-  pauseServerNavigationSync(560);
+  pauseServerNavigationSync(900);
   setActiveServer(serverId);
   restoreServerLeavePosition(serverId);
   // Sidebar clicks must land near visual center. Leave-restore / under-titlebar
@@ -3627,10 +3609,15 @@ function navigateToServer(serverId) {
     if (serverCardOutsideViewport(serverId)) {
       scrollServerIntoVisualCenter(serverId);
     }
+    // Re-assert after the page settles so a tall previous card cannot steal the
+    // rail marker once the scroll-spy pause ends.
+    setActiveServer(serverId);
+    pauseServerNavigationSync(720);
   };
   finishSidebarJump();
   // Leave-restore schedules its own rAF; run after it so centering wins the race.
   requestAnimationFrame(finishSidebarJump);
+  requestAnimationFrame(() => requestAnimationFrame(finishSidebarJump));
   const server = currentSnapshot?.servers?.find(item => item.server_id === serverId);
   ui.serverNavigatorStatus.textContent = server
     ? `已定位到服务器 ${server.display_name}`

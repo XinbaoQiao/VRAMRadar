@@ -1105,7 +1105,7 @@ class WebUiContractTests(unittest.TestCase):
             "function ensureActiveNavigatorItemVisible",
             "function pauseServerNavigationSync",
             "while (low <= high)",
-            "serverNavigationCardsById.get(activeServerId)",
+            "serverNavigationCards[activeIndex]",
             "serverNavigatorItems.get(serverId)",
             "window.requestAnimationFrame(() =>",
             "scrollIntoView({behavior: 'auto'",
@@ -1119,9 +1119,12 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("cards.reduce", scroll_sync)
         self.assertNotIn("behavior: reducedMotion ? 'auto' : 'smooth'", self.javascript)
         self.assertNotIn("window.matchMedia?.('(max-width: 900px)').matches", scroll_sync)
-        # Focus line must match sidebar centering so the rail marker follows a lower server.
+        # Spy sticky .server-head against the sidebar focus line so the rail marker follows lower servers.
         self.assertIn("availableHeight * 0.32", scroll_sync)
         self.assertIn("serverNavigationSyncPausedUntil", scroll_sync)
+        self.assertIn("querySelector('.server-head')", scroll_sync)
+        self.assertIn("activeIndex", scroll_sync)
+        self.assertNotIn("activeRect.bottom", scroll_sync)
         self.assertNotIn("owns the focus line even when the next heading is nearer", scroll_sync)
         self.assertIn("contain: layout paint style", self.styles)
         self.assertIn("will-change: transform", self.styles)
@@ -1135,7 +1138,8 @@ class WebUiContractTests(unittest.TestCase):
         navigate = self.javascript[
             self.javascript.index("function navigateToServer"):self.javascript.index("function navigateRelativeServer")
         ]
-        self.assertIn("pauseServerNavigationSync(560)", navigate)
+        self.assertIn("pauseServerNavigationSync(900)", navigate)
+        self.assertIn("pauseServerNavigationSync(720)", navigate)
         set_active = self.javascript[
             self.javascript.index("function setActiveServer"):self.javascript.index("function visibleServerNavigatorIds")
         ]
@@ -1143,6 +1147,10 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("list.scrollTop", self.javascript[
             self.javascript.index("function ensureActiveNavigatorItemVisible"):self.javascript.index("function pauseServerNavigationSync")
         ])
+        render_nav = self.javascript[
+            self.javascript.index("function renderServerNavigator(servers)"):self.javascript.index("function scheduleServerNavigatorSearchRender")
+        ]
+        self.assertIn("priorScrollTop", render_nav)
 
     def test_empty_profile_uses_a_dedicated_progressive_onboarding(self):
         for selector in (
