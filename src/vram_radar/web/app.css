@@ -2349,13 +2349,13 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 
 .server-card.is-acp .acp-period .task-period-head {
   padding: 9px 12px;
-  background: #f3f6f8;
+  background: var(--surface-3);
 }
 
 .server-card.is-acp .acp-period .acp-job-stack {
   padding: 10px;
   gap: 8px;
-  background: #f7f9fb;
+  background: var(--surface-2);
 }
 
 .acp-job-stack {
@@ -2369,10 +2369,10 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   gap: 10px 14px;
   align-items: center;
   padding: 12px 14px 12px 16px;
-  border: 1px solid #d5dee6;
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(36, 52, 60, 0.04);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 4%, transparent);
   position: relative;
 }
 
@@ -2424,7 +2424,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 
 .acp-job-meta-sep {
-  color: #b7c2ca;
+  color: var(--muted);
 }
 
 .acp-job-id {
@@ -2441,7 +2441,7 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 
 .acp-job-gpus span {
   font-weight: 650;
-  color: #4f646f;
+  color: var(--muted);
 }
 
 .acp-job-reason {
@@ -2470,9 +2470,9 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 
 /* ACP status badges: clearer shared colors, near-rect --radius-badge */
 .acp-job-empty {
-  border: 1px dashed #d5dee6;
+  border: 1px dashed var(--border-strong);
   border-radius: 10px;
-  background: #ffffff;
+  background: var(--surface);
 }
 
 .server-card.is-acp .error-panel .error-symbol {
@@ -2484,9 +2484,9 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
   gap: 8px;
   margin: 12px var(--server-content-inset, 20px) 0;
   padding: 12px 14px;
-  border: 1px solid #d5dee6;
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  background: #f5f7f9;
+  background: var(--surface-2);
 }
 
 .server-card.is-acp .error-title {
@@ -2518,9 +2518,9 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 }
 
 .server-card.is-acp .error-actions .button:not(.primary) {
-  background: #ffffff;
+  background: var(--surface);
   color: var(--muted);
-  border: 1px solid #d5dee6;
+  border: 1px solid var(--border-strong);
 }
 
 .server-card.is-acp .stale-data {
