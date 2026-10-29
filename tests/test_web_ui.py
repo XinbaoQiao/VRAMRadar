@@ -28,6 +28,25 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("document.documentElement.lang = language", self.localization)
         self.assertIn("english_interface_has_no_untranslated_chinese", (Path(__file__).parents[1] / "tools" / "benchmark_webview_ui.py").read_text(encoding="utf-8"))
 
+    
+    def test_paused_server_error_panel_keeps_resume_monitoring_control(self):
+        """Pause must not remove the only resume affordance (error panel + header toggle)."""
+        self.assertIn("function renderError(server)", self.javascript)
+        render_error = self.javascript[
+            self.javascript.index("function renderError(server)"):
+            self.javascript.index("function renderConfiguring(server)")
+        ]
+        self.assertIn("resumeMonitoring", render_error)
+        self.assertIn("toggle-server-monitoring", render_error)
+        self.assertIn("恢复监控", render_error)
+        # Header quick action keeps the same control with full labels when paused.
+        quick = self.javascript[
+            self.javascript.index("function renderServerQuickActions(server)"):
+            self.javascript.index("function renderServerQuickActions(server)") + 2500
+        ]
+        self.assertIn("${enabled ? '暂停监控' : '恢复监控'}", quick)
+        self.assertIn("Resume monitoring", self.localization)
+
     def test_ui_zoom_pin_pause_and_command_collapse_contracts(self):
         self.assertIn("function applyUiZoom", self.javascript)
         self.assertIn("function nudgeUiZoom", self.javascript)

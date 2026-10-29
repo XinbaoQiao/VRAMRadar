@@ -673,6 +673,7 @@
     ['暂停监控', 'Pause monitoring'],
     ['恢复自动监控', 'Resume automatic monitoring'], ['暂停自动监控', 'Pause automatic monitoring'],
     ['恢复监控', 'Resume monitoring'],
+    ['继续监控', 'Resume monitoring'],
     ['正在初始化', 'Initializing'],
     ['立即刷新', 'Refresh now'],
     ['设置与服务器', 'Settings and servers'],
