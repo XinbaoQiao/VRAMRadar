@@ -2475,7 +2475,7 @@ function acceptProfile(candidate) {
     ) return false;
   }
   currentProfile = candidate;
-  if (!navigatorResizeState && !navigatorSizeSaving) applyNavigatorSize(candidate.navigator_width || 0, candidate.navigator_height || 0);
+  if (!navigatorResizeState && !navigatorSizeSaving) { applyNavigatorSize(candidate.navigator_width || 0, candidate.navigator_height || 0); void repairNavigatorSizeIfNeeded(candidate); }
   window.VRAMRadarI18n?.setLanguage(currentProfile.ui_language || 'zh-CN');
   syncProfileConvenienceState(currentProfile);
   syncPendingAliasChoices(currentProfile);
@@ -3019,26 +3019,35 @@ async function persistServerNavigatorSide(side) {
 let navigatorResizeState = null;
 let navigatorSizeSaving = false;
 const NAVIGATOR_WIDTH_MIN = 190;
-const NAVIGATOR_WIDTH_HARD_MAX = 640;
+const NAVIGATOR_WIDTH_HARD_MAX = 420;
 const NAVIGATOR_HEIGHT_MIN = 240;
-const NAVIGATOR_HEIGHT_HARD_MAX = 1600;
-const NAVIGATOR_MAIN_RESERVE_PX = 280;
-const NAVIGATOR_BOTTOM_RESERVE_PX = 12;
+const NAVIGATOR_HEIGHT_HARD_MAX = 900;
+const NAVIGATOR_MAIN_RESERVE_PX = 360;
+const NAVIGATOR_BOTTOM_RESERVE_PX = 24;
 function navigatorViewportSizeLimits() {
   const viewportWidth = Math.max(1, Math.floor(layoutPxFromViewportRect(window.innerWidth || document.documentElement.clientWidth || 0)));
   const viewportHeight = Math.max(1, Math.floor(layoutPxFromViewportRect(window.innerHeight || document.documentElement.clientHeight || 0)));
   const topReserve = Math.max(78, Math.min(160, Math.round(viewportHeight * 0.14))) + NAVIGATOR_BOTTOM_RESERVE_PX;
+  const widthCapByViewport = Math.min(viewportWidth - NAVIGATOR_MAIN_RESERVE_PX, Math.floor(viewportWidth * 0.42));
   return {
     minWidth: NAVIGATOR_WIDTH_MIN,
-    maxWidth: Math.max(NAVIGATOR_WIDTH_MIN, Math.min(NAVIGATOR_WIDTH_HARD_MAX, viewportWidth - NAVIGATOR_MAIN_RESERVE_PX)),
+    maxWidth: Math.max(NAVIGATOR_WIDTH_MIN, Math.min(NAVIGATOR_WIDTH_HARD_MAX, widthCapByViewport)),
     minHeight: NAVIGATOR_HEIGHT_MIN,
-    maxHeight: Math.max(NAVIGATOR_HEIGHT_MIN, Math.min(NAVIGATOR_HEIGHT_HARD_MAX, viewportHeight - topReserve)),
+    maxHeight: Math.max(NAVIGATOR_HEIGHT_MIN, Math.min(NAVIGATOR_HEIGHT_HARD_MAX, viewportHeight - topReserve, Math.floor(viewportHeight * 0.72))),
   };
 }
 function clampNavigatorSize(width = 0, height = 0) {
   const limits = navigatorViewportSizeLimits();
-  const nextWidth = width ? Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, Number(width) || 0))) : 0;
-  const nextHeight = height ? Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, Number(height) || 0))) : 0;
+  const rawWidth = Number(width) || 0;
+  const rawHeight = Number(height) || 0;
+  // Drop oversized legacy saves instead of keeping a clipped giant that still
+  // drives transform/children via the CSS variable.
+  const nextWidth = rawWidth <= 0 ? 0
+    : rawWidth > NAVIGATOR_WIDTH_HARD_MAX ? 0
+    : Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, rawWidth)));
+  const nextHeight = rawHeight <= 0 ? 0
+    : rawHeight > NAVIGATOR_HEIGHT_HARD_MAX ? 0
+    : Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, rawHeight)));
   return [nextWidth, nextHeight];
 }
 function applyNavigatorSize(width = 0, height = 0) {
@@ -3050,6 +3059,25 @@ function applyNavigatorSize(width = 0, height = 0) {
   else nav.style.removeProperty('--navigator-height');
   nav.classList.toggle('has-custom-size', Boolean(nextHeight));
   return [nextWidth, nextHeight];
+}
+let navigatorSizeRepairScheduled = false;
+async function repairNavigatorSizeIfNeeded(profile = currentProfile) {
+  if (!profile || navigatorResizeState || navigatorSizeSaving || navigatorSizeRepairScheduled) return;
+  const rawW = Number(profile.navigator_width) || 0;
+  const rawH = Number(profile.navigator_height) || 0;
+  if (!rawW && !rawH) return;
+  const [nextW, nextH] = clampNavigatorSize(rawW, rawH);
+  if (nextW === rawW && nextH === rawH) return;
+  navigatorSizeRepairScheduled = true;
+  try {
+    const result = await api.set_navigator_size(nextW, nextH);
+    if (result?.ok) acceptProfile(result.profile);
+    else applyNavigatorSize(nextW, nextH);
+  } catch (_error) {
+    applyNavigatorSize(nextW, nextH);
+  } finally {
+    navigatorSizeRepairScheduled = false;
+  }
 }
 function detachNavigatorResizeWindowListeners() {
   window.removeEventListener('pointermove', moveNavigatorResize, true);
@@ -3084,12 +3112,18 @@ function moveNavigatorResize(event) {
   const limits = navigatorViewportSizeLimits();
   const dx = layoutPxFromViewportRect(event.clientX-drag.x);
   const dy = layoutPxFromViewportRect(event.clientY-drag.y);
+  const resizingWidth = drag.edge.includes('w') || drag.edge.includes('e');
+  const resizingHeight = drag.edge.includes('s');
   const widthDelta = drag.edge.includes('w') ? -dx : drag.edge.includes('e') ? dx : 0;
-  const heightDelta = drag.edge.includes('s') ? dy : 0;
-  drag.next = [
-    Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, drag.width + widthDelta))),
-    Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, drag.height + heightDelta))),
-  ];
+  const heightDelta = resizingHeight ? dy : 0;
+  const nextWidth = resizingWidth
+    ? Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, drag.width + widthDelta)))
+    : (drag.previous[0] || drag.width);
+  // Width-only drags must not invent a custom height (that toggles has-custom-size and flashes layout).
+  const nextHeight = resizingHeight
+    ? Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, drag.height + heightDelta)))
+    : (drag.previous[1] || 0);
+  drag.next = [nextWidth, nextHeight];
   applyNavigatorSize(...drag.next);
   event.preventDefault();
 }
@@ -7362,6 +7396,7 @@ window.addEventListener('resize', () => {
   scheduleStuckChromeUpdate();
   if (!navigatorResizeState && !navigatorSizeSaving) {
     applyNavigatorSize(currentProfile?.navigator_width || 0, currentProfile?.navigator_height || 0);
+    void repairNavigatorSizeIfNeeded(currentProfile);
   }
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
