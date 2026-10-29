@@ -3026,6 +3026,17 @@ function applyNavigatorSize(width = 0, height = 0) {
   else nav.style.removeProperty('--navigator-height');
   nav.classList.toggle('has-custom-size', Boolean(height));
 }
+function detachNavigatorResizeWindowListeners() {
+  window.removeEventListener('pointermove', moveNavigatorResize, true);
+  window.removeEventListener('pointerup', finishNavigatorResizeFromWindow, true);
+  window.removeEventListener('pointercancel', cancelNavigatorResizeFromWindow, true);
+}
+function finishNavigatorResizeFromWindow(event) {
+  void finishNavigatorResize(event, false);
+}
+function cancelNavigatorResizeFromWindow(event) {
+  void finishNavigatorResize(event, true);
+}
 function beginNavigatorResize(event) {
   const handle = event.target.closest('[data-resize]');
   if (!handle || event.button !== 0 || navigatorSizeSaving) return;
@@ -3034,8 +3045,13 @@ function beginNavigatorResize(event) {
     width: layoutPxFromViewportRect(rect.width), height: layoutPxFromViewportRect(rect.height),
     previous: [currentProfile?.navigator_width || 0, currentProfile?.navigator_height || 0]};
   ui.serverNavigator.classList.add('resizing');
-  handle.setPointerCapture?.(event.pointerId);
+  detachNavigatorResizeWindowListeners();
+  window.addEventListener('pointermove', moveNavigatorResize, true);
+  window.addEventListener('pointerup', finishNavigatorResizeFromWindow, true);
+  window.addEventListener('pointercancel', cancelNavigatorResizeFromWindow, true);
+  try { handle.setPointerCapture?.(event.pointerId); } catch (_) {}
   event.preventDefault();
+  event.stopPropagation();
 }
 function moveNavigatorResize(event) {
   const drag = navigatorResizeState;
@@ -3049,10 +3065,13 @@ function moveNavigatorResize(event) {
 }
 async function finishNavigatorResize(event, cancelled = false) {
   const drag = navigatorResizeState;
-  if (!drag || event.pointerId !== drag.id) return;
+  if (!drag || (event && event.pointerId != null && event.pointerId !== drag.id)) return;
   navigatorResizeState = null;
+  detachNavigatorResizeWindowListeners();
   ui.serverNavigator.classList.remove('resizing');
-  if (drag.handle.hasPointerCapture?.(drag.id)) drag.handle.releasePointerCapture(drag.id);
+  try {
+    if (drag.handle.hasPointerCapture?.(drag.id)) drag.handle.releasePointerCapture(drag.id);
+  } catch (_) {}
   if (cancelled || !drag.next) { applyNavigatorSize(...drag.previous); return; }
   navigatorSizeSaving = true;
   try {
@@ -3065,11 +3084,11 @@ async function finishNavigatorResize(event, cancelled = false) {
   } finally { navigatorSizeSaving = false; }
 }
 ui.serverNavigator.addEventListener('pointerdown', beginNavigatorResize);
-ui.serverNavigator.addEventListener('pointermove', moveNavigatorResize);
-ui.serverNavigator.addEventListener('pointerup', event => void finishNavigatorResize(event));
-ui.serverNavigator.addEventListener('pointercancel', event => void finishNavigatorResize(event, true));
 ui.serverNavigator.addEventListener('lostpointercapture', event => {
-  if (navigatorResizeState) void finishNavigatorResize(event, true);
+  // Commit if the user already dragged; only revert when nothing moved.
+  if (navigatorResizeState && event.pointerId === navigatorResizeState.id) {
+    void finishNavigatorResize(event, !navigatorResizeState.next);
+  }
 });
 
 function beginServerNavigatorDrag(event) {
