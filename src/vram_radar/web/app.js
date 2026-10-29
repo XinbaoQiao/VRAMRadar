@@ -3018,13 +3018,38 @@ async function persistServerNavigatorSide(side) {
 
 let navigatorResizeState = null;
 let navigatorSizeSaving = false;
+const NAVIGATOR_WIDTH_MIN = 190;
+const NAVIGATOR_WIDTH_HARD_MAX = 640;
+const NAVIGATOR_HEIGHT_MIN = 240;
+const NAVIGATOR_HEIGHT_HARD_MAX = 1600;
+const NAVIGATOR_MAIN_RESERVE_PX = 280;
+const NAVIGATOR_BOTTOM_RESERVE_PX = 12;
+function navigatorViewportSizeLimits() {
+  const viewportWidth = Math.max(1, Math.floor(layoutPxFromViewportRect(window.innerWidth || document.documentElement.clientWidth || 0)));
+  const viewportHeight = Math.max(1, Math.floor(layoutPxFromViewportRect(window.innerHeight || document.documentElement.clientHeight || 0)));
+  const topReserve = Math.max(78, Math.min(160, Math.round(viewportHeight * 0.14))) + NAVIGATOR_BOTTOM_RESERVE_PX;
+  return {
+    minWidth: NAVIGATOR_WIDTH_MIN,
+    maxWidth: Math.max(NAVIGATOR_WIDTH_MIN, Math.min(NAVIGATOR_WIDTH_HARD_MAX, viewportWidth - NAVIGATOR_MAIN_RESERVE_PX)),
+    minHeight: NAVIGATOR_HEIGHT_MIN,
+    maxHeight: Math.max(NAVIGATOR_HEIGHT_MIN, Math.min(NAVIGATOR_HEIGHT_HARD_MAX, viewportHeight - topReserve)),
+  };
+}
+function clampNavigatorSize(width = 0, height = 0) {
+  const limits = navigatorViewportSizeLimits();
+  const nextWidth = width ? Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, Number(width) || 0))) : 0;
+  const nextHeight = height ? Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, Number(height) || 0))) : 0;
+  return [nextWidth, nextHeight];
+}
 function applyNavigatorSize(width = 0, height = 0) {
   const nav = ui.serverNavigator;
-  if (width) nav.style.setProperty('--navigator-panel-width', `min(${Math.max(190, Math.min(640, width))}px, calc(100vw - 70px))`);
+  const [nextWidth, nextHeight] = clampNavigatorSize(width, height);
+  if (nextWidth) nav.style.setProperty('--navigator-panel-width', `${nextWidth}px`);
   else nav.style.removeProperty('--navigator-panel-width');
-  if (height) nav.style.setProperty('--navigator-height', `${Math.max(240, Math.min(1600, height))}px`);
+  if (nextHeight) nav.style.setProperty('--navigator-height', `${nextHeight}px`);
   else nav.style.removeProperty('--navigator-height');
-  nav.classList.toggle('has-custom-size', Boolean(height));
+  nav.classList.toggle('has-custom-size', Boolean(nextHeight));
+  return [nextWidth, nextHeight];
 }
 function detachNavigatorResizeWindowListeners() {
   window.removeEventListener('pointermove', moveNavigatorResize, true);
@@ -3056,10 +3081,15 @@ function beginNavigatorResize(event) {
 function moveNavigatorResize(event) {
   const drag = navigatorResizeState;
   if (!drag || event.pointerId !== drag.id) return;
+  const limits = navigatorViewportSizeLimits();
   const dx = layoutPxFromViewportRect(event.clientX-drag.x);
   const dy = layoutPxFromViewportRect(event.clientY-drag.y);
-  drag.next = [Math.round(Math.max(190, Math.min(640, drag.width + (drag.edge.includes('w') ? -dx : drag.edge.includes('e') ? dx : 0)))),
-    Math.round(Math.max(240, Math.min(1600, drag.height + (drag.edge.includes('s') ? dy : 0))))];
+  const widthDelta = drag.edge.includes('w') ? -dx : drag.edge.includes('e') ? dx : 0;
+  const heightDelta = drag.edge.includes('s') ? dy : 0;
+  drag.next = [
+    Math.round(Math.max(limits.minWidth, Math.min(limits.maxWidth, drag.width + widthDelta))),
+    Math.round(Math.max(limits.minHeight, Math.min(limits.maxHeight, drag.height + heightDelta))),
+  ];
   applyNavigatorSize(...drag.next);
   event.preventDefault();
 }
@@ -3075,7 +3105,7 @@ async function finishNavigatorResize(event, cancelled = false) {
   if (cancelled || !drag.next) { applyNavigatorSize(...drag.previous); return; }
   navigatorSizeSaving = true;
   try {
-    const result = await api.set_navigator_size(...drag.next);
+    const result = await api.set_navigator_size(...clampNavigatorSize(...drag.next));
     if (!result?.ok) throw new Error(result?.error || '无法保存侧栏尺寸');
     acceptProfile(result.profile);
   } catch (error) {
@@ -7330,6 +7360,9 @@ window.addEventListener('resize', () => {
   syncStickyLayoutOffsets();
   scheduleServerNavigationSync();
   scheduleStuckChromeUpdate();
+  if (!navigatorResizeState && !navigatorSizeSaving) {
+    applyNavigatorSize(currentProfile?.navigator_width || 0, currentProfile?.navigator_height || 0);
+  }
 }, {passive: true});
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) stopQuotaMonitor();
