@@ -5615,6 +5615,7 @@ def main(argv: list[str] | None = None) -> int:
                     js_api=api,
                     width=initial_geometry.width,
                     height=initial_geometry.height,
+                    resizable=True,
                     min_size=(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT),
                     background_color="#071017",
                     hidden=bool(args.start_hidden),

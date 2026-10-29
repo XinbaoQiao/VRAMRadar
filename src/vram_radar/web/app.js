@@ -387,6 +387,12 @@ const taskStateIcon = state => ({
 })[state] || 'clock';
 
 
+function clampUiZoom(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) return 1;
+  return Math.min(UI_ZOOM_MAX, Math.max(UI_ZOOM_MIN, Math.round(numberValue * 100) / 100));
+}
+
 function loadUiZoomPreference() {
   try {
     const stored = localStorage.getItem(UI_ZOOM_STORAGE_KEY);

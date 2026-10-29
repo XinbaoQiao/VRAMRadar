@@ -93,6 +93,7 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("['已暂停监控', 'Monitoring paused']", self.localization)
 
     def test_ui_zoom_pin_pause_and_command_collapse_contracts(self):
+        self.assertIn("function clampUiZoom", self.javascript)
         self.assertIn("function applyUiZoom", self.javascript)
         self.assertIn("function nudgeUiZoom", self.javascript)
         self.assertIn("vram-radar.ui-zoom", self.javascript)
