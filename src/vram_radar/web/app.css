@@ -1122,6 +1122,24 @@ input, select { width: 100%; min-height: 38px; border: 1px solid var(--border); 
   outline: 2px solid color-mix(in srgb, var(--border-strong) 45%, transparent);
   outline-offset: 0;
 }
+
+.settings-zoom-field { max-width: 320px; }
+.settings-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.settings-zoom-value {
+  min-width: 3.6em;
+  text-align: center;
+  color: var(--text);
+  font-family: var(--data-font);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.settings-zoom-field .editor-help { margin: 0; }
+
 .settings-field-follow {
   max-width: 240px;
   margin-left: 12px;

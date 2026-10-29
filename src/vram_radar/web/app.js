@@ -52,6 +52,10 @@ const ui = {
   refreshSeconds: document.getElementById('refresh-seconds'),
   language: document.getElementById('ui-language'),
   closeBehavior: document.getElementById('close-behavior'),
+  uiZoomOut: document.getElementById('ui-zoom-out'),
+  uiZoomIn: document.getElementById('ui-zoom-in'),
+  uiZoomReset: document.getElementById('ui-zoom-reset'),
+  uiZoomValue: document.getElementById('ui-zoom-value'),
   favoriteAlertEnabled: document.getElementById('favorite-alert-enabled'),
   favoriteAlertMinMemory: document.getElementById('favorite-alert-min-memory'),
   taskCompletionAlertEnabled: document.getElementById('task-completion-alert-enabled'),
@@ -407,10 +411,18 @@ function persistUiZoomPreference(value) {
   try { localStorage.setItem(UI_ZOOM_STORAGE_KEY, String(value)); } catch (_error) {}
 }
 
+function syncUiZoomControls() {
+  if (!ui.uiZoomValue) return;
+  ui.uiZoomValue.textContent = `${Math.round(uiZoom * 100)}%`;
+  if (ui.uiZoomOut) ui.uiZoomOut.disabled = uiZoom <= UI_ZOOM_MIN + 1e-9;
+  if (ui.uiZoomIn) ui.uiZoomIn.disabled = uiZoom >= UI_ZOOM_MAX - 1e-9;
+}
+
 function applyUiZoom(value, {persist = true, announce = false} = {}) {
   uiZoom = clampUiZoom(value);
   document.documentElement.style.setProperty('--ui-zoom', String(uiZoom));
   if (persist) persistUiZoomPreference(uiZoom);
+  syncUiZoomControls();
   if (announce) showToast(`界面缩放 ${Math.round(uiZoom * 100)}%`);
   if (typeof syncStickyLayoutOffsets === 'function') syncStickyLayoutOffsets();
   scheduleStuckChromeUpdate();
@@ -7114,6 +7126,9 @@ ui.taskAlertIndicator.addEventListener('click', () => {
 });
 ui.markNotificationsRead.addEventListener('click', () => void markAllNotificationsRead());
 ui.clearNotifications.addEventListener('click', () => void clearAllNotifications());
+ui.uiZoomOut?.addEventListener('click', () => nudgeUiZoom(-UI_ZOOM_STEP));
+ui.uiZoomIn?.addEventListener('click', () => nudgeUiZoom(UI_ZOOM_STEP));
+ui.uiZoomReset?.addEventListener('click', () => applyUiZoom(1, {announce: true}));
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !ui.notificationCenter.hidden) {
     void setNotificationCenterOpen(false);

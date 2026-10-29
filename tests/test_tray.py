@@ -537,6 +537,30 @@ class TrayControllerTests(unittest.TestCase):
         self.assertTrue(form.ShowIcon)
         self.assertTrue(form.ShowInTaskbar)
 
+
+    def test_webview_zoom_control_is_disabled_for_css_ui_zoom(self):
+        settings = SimpleNamespace(IsZoomControlEnabled=True)
+        core = SimpleNamespace(Settings=settings)
+        control = SimpleNamespace(CoreWebView2=core, CoreWebView2InitializationCompleted=None)
+        browser = SimpleNamespace(webview=control)
+        form = SimpleNamespace(
+            Handle=1,
+            browser=browser,
+            webview=control,
+            IsHandleCreated=True,
+            Invoke=None,
+        )
+        window = SimpleNamespace(native=form, gui=None)
+
+        with patch("vram_radar.tray.sys.platform", "win32"):
+            self.assertTrue(tray.configure_windows_webview_zoom(window))
+
+        self.assertFalse(settings.IsZoomControlEnabled)
+
+    def test_webview_zoom_configuration_is_a_safe_noop_off_windows(self):
+        with patch("vram_radar.tray.sys.platform", "darwin"):
+            self.assertFalse(tray.configure_windows_webview_zoom(Mock()))
+
     def test_native_caption_customization_is_a_safe_noop_on_macos(self):
         with patch("vram_radar.tray.sys.platform", "darwin"):
             self.assertFalse(tray.configure_windows_native_chrome(Mock()))

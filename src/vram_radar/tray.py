@@ -166,6 +166,87 @@ def configure_windows_native_chrome(window: Any) -> bool:
     return True
 
 
+
+def _windows_webview2_control(window: Any) -> Any | None:
+    """Return the WinForms WebView2 control for a pywebview window, if any."""
+
+    form = _native_window_form(window)
+    if form is None:
+        return None
+    browser = getattr(form, "browser", None)
+    control = getattr(browser, "webview", None) if browser is not None else None
+    if control is None:
+        control = getattr(form, "webview", None)
+    return control
+
+
+def configure_windows_webview_zoom(window: Any) -> bool:
+    """Let the page CSS zoom own Ctrl+/- and Ctrl+wheel.
+
+    pywebview's Edge backend always sets ``IsZoomControlEnabled = True``. That
+    steals Ctrl+wheel for the host ``ZoomFactor`` and fights ``--ui-zoom``.
+    Disable the native zoom control once CoreWebView2 is ready so the document
+    handlers can shrink and enlarge the UI normally.
+    """
+
+    if sys.platform != "win32":
+        return False
+    form = _native_window_form(window)
+    control = _windows_webview2_control(window)
+    if form is None or control is None:
+        return False
+
+    applied = {"ok": False}
+
+    def _disable_zoom_control() -> None:
+        try:
+            core = getattr(control, "CoreWebView2", None)
+            if core is None:
+                if getattr(form, "_vram_radar_webview_zoom_hooked", False):
+                    return
+                completed = getattr(control, "CoreWebView2InitializationCompleted", None)
+                if completed is None:
+                    return
+
+                def _on_ready(sender: Any, args: Any) -> None:
+                    try:
+                        if getattr(args, "IsSuccess", True) is False:
+                            return
+                        ready = getattr(sender, "CoreWebView2", None)
+                        if ready is None:
+                            return
+                        ready.Settings.IsZoomControlEnabled = False
+                        applied["ok"] = True
+                    except Exception:
+                        logging.getLogger("vram_radar").exception(
+                            "failed to disable WebView2 zoom control after init"
+                        )
+
+                completed += _on_ready
+                form._vram_radar_webview_zoom_hooked = True
+                return
+            core.Settings.IsZoomControlEnabled = False
+            applied["ok"] = True
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to disable WebView2 zoom control")
+
+    try:
+        invoke = getattr(form, "Invoke", None)
+        if callable(invoke) and bool(getattr(form, "IsHandleCreated", True)):
+            from System import Action
+
+            invoke(Action(_disable_zoom_control))
+        else:
+            _disable_zoom_control()
+    except Exception:
+        try:
+            _disable_zoom_control()
+        except Exception:
+            logging.getLogger("vram_radar").exception("failed to disable WebView2 zoom control")
+            return False
+    return bool(applied["ok"])
+
+
 def native_window_is_normal(window: Any) -> bool:
     """Return whether a native window is neither minimized nor maximized."""
 

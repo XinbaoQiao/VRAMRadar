@@ -109,6 +109,15 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn(".server-status-label { display: none; }", self.styles)
         self.assertIn("--ui-zoom", self.styles)
         self.assertIn("html { zoom: var(--ui-zoom, 1); }", self.styles)
+        self.assertIn("function syncUiZoomControls", self.javascript)
+        self.assertIn("ui-zoom-in", self.markup)
+        self.assertIn("ui-zoom-out", self.markup)
+        self.assertIn("ui-zoom-reset", self.markup)
+        self.assertIn(".settings-zoom-controls", self.styles)
+        self.assertIn(
+            "configure_windows_webview_zoom",
+            (Path(__file__).parents[1] / "src" / "vram_radar" / "shell.py").read_text(encoding="utf-8"),
+        )
         self.assertIn("function orderedServersForDisplay", self.javascript)
         self.assertIn("function serverDisplayRank", self.javascript)
         self.assertIn("function serverIsPaused", self.javascript)
