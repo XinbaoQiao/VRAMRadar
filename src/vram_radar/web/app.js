@@ -223,6 +223,7 @@ function updateRetryDelay(failures, code) {
 let recommendationRequested = false;
 let activeServerId = '';
 let serverNavigationFrame = null;
+let serverNavigationSyncPausedUntil = 0;
 let stuckChromeFrame = null;
 let cachedTitlebarHeightPx = 62;
 let lastStuckServerId = '';
@@ -3379,10 +3380,36 @@ function renderServerNavigatorItem(server, index) {
   return `<div class="server-navigator-entry${paused ? ' is-paused' : ''}${pinned ? ' is-pinned' : ''}" data-server-id="${escapeHtml(server.server_id)}"><button class="server-navigator-item ${escapeHtml(state)}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-controls="${escapeHtml(anchor)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"><span class="server-navigator-marker"><span>${position}</span><i class="status-dot ${escapeHtml(state)}"></i></span><span class="server-navigator-copy"><strong>${escapeHtml(server.display_name)}</strong>${pinned ? `<span class="server-navigator-pin-mark" title="${escapeHtml(localizedText('已置顶'))}">${icon('pin')}</span>` : ''}${moduleCueMarkup}${favoriteKindMarkup}<span>${escapeHtml(serverNavigatorResourceSummary(server))}</span><small>${escapeHtml(taskSummary)}</small></span></button><button class="server-navigator-favorite favorite-server${favorite ? ' active' : ''}" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="${favorite}" aria-label="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}" title="${escapeHtml(favorite ? localizedText('取消收藏这台服务器') : localizedText('收藏这台服务器'))}">${icon('star')}</button></div>`;
 }
 
+function ensureActiveNavigatorItemVisible(item) {
+  // Scroll only the rail list — never the page — so the cyan active marker
+  // stays in view when a lower server becomes current.
+  const list = ui.serverNavigatorList;
+  if (!list || !item?.isConnected) return;
+  const listRect = list.getBoundingClientRect();
+  const itemRect = item.getBoundingClientRect();
+  if (listRect.height <= 0 || itemRect.height <= 0) return;
+  if (itemRect.top < listRect.top) list.scrollTop += itemRect.top - listRect.top;
+  else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom;
+}
+
+function pauseServerNavigationSync(ms = 520) {
+  // Sidebar jumps scroll the page; without a pause the spy snaps the rail
+  // marker back to a tall previous card that still covers the old focus line.
+  const until = Date.now() + Math.max(0, ms);
+  if (until > serverNavigationSyncPausedUntil) serverNavigationSyncPausedUntil = until;
+  if (serverNavigationFrame != null) {
+    window.cancelAnimationFrame(serverNavigationFrame);
+    serverNavigationFrame = null;
+  }
+}
+
 function setActiveServer(serverId) {
   if (!serverId) return;
   const nextItem = serverNavigatorItems.get(serverId);
-  if (activeServerId === serverId && nextItem?.getAttribute('aria-current') === 'location') return;
+  if (activeServerId === serverId && nextItem?.getAttribute('aria-current') === 'location') {
+    ensureActiveNavigatorItemVisible(nextItem);
+    return;
+  }
   if (activeServerId && activeServerId !== serverId) {
     captureServerLeavePosition(activeServerId);
   }
@@ -3395,6 +3422,7 @@ function setActiveServer(serverId) {
   if (nextItem) {
     nextItem.classList.add('active');
     nextItem.setAttribute('aria-current', 'location');
+    ensureActiveNavigatorItemVisible(nextItem);
   }
   updateServerNavigatorPosition();
   updateLocationStrip();
@@ -3425,11 +3453,20 @@ function syncActiveServerFromScroll() {
   serverNavigationFrame = null;
   if (ui.serverNavigator.hidden) return;
   if (!serverNavigationCards.length) return;
-  const focusLine = Math.min(window.innerHeight * .3, 260);
+  if (Date.now() < serverNavigationSyncPausedUntil) return;
+  const titlebar = cachedTitlebarHeightPx
+    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
+    || 62;
+  const availableHeight = Math.max(160, window.innerHeight - titlebar);
+  // Keep the same landing line as scrollServerIntoVisualCenter so a sidebar
+  // jump to a lower server does not hand the rail marker back to the tall card above.
+  const focusLine = titlebar + availableHeight * 0.32;
   const activeCard = serverNavigationCardsById.get(activeServerId);
   if (activeCard) {
+    const head = activeCard.querySelector('.server-head') || activeCard;
+    const headRect = head.getBoundingClientRect();
     const activeRect = activeCard.getBoundingClientRect();
-    if (activeRect.top <= focusLine && activeRect.bottom > focusLine) return;
+    if (headRect.top <= focusLine + 56 && activeRect.bottom > focusLine - 24) return;
   }
   let low = 0;
   let high = serverNavigationCards.length - 1;
@@ -3448,19 +3485,14 @@ function syncActiveServerFromScroll() {
     : precedingIndex >= serverNavigationCards.length - 1
       ? [serverNavigationCards.length - 1]
       : [precedingIndex, precedingIndex + 1];
-  // A tall expanded card owns the focus line even when the next heading is nearer.
-  if (precedingIndex >= 0) {
-    const containingCard = serverNavigationCards[precedingIndex];
-    if (containingCard.getBoundingClientRect().bottom > focusLine) {
-      setActiveServer(containingCard.dataset.serverId);
-      return;
-    }
-  }
+  // Prefer the nearest server heading. A tall previous card may still cover the
+  // focus line after a lower-server jump; heading distance keeps the marker moving.
   let closest = null;
   let closestDistance = Number.POSITIVE_INFINITY;
   candidateIndexes.forEach(index => {
     const card = serverNavigationCards[index];
-    const distance = Math.abs(card.getBoundingClientRect().top - focusLine);
+    const head = card.querySelector('.server-head') || card;
+    const distance = Math.abs(head.getBoundingClientRect().top - focusLine);
     if (distance < closestDistance) {
       closest = card;
       closestDistance = distance;
@@ -3471,6 +3503,7 @@ function syncActiveServerFromScroll() {
 
 function scheduleServerNavigationSync() {
   if (ui.serverNavigator.hidden) return;
+  if (Date.now() < serverNavigationSyncPausedUntil) return;
   if (serverNavigationFrame != null) return;
   serverNavigationFrame = window.requestAnimationFrame(syncActiveServerFromScroll);
 }
@@ -3583,6 +3616,7 @@ function navigateToServer(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId))
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
+  pauseServerNavigationSync(560);
   setActiveServer(serverId);
   restoreServerLeavePosition(serverId);
   // Sidebar clicks must land near visual center. Leave-restore / under-titlebar
