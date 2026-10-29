@@ -327,7 +327,14 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px; margin: 0 au
 .server-quick-actions { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .server-quick-actions .button { min-height: 30px; min-width: 30px; padding: 3px 6px; border-color: transparent; background: transparent; box-shadow: none; font-size: 12px; color: var(--muted); }
 .pin-server.active { color: var(--cyan-text); border-color: color-mix(in srgb, var(--cyan) 45%, var(--border)); background: color-mix(in srgb, var(--cyan) 12%, var(--surface)); }
-.server-card.is-paused { opacity: 1; background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--text-muted) 45%, transparent); outline-offset: -1px; }
+.server-card.is-paused { opacity: 1; background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--amber) 55%, transparent); border-color: color-mix(in srgb, var(--amber) 28%, var(--border)); }
+.toggle-server-monitoring:hover { color: var(--text); border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); background: color-mix(in srgb, var(--amber) 8%, var(--surface)); }
+.toggle-server-monitoring:active { transform: translateY(1px) scale(.97); }
+.toggle-server-monitoring.is-pending { opacity: .82; cursor: progress; }
+.toggle-server-monitoring[aria-pressed="false"],
+.toggle-server-monitoring.is-monitoring-paused { color: var(--amber-text); border-color: color-mix(in srgb, var(--amber) 45%, var(--border)); background: color-mix(in srgb, var(--amber) 10%, var(--surface)); }
+.server-pause-notice { margin: 0 0 10px; padding: 8px 10px; border-radius: var(--radius-md); border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border)); background: color-mix(in srgb, var(--amber) 10%, var(--surface)); color: var(--amber-text); font-size: var(--font-small); font-weight: 620; animation: surface-enter .2s var(--motion-ease); }
+.status-dot.disabled { background: var(--amber); }
 .server-navigator-entry.is-paused { opacity: .72; }
 .server-navigator-pin-mark { display: inline-block; margin-left: 4px; color: var(--cyan-text); font-size: var(--font-caption); font-weight: 700; }
 .server-navigator-pin-mark .ui-icon { width: 12px; height: 12px; vertical-align: -1px; }

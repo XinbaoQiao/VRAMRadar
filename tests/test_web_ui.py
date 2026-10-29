@@ -58,6 +58,24 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("return 2", rank)
         self.assertIn(".server-card.is-paused", self.styles)
 
+    def test_pause_resume_gives_immediate_click_feedback(self):
+        """Pause/resume must feel clicked: optimistic paint, toast, in-card notice."""
+        enabled = self.javascript[
+            self.javascript.index("async function setServerEnabled"):
+            self.javascript.index("async function openServerTerminal")
+        ]
+        self.assertIn("function paintServerMonitoringControls", self.javascript)
+        self.assertIn("function flashServerMonitoringNotice", self.javascript)
+        self.assertIn("paintServerMonitoringControls(serverId, enabled, {pending: true})", enabled)
+        self.assertIn("flashServerMonitoringNotice(serverId, enabled)", enabled)
+        self.assertIn("showToast(enabled ? '已恢复监控' : '已暂停监控')", enabled)
+        self.assertIn("server-pause-notice", self.javascript)
+        self.assertIn(".toggle-server-monitoring:hover", self.styles)
+        self.assertIn(".toggle-server-monitoring.is-monitoring-paused", self.styles)
+        self.assertIn(".server-pause-notice", self.styles)
+        self.assertIn(".status-dot.disabled", self.styles)
+        self.assertIn("['已暂停监控', 'Monitoring paused']", self.localization)
+
     def test_ui_zoom_pin_pause_and_command_collapse_contracts(self):
         self.assertIn("function applyUiZoom", self.javascript)
         self.assertIn("function nudgeUiZoom", self.javascript)

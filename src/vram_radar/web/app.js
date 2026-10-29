@@ -2815,14 +2815,68 @@ async function setFavoriteGpu(serverId, gpuIndex) {
 }
 
 
+const serverMonitoringToggleInFlight = new Set();
+
+function paintServerMonitoringControls(serverId, enabled, {pending = false} = {}) {
+  const selector = `.toggle-server-monitoring[data-server-id="${CSS.escape(String(serverId))}"]`;
+  document.querySelectorAll(selector).forEach(button => {
+    const label = enabled ? '暂停监控' : '恢复监控';
+    const aria = enabled ? '暂停监控这台服务器' : '恢复监控这台服务器';
+    button.disabled = Boolean(pending);
+    button.classList.toggle('is-pending', Boolean(pending));
+    button.classList.toggle('is-monitoring-paused', !enabled);
+    button.setAttribute('aria-pressed', String(enabled));
+    button.setAttribute('aria-label', localizedText(aria));
+    button.title = localizedText(label);
+    button.innerHTML = `${icon(enabled ? 'pause' : 'play')}<span>${localizedText(label)}</span>`;
+  });
+  const card = serverNavigationCardsById.get(serverId)
+    || document.querySelector(`.server-card[data-server-id="${CSS.escape(String(serverId))}"]`);
+  if (!card) return;
+  card.classList.toggle('is-paused', !enabled);
+  card.classList.toggle('disabled', !enabled);
+  const statusLabel = card.querySelector('.server-status-label');
+  const statusDot = card.querySelector('.status-dot');
+  if (!enabled) {
+    if (statusLabel) statusLabel.textContent = localizedText('监控已暂停');
+    if (statusDot) statusDot.className = 'status-dot disabled';
+  } else if (statusDot?.classList.contains('disabled')) {
+    statusDot.className = 'status-dot connecting';
+    if (statusLabel) statusLabel.textContent = localizedText('正在配置中');
+  }
+}
+
+function flashServerMonitoringNotice(serverId, enabled) {
+  const card = serverNavigationCardsById.get(serverId)
+    || document.querySelector(`.server-card[data-server-id="${CSS.escape(String(serverId))}"]`);
+  if (!card) return;
+  card.querySelectorAll('.server-pause-notice').forEach(node => node.remove());
+  const notice = document.createElement('div');
+  notice.className = 'server-pause-notice';
+  notice.setAttribute('role', 'status');
+  notice.textContent = localizedText(enabled ? '已恢复监控' : '已暂停监控');
+  const head = card.querySelector('.server-head');
+  if (head?.parentElement) head.after(notice);
+  else card.prepend(notice);
+  setTimeout(() => { if (notice.isConnected) notice.remove(); }, 2600);
+}
+
 async function setServerEnabled(serverId, enabled) {
   if (!api?.set_server_enabled) return showToast('请在设置中保存服务器启用状态');
+  const key = String(serverId);
+  if (serverMonitoringToggleInFlight.has(key)) return;
+  serverMonitoringToggleInFlight.add(key);
+  // Immediate click feedback: swap label/icon, status pill, toast, and in-card notice
+  // before the network refresh finishes — otherwise the click feels like a no-op.
+  paintServerMonitoringControls(serverId, enabled, {pending: true});
+  flashServerMonitoringNotice(serverId, enabled);
+  showToast(enabled ? '已恢复监控' : '已暂停监控');
   try {
     const result = await api.set_server_enabled(serverId, enabled);
     if (!result?.ok) throw new Error(result?.error || '无法更新服务器状态');
     if (result.profile) acceptProfile(result.profile);
-    showToast(enabled ? '已恢复监控' : '已暂停监控这台服务器');
     await refresh(true, serverId);
+    paintServerMonitoringControls(serverId, enabled, {pending: false});
     // Keep the paused/resumed card in view. Pause used to demote the card to a
     // distant tail; even in-place, the body collapses to the paused panel.
     const generation = bumpViewportScrollGeneration();
@@ -2838,7 +2892,10 @@ async function setServerEnabled(serverId, enabled) {
       requestAnimationFrame(recenter);
     });
   } catch (error) {
+    paintServerMonitoringControls(serverId, !enabled, {pending: false});
     showToast(error.message || String(error));
+  } finally {
+    serverMonitoringToggleInFlight.delete(key);
   }
 }
 
