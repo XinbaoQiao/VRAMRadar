@@ -47,6 +47,17 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("${enabled ? '暂停监控' : '恢复监控'}", quick)
         self.assertIn("Resume monitoring", self.localization)
 
+    def test_paused_servers_keep_display_order_in_place(self):
+        """Pausing must not relocate the card to a distant paused tail."""
+        rank = self.javascript[
+            self.javascript.index("function serverDisplayRank(server)"):
+            self.javascript.index("function orderedServersForDisplay(servers)")
+        ]
+        self.assertIn("pinnedServerIds.has(server.server_id)", rank)
+        self.assertNotIn("serverIsPaused", rank)
+        self.assertNotIn("return 2", rank)
+        self.assertIn(".server-card.is-paused", self.styles)
+
     def test_ui_zoom_pin_pause_and_command_collapse_contracts(self):
         self.assertIn("function applyUiZoom", self.javascript)
         self.assertIn("function nudgeUiZoom", self.javascript)
@@ -80,7 +91,14 @@ class WebUiContractTests(unittest.TestCase):
             self.javascript.index("async function openServerTerminal")
         ]
         self.assertIn("scrollServerIntoVisualCenter(serverId)", enabled)
-        self.assertIn("if (enabled)", enabled)
+        # Pause and resume both keep the card in view (no paused-tail demotion).
+        self.assertNotIn("if (enabled)", enabled)
+        rank = self.javascript[
+            self.javascript.index("function serverDisplayRank(server)"):
+            self.javascript.index("function orderedServersForDisplay(servers)")
+        ]
+        self.assertNotIn("serverIsPaused", rank)
+        self.assertNotIn("return 2", rank)
 
 
 

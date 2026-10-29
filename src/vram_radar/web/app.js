@@ -2238,7 +2238,7 @@ function renderError(server) {
   const securityBlocked = error.code === 'host_key_changed';
   const revalidate = disabled || securityBlocked ? '' : `<button class="button primary retry-server" type="button" data-server-id="${escapeHtml(server.server_id)}">重新验证</button>`;
   // Pausing must not remove the only resume control: keep a clear primary action here
-  // (header icon-only toggle is easy to miss after the card moves to the paused tail).
+  // even when the header toggle is icon-only at narrow widths.
   const resumeMonitoring = disabled
     ? `<button class="button primary toggle-server-monitoring" type="button" data-server-id="${escapeHtml(server.server_id)}" aria-pressed="false" aria-label="恢复监控这台服务器" title="恢复监控">${icon('play')}<span>恢复监控</span></button>`
     : '';
@@ -2823,21 +2823,20 @@ async function setServerEnabled(serverId, enabled) {
     if (result.profile) acceptProfile(result.profile);
     showToast(enabled ? '已恢复监控' : '已暂停监控这台服务器');
     await refresh(true, serverId);
-    if (enabled) {
-      // Unpause moves the card out of the paused tail into normal/pinned order.
-      const generation = bumpViewportScrollGeneration();
-      const recenter = () => {
-        if (generation !== viewportScrollGeneration) return;
+    // Keep the paused/resumed card in view. Pause used to demote the card to a
+    // distant tail; even in-place, the body collapses to the paused panel.
+    const generation = bumpViewportScrollGeneration();
+    const recenter = () => {
+      if (generation !== viewportScrollGeneration) return;
+      scrollServerIntoVisualCenter(serverId);
+      if (typeof serverCardOutsideViewport === 'function' && serverCardOutsideViewport(serverId)) {
         scrollServerIntoVisualCenter(serverId);
-        if (typeof serverCardOutsideViewport === 'function' && serverCardOutsideViewport(serverId)) {
-          scrollServerIntoVisualCenter(serverId);
-        }
-      };
-      requestAnimationFrame(() => {
-        recenter();
-        requestAnimationFrame(recenter);
-      });
-    }
+      }
+    };
+    requestAnimationFrame(() => {
+      recenter();
+      requestAnimationFrame(recenter);
+    });
   } catch (error) {
     showToast(error.message || String(error));
   }
@@ -3130,7 +3129,8 @@ function serverIsPaused(server) {
 }
 
 function serverDisplayRank(server) {
-  if (serverIsPaused(server)) return 2;
+  // Paused cards stay in pin/index order. Ranking them to a distant "paused
+  // tail" made 暂停监控 feel like the card disappeared from the list.
   if (pinnedServerIds.has(server.server_id)) return 0;
   return 1;
 }
