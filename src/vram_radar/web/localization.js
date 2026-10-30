@@ -18,7 +18,6 @@
     ['本地标识', 'Local identifier'],
     ["云任务", "Cloud jobs"],
     ["运行中", "Running"],
-    ["排队与启动", "Queued & starting"],
     ["已结束", "Finished"],
     ["异常", "Issues"],
     ["其他", "Other"],

@@ -3758,7 +3758,7 @@ function renderAcpPlatform(server) {
     const openAttr = taskGroupOpen(serverId, 'acp-jobs', groupKey, defaultOpen);
     return `<details class="task-group acp-period" data-task-group="${escapeHtml(groupKey)}" data-task-module="acp-jobs" data-server-id="${escapeHtml(serverId)}"${openAttr}>
       <summary>
-        <span class="acp-period-heading"><h5>${escapeHtml(title)}</h5></span>
+        <span class="task-owner-heading acp-period-heading"><h5>${escapeHtml(title)}</h5></span>
         <span class="task-group-meta">${number(list.length)} 条 ${icon('chevron', 'task-group-chevron')}</span>
       </summary>
       <div class="acp-job-stack" role="list">${cards}</div>
@@ -3768,17 +3768,11 @@ function renderAcpPlatform(server) {
   // Keep active work visible; collapse finished jobs by default so ~60 rows stay compact.
   const periods = [
     renderPeriod('运行中', buckets.running, 'acp-running', true),
-    renderPeriod('排队与启动', buckets.pending, 'acp-pending', true),
+    renderPeriod('排队', buckets.pending, 'acp-pending', true),
     renderPeriod('已结束', buckets.done, 'acp-done', false),
   ].join('');
 
   const empty = '<div class="module-empty acp-job-empty">暂无云任务</div>';
-
-  const pageSize = Number(platform.page_size) || 0;
-  const truncated = platform.list_complete === false && pageSize > 0 && jobs.length >= pageSize;
-  const truncateNote = truncated
-    ? `<p class="acp-page-note" role="note">当前只显示一页（最多 ${number(pageSize)} 条）。若任务不在这一页，并不代表平台没有该任务。</p>`
-    : '';
 
   const place = metaBits.length ? escapeHtml(metaBits.join(' · ')) : 'SenseCore / SLAI';
   return `<details class="cluster-module acp-module" data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}"${moduleOpen(server.server_id, 'acp-jobs', true)} aria-label="云任务">
@@ -3791,7 +3785,7 @@ function renderAcpPlatform(server) {
       <span class="details-chevron">${icon('chevron')}</span>
     </summary>
     <div class="cluster-content">
-      ${truncateNote}${periods || empty}
+      ${periods || empty}
       <details class="module-context" data-context-note="acp-scope">
         <summary>说明</summary>
         <p>只读查看云平台任务列表，不提供 SSH、目录浏览或实时显存。名称过长时会自动缩短，完整标识可在悬停时查看。</p>
