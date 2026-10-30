@@ -221,7 +221,7 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertIn("navigationFocusMetrics()", center)
         self.assertIn("focusLine", center)
-        self.assertIn("availableHeight * 0.32", self.javascript[
+        self.assertIn("availableHeight * 0.22", self.javascript[
             self.javascript.index("function navigationFocusMetrics()"):
             self.javascript.index("function serverScrollProbe")
         ])
@@ -996,11 +996,13 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("function clampNavigatorSize(", self.javascript)
         self.assertIn("NAVIGATOR_MAIN_RESERVE_PX", self.javascript)
         self.assertIn("NAVIGATOR_WIDTH_HARD_MAX = 420", self.javascript)
-        self.assertIn("translate3d(calc(-100% + var(--navigator-rail-width))", self.styles)
+        # Fixed box expands on hover so overflow hit-testing reaches server names.
+        self.assertIn(".server-navigator:is(:hover, :focus-within, .dragging, .resizing) { width: min(var(--navigator-panel-width)", self.styles)
+        self.assertNotIn("translate3d(calc(-100% + var(--navigator-rail-width))", self.styles)
 
         self.assertIn("max-width: var(--navigator-rail-width)", self.styles)
         self.assertIn(".server-navigator-panel { position: relative; box-sizing: border-box; width: 100%;", self.styles)
-        self.assertIn(".server-navigator:is(:hover, :focus-within, .dragging, .resizing) .server-navigator-panel { width: min(var(--navigator-panel-width)", self.styles)
+        self.assertIn(".server-navigator:is(:hover, :focus-within, .dragging, .resizing) .server-navigator-panel { width: 100%;", self.styles)
         self.assertIn(".server-navigator.has-custom-size:is(:hover, :focus-within, .dragging, .resizing)", self.styles)
         self.assertNotIn(".server-navigator.has-custom-size, .server-navigator.has-custom-size .server-navigator-panel { max-height:", self.styles)
         self.assertIn("overflow-x: hidden", self.styles)
@@ -1154,8 +1156,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("getBoundingClientRect().bottom", metrics)
         self.assertNotIn("layoutPxFromViewportRect(window.innerHeight", metrics)
         self.assertIn("contain: layout paint style", self.styles)
-        self.assertIn("will-change: transform", self.styles)
-        self.assertIn("transition: transform .24s var(--motion-ease)", self.styles)
+        self.assertIn("will-change: width", self.styles)
+        self.assertIn("transition: border-color .24s var(--motion-ease)", self.styles)
         self.assertNotIn("transition: width .2s ease", self.styles)
         schedule_sync = self.javascript[
             self.javascript.index("function scheduleServerNavigationSync"):self.javascript.index("function renderServerNavigator(servers)")

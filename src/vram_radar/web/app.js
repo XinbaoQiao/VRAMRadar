@@ -7031,7 +7031,10 @@ document.addEventListener('click', event => {
     }
   }
   const serverNavigatorItem = event.target.closest('.server-navigator-item');
-  if (serverNavigatorItem) navigateToServer(serverNavigatorItem.dataset.serverId);
+  if (serverNavigatorItem) {
+    navigateToServer(serverNavigatorItem.dataset.serverId);
+    return;
+  }
   const locationHome = event.target.closest('.server-location-home');
   if (locationHome) {
     scrollServerCardUnderTitlebar(locationHome.dataset.serverId || activeServerId);
