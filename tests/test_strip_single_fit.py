@@ -1,10 +1,10 @@
-"""Codex-only strip: compacted, then clipped, to the empty taskbar gap (never past Start)."""
+"""Codex-only strip: compacted, then clipped, to the empty taskbar gap right of Start."""
 import sys
 import types
 import unittest
 from unittest import mock
 
-from vram_radar.usage_surface import SINGLE_FIT_FACTORS, docked_point, docked_target, left_gap, place_single
+from vram_radar.usage_surface import SINGLE_FIT_FACTORS, docked_point, docked_target, place_single
 
 
 class FakeSize:
@@ -67,15 +67,13 @@ class SingleStripFitTests(unittest.TestCase):
         self.assertEqual(SINGLE_FIT_FACTORS[0], 1.0)
         self.assertGreaterEqual(min(SINGLE_FIT_FACTORS), 0.9)
 
-    def test_narrow_gap_reading_never_reaches_start(self):
-        # 150 % taskbar where only 51 px are free between the weather and Start.
+    def test_docked_strip_starts_right_of_start(self):
         bar = (0, 1528, 2560, 1600)
         elements = {"WidgetsButton": (9, 1528, 422, 1600), "StartButton": (509, 1528, 577, 1600)}
-        gap = left_gap(bar, elements, 18)
-        width, _, _ = layout(["82%", "6d 7h"], gap[1] - gap[0])
+        width, _, _ = layout(["82%", "6d 7h"], 200)
         x, _ = docked_point(bar, docked_target(bar, (2200, 1528, 2560, 1600), elements, (width, 51), 18), width)
-        self.assertEqual(x, gap[0])
-        self.assertLessEqual(x + width, elements["StartButton"][0] - 18)
+        self.assertEqual(x, elements["StartButton"][2] + 18)
+        self.assertGreaterEqual(x, elements["StartButton"][2])
 
 
 if __name__ == "__main__":

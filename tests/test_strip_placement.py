@@ -1,7 +1,8 @@
 import unittest
 
 from vram_radar.usage_surface import (PlacementDebouncer, TaskbarLayout, docked_point, docked_target,
-                                      exclude_rect, refresh_left_anchor, settle_color, usable_layout)
+                                      exclude_rect, refresh_left_anchor, settle_color, start_cluster_right,
+                                      usable_layout)
 
 BAR = (0, 1032, 1920, 1080)
 TRAY = (1700, 1032, 1920, 1080)
@@ -22,27 +23,21 @@ class FakeLayout(TaskbarLayout):
 
 class StripPlacementTests(unittest.TestCase):
     def test_left_slot_target_and_point(self):
+        # Right of Start (GOOD has no Search/TaskView): Start.right + default margin.
         target = docked_target(BAR, TRAY, GOOD, (200, 34))
         self.assertEqual(target[0], "left")
-        self.assertEqual(docked_point(BAR, target, 200), (156, 1039))
+        self.assertEqual(target[1], GOOD["StartButton"][2] + 6)
+        self.assertEqual(docked_point(BAR, target, 200), (GOOD["StartButton"][2] + 6, 1039))
 
-    def test_narrow_left_gap_keeps_left_anchor_instead_of_switching_sides(self):
-        # Reading from a 150 % taskbar where the Widgets edge reached x=422 (a second
-        # VRAM Radar strip beside the weather was read as weather content).  Placement
-        # caps that news-width edge (4 x bar height from the Widgets left) so the
-        # strip stays on the left; left_slot's "fits" answer is not the rule.
-        from vram_radar.usage_surface import left_slot, weather_place_right
+    def test_start_cluster_right_skips_search_and_task_view(self):
+        # Strip docks right of Start/Search/TaskView so Search stays clickable.
         bar = (0, 1528, 2560, 1600)
         elements = {"WidgetsButton": (9, 1528, 422, 1600), "StartButton": (509, 1528, 577, 1600),
                     "SearchButton": (580, 1540, 909, 1588), "TaskViewButton": (913, 1528, 979, 1600)}
-        capped = weather_place_right(elements["WidgetsButton"], bar) + 18
+        self.assertEqual(start_cluster_right(elements), 979)
         target = docked_target(bar, (2200, 1528, 2560, 1600), elements, (69, 51), 18)
         self.assertEqual(target[0], "left")
-        self.assertEqual(docked_point(bar, target, 69), (capped, 1538))
-        self.assertLess(capped, 422)   # news width must not set the left edge
-        # Capped edge leaves enough room for a 69 px strip; docked_target still
-        # answers "left" (the historical left_slot-None case was the uncapped gap).
-        self.assertEqual(left_slot(bar, elements, (69, 51), 18), (capped, 1538))
+        self.assertEqual(docked_point(bar, target, 69), (979 + 18, 1538))
 
     def test_empty_uia_defaults_to_tray_width_independent(self):
         # Empty UIA cannot tell centered from left-aligned; tray is the portable
@@ -60,11 +55,11 @@ class StripPlacementTests(unittest.TestCase):
         target = docked_target(BAR, TRAY, elements, (200, 34), 6)
         self.assertEqual(target[0], "tray")
 
-    def test_widgets_left_without_start_stays_left(self):
+    def test_widgets_left_without_start_uses_tray(self):
+        # No Start cluster to dock against: tray is the portable default.
         elements = {"WidgetsButton": (0, 1032, 150, 1080)}
         target = docked_target(BAR, TRAY, elements, (200, 34), 6)
-        self.assertEqual(target[0], "left")
-        self.assertEqual(target[1], 156)
+        self.assertEqual(target[0], "tray")
 
     def test_transient_lookup_failure_keeps_last_good(self):
         layout = FakeLayout([GOOD, {}, {"WidgetsButton": (0, 1032, 150, 1080)}, GOOD])
@@ -95,11 +90,11 @@ class StripPlacementTests(unittest.TestCase):
         self.assertEqual(layout.elements(1, BAR), GOOD)  # cached, no further read
 
     def test_own_window_excluded_from_layout(self):
-        own = (156, 1032, 356, 1080)
-        reading = dict(GOOD, first_app=(160, 1036, 200, 1076))
+        own = (754, 1032, 954, 1080)  # strip docked right of Start (748+6)
+        reading = dict(GOOD, first_app=(760, 1036, 800, 1076))
         self.assertEqual(exclude_rect(reading, own), GOOD)
         self.assertEqual(exclude_rect(GOOD, None), GOOD)
-        layout = FakeLayout([{"StartButton": (170, 1036, 210, 1076)}, GOOD])
+        layout = FakeLayout([{"StartButton": (760, 1036, 800, 1076)}, GOOD])
         self.assertEqual(layout.elements(1, BAR, own), {})
 
     def test_debouncer_needs_consistent_readings(self):
@@ -160,18 +155,15 @@ if __name__ == "__main__":
 class LeftAnchorStabilityTests(unittest.TestCase):
     """Quota strip left edge stays put across weather length and model width."""
 
-    def test_news_width_weather_does_not_move_left_edge_past_cap(self):
-        from vram_radar.usage_surface import weather_place_right
+    def test_weather_width_does_not_move_start_right_anchor(self):
         bar = (0, 1528, 2560, 1600)
         tray = (2200, 1528, 2560, 1600)
         temp = {"WidgetsButton": (9, 1528, 150, 1600), "StartButton": (623, 1528, 691, 1600)}
         news = {"WidgetsButton": (9, 1528, 480, 1600), "StartButton": (623, 1528, 691, 1600)}
         left_temp = docked_target(bar, tray, temp, (200, 51), 18)[1]
         left_news = docked_target(bar, tray, news, (200, 51), 18)[1]
-        self.assertEqual(left_temp, 150 + 18)
-        self.assertEqual(left_news, weather_place_right(news["WidgetsButton"], bar) + 18)
-        self.assertLess(left_news, 480)          # capped below raw news ink
-        self.assertLessEqual(left_news - left_temp, 4 * 72)  # within place span
+        self.assertEqual(left_temp, 691 + 18)
+        self.assertEqual(left_news, left_temp)  # weather ink no longer moves the strip
 
     def test_model_count_width_keeps_left_edge(self):
         target = docked_target(BAR, TRAY, GOOD, (200, 34))
@@ -206,12 +198,12 @@ class LeftAnchorStabilityTests(unittest.TestCase):
             bar = (0, 1000, 1920, 1000 + bar_h)
             tray = (1600, 1000, 1920, 1000 + bar_h)
             weather_end = 10 + round(bar_h * 2.5)
+            start_right = 700 + bar_h
             elements = {"WidgetsButton": (10, 1000, weather_end, 1000 + bar_h),
-                        "StartButton": (700, 1000, 700 + bar_h, 1000 + bar_h)}
+                        "StartButton": (700, 1000, start_right, 1000 + bar_h)}
             target = docked_target(bar, tray, elements, (180, max(20, bar_h - 14)), m)
             self.assertEqual(target[0], "left")
-            self.assertEqual(target[1], weather_end + m)
-            self.assertLess(target[1], (bar[0] + bar[2]) / 2)
+            self.assertEqual(target[1], start_right + m)
 
     def test_committed_left_survives_empty_via_refresh(self):
         # Simulates position(): empty UIA proposes tray, but refresh keeps left.

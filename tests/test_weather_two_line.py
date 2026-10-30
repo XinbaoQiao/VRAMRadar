@@ -86,7 +86,7 @@ class Running:
         x, y = us.docked_point(BAR, target, SIZE[0])
         self.own = (x, y, x + SIZE[0], y + SIZE[1])
         self.screen.own = self.own
-        assert self.own[2] <= RAW["StartButton"][0], self.own      # never over Start
+        assert self.own[0] >= RAW["StartButton"][2], self.own      # docked right of Start
         return self.own
 
     def gap(self):
@@ -121,37 +121,30 @@ class TwoLineWidget(unittest.TestCase):
         settled = layout.widest_weather(out, RAW["WidgetsButton"], own, now=0.0)
         self.assertGreater(settled["WidgetsButton"][2], own[0])          # steps right of the strip
 
-    def test_strip_left_of_line2_steps_clear_within_seconds(self):
-        # Strip settled while the widget showed line 1 only, then line 2 appears.
+    def test_strip_stays_right_of_start_when_line2_appears(self):
+        # Strip docks right of Start; weather line 2 no longer moves it.
         r = Running(Screen(line2=[]))
         for _ in range(6):
             r.tick()
-        self.assertEqual(r.own[0], text_end(LINE1) + MARGIN)
-        r.screen.line2 = list(LINE2_LONG)            # under the strip now
-        clear_at = None
+        anchor = us.start_cluster_right(RAW) + MARGIN
+        self.assertEqual(r.own[0], anchor)
+        r.screen.line2 = list(LINE2_LONG)
         for second in range(1, 31):
             r.tick()
-            if clear_at is None and r.gap() >= MARGIN:
-                clear_at = second
-        self.assertEqual(r.gap(), MARGIN)
-        self.assertIsNotNone(clear_at)
-        self.assertLessEqual(clear_at, 8)
+        self.assertEqual(r.own[0], anchor)
 
     def test_grows_from_short_to_long_second_line(self):
         r = Running(Screen(line2=LINE2_SHORT))
         for _ in range(6):
             r.tick()
-        self.assertEqual(r.gap(), MARGIN)
+        anchor = us.start_cluster_right(RAW) + MARGIN
+        self.assertEqual(r.own[0], anchor)
         r.screen.line2 = list(LINE2_LONG)
-        overlapped = 0
         for second in range(1, 21):
             r.tick()
-            if r.gap() < MARGIN:
-                overlapped = second
-        self.assertEqual(r.gap(), MARGIN)
-        self.assertLessEqual(overlapped, 8)
+        self.assertEqual(r.own[0], anchor)
 
-    def test_shrink_waits_20s(self):
+    def test_shrink_leaves_start_right_put(self):
         r = Running(Screen(line2=LINE2_LONG))
         for _ in range(6):
             r.tick()
@@ -159,10 +152,10 @@ class TwoLineWidget(unittest.TestCase):
         r.screen.line2 = list(LINE2_SHORT)
         for _ in range(12):
             r.tick()
-        self.assertEqual(r.own, wide)                 # held back
+        self.assertEqual(r.own, wide)
         for _ in range(30):
             r.tick()
-        self.assertEqual(r.gap(), MARGIN)
+        self.assertEqual(r.own, wide)
 
     def test_real_lock_screen_still_holds(self):
         r = Running(Screen(line2=LINE2_SHORT))

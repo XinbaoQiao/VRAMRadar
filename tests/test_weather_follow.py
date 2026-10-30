@@ -1,4 +1,4 @@
-"""Strip follows the weather text while running (grow / shrink / stale UIA rect)."""
+"""Weather measurement while the strip docks right of the Start cluster."""
 import unittest
 from unittest import mock
 
@@ -52,6 +52,9 @@ class Running:
         self.own = (x, y, x + SIZE[0], y + SIZE[1])
         return self.own
 
+    def anchor(self):
+        return us.start_cluster_right(RAW) + MARGIN
+
     def gap(self):
         return self.own[0] - self.screen.text_end
 
@@ -64,46 +67,38 @@ class Running:
         return moves
 
     def assertion(self):
-        assert self.own[2] <= RAW["StartButton"][0], self.own          # never over Start
+        # Docked immediately right of Start/Search/TaskView (never left of Start).
+        assert self.own[0] >= RAW["StartButton"][2], self.own
 
 
 class WeatherFollow(unittest.TestCase):
-    def test_settles_18px_right_of_text(self):
+    def test_settles_right_of_start_cluster(self):
         r = Running(150)
         r.run(6)
-        self.assertEqual(r.gap(), MARGIN)
+        self.assertEqual(r.own[0], r.anchor())
 
-    def test_grows_past_stale_uia_rect(self):
+    def test_weather_growth_does_not_move_start_right_strip(self):
         r = Running(150)
         r.run(6)
-        r.screen.text_end = 270           # wider than the 237 px rect, under the strip
-        overlapped = 0
-        for second in range(1, 31):
-            r.tick()
-            if r.gap() < MARGIN:
-                overlapped = second
-        self.assertEqual(r.gap(), MARGIN)
-        self.assertLessEqual(overlapped, 10)   # clear again within a few seconds
-        r.screen.text_end = 245          # small growth that stays visible: one prompt move
-        moves = r.run(8)
-        self.assertEqual((r.gap(), moves), (MARGIN + 25, 0))   # wider reading recently seen: no move back yet
+        r.screen.text_end = 270           # wider than the 237 px rect
+        moves = r.run(30)
+        self.assertEqual((moves, r.own[0]), (0, r.anchor()))
+        r.screen.text_end = 245
+        self.assertEqual(r.run(8), 0)
 
-    def test_small_growth_moves_promptly(self):
+    def test_small_growth_leaves_strip_put(self):
         r = Running(150)
         r.run(6)
-        r.screen.text_end = 160           # still visible left of the strip
+        r.screen.text_end = 160
         for second in range(1, 6):
             r.tick()
-        self.assertEqual(r.gap(), MARGIN)
+        self.assertEqual(r.own[0], r.anchor())
 
-    def test_shrink_follows_after_hold_without_flicker(self):
+    def test_shrink_leaves_strip_put(self):
         r = Running(200)
         r.run(6)
         r.screen.text_end = 150
-        moves = r.run(10)
-        self.assertEqual((moves, r.gap()), (0, MARGIN + 50))     # held back briefly
-        moves = r.run(25)
-        self.assertEqual((moves, r.gap()), (1, MARGIN))         # then exactly one move
+        self.assertEqual((r.run(35), r.own[0]), (0, r.anchor()))
 
     def test_steady_text_never_moves(self):
         r = Running(150)
@@ -120,11 +115,10 @@ class WeatherFollow(unittest.TestCase):
         r.screen.photo, r.is_locked = False, False
         r.screen.text_end = 170                        # weather changed meanwhile
         r.run(5)
-        self.assertEqual(r.gap(), MARGIN)
+        self.assertEqual(r.own[0], r.anchor())
 
     def test_implausible_capture_is_ignored(self):
-        # Overlay/glitch not detected as lock: "content" running to Start is no
-        # weather text -> keep the previous edge, never step onto Start/Search.
+        # Overlay/glitch not detected as lock: placement still stays on Start-right.
         r = Running(150)
         r.run(6)
         before = r.own

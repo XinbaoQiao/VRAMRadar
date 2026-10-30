@@ -234,9 +234,9 @@ def place_single(labels, fonts_for, pick, strip_scale: float, available=None) ->
     ``fonts_for(factor)`` gives the (top, bottom) base fonts at that size and
     ``pick(text, base)`` the script-appropriate face (see pick_value_font).  As
     in the multi-app layout, the type shrinks step by step until the strip fits
-    ``available`` (the empty taskbar gap left of Start); if even the smallest
-    size does not fit, the width is clipped to the gap, so the strip never
-    reaches Start.  Without a gap (free placement, tray side) nothing shrinks.
+    ``available`` (the empty taskbar gap right of the Start cluster); if even
+    the smallest size does not fit, the width is clipped to the gap.  Without
+    a gap (free placement, tray side) nothing shrinks.
     """
     from System.Drawing import Point, Size
     scale = lambda v: round(v * strip_scale)
@@ -944,8 +944,48 @@ def exclude_rect(elements, own):
 
 
 def usable_layout(elements) -> bool:
-    """A reading that can bound the left slot (Start/Search/first app found)."""
+    """A reading that can bound Start-right docking (Start/Search/first app)."""
     return bool(elements) and any(elements.get(k) for k in (*RIGHT_BOUND_IDS, "first_app"))
+
+
+def start_cluster_right(elements):
+    """Right edge of the contiguous Start → Search → TaskView cluster.
+
+    Returns None when Start is missing.  Search/TaskView extend the cluster
+    only when they abut the running right edge (within one Start height), so
+    the strip sits immediately right of the Windows Start group without
+    covering the Search box on Windows 11.
+    """
+    if not elements:
+        return None
+    start = elements.get("StartButton")
+    if not start or start[2] <= start[0]:
+        return None
+    right = int(start[2])
+    height = max(1, int(start[3] - start[1]))
+    for key in ("SearchButton", "TaskViewButton"):
+        rect = elements.get(key)
+        if not rect or rect[2] <= rect[0]:
+            continue
+        if int(rect[0]) <= right + height:
+            right = max(right, int(rect[2]))
+    return right
+
+
+def start_right_gap(bar, elements, tray, margin=6):
+    """(left, right) of the area used when the strip docks right of Start."""
+    cluster = start_cluster_right(elements)
+    if cluster is None or not tray:
+        return None
+    left_edge = cluster + margin
+    right_edge = int(tray[0]) - margin
+    widgets = elements.get("WidgetsButton") if elements else None
+    mid = (bar[0] + bar[2]) / 2
+    if widgets and widgets[0] > mid and widgets[0] < right_edge + margin:
+        right_edge = min(right_edge, int(widgets[0]) - margin)
+    if right_edge <= left_edge:
+        return None
+    return left_edge, right_edge
 
 
 def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
@@ -955,12 +995,12 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     (anchor = right edge the strip must stay left of).  Anchors rather than
     final x keep a width change from looking like a side switch.
 
-    Portable left-edge rule (any DPI / bar origin / width):
-    * centered taskbar with a measurable gap -> left at
-      ``weather_place_right(Widgets) + margin`` (news width capped);
+    Portable rule (any DPI / bar origin / width):
     * Widgets on the right half -> tray side (left-aligned icons);
-    * Widgets on the left half but Start not exposed yet -> left by Widgets;
-    * otherwise (empty UIA, left-aligned without Widgets) -> tray.
+    * Start readable and not glued to the far left -> left-anchored at
+      ``start_cluster_right(Start/Search/TaskView) + margin`` (right of the
+      Windows Start group);
+    * otherwise (empty UIA, left-aligned Start, no Start) -> tray.
     Callers that already committed a left anchor must hold it across brief
     empty readings (see ``refresh_left_anchor``) so a flicker cannot jump
     the strip to the notification area on a centered taskbar.
@@ -975,14 +1015,16 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
         if widgets[0] < tray[0]:
             right = widgets[0] - widgets_gap
         return ("tray", right, y)
-    gap = left_gap(bar, elements, margin) if elements else None
-    if gap is not None:
-        return ("left", gap[0], y)
-    # Widgets still on the left half but Start/Search not readable yet: keep
-    # the left slot from the weather edge (relative to this bar).
-    if widgets and widgets[2] > widgets[0] and bar[0] <= widgets[0] < mid:
-        return ("left", max(bar[0] + margin, weather_place_right(widgets, bar) + margin), y)
-    # Empty UIA or left-aligned without Widgets: tray is the portable default.
+    cluster = start_cluster_right(elements) if elements else None
+    start = elements.get("StartButton") if elements else None
+    # Start glued to the bar's far left => left-aligned shell; tray default.
+    left_glued = bool(
+        start and start[2] > start[0]
+        and start[0] <= bar[0] + max(margin * 2, (start[3] - start[1]))
+    )
+    if cluster is not None and not left_glued:
+        return ("left", cluster + margin, y)
+    # Empty UIA or left-aligned without a center Start cluster: tray.
     return ("tray", tray[0], y)
 
 
@@ -3060,13 +3102,15 @@ class CodexUsageSurface:
                 reset_label.Visible = bool(reset_label.Text)
             for name_label, value_label, reset_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = reset_label.Visible = False
-            # Width of the empty taskbar area left of Start (None: free placement
-            # or tray side). Compact type to fit; known resets may grow right.
+            # Width of the area right of the Start cluster to the tray (None:
+            # free placement or tray side). Compact type to fit; known resets
+            # may grow right toward the notification area.
             available = None
             if self._placement == "taskbar" and geometry:
                 elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
                                                  (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
-                gap_area = left_gap(geometry[0], elements, strip_margin(self._scale)) if elements else None
+                gap_area = (start_right_gap(geometry[0], elements, geometry[1], strip_margin(self._scale))
+                            if elements else None)
                 available = gap_area[1] - gap_area[0] if gap_area else None
             if not multi:
                 self._fit_key = None
@@ -3091,7 +3135,7 @@ class CodexUsageSurface:
                 form.ClientSize = Size(width, scale(40))
             else:
                 # Two provider rows per column: "Name  value", full names.  Up
-                # to four apps (two columns) fit the empty taskbar area left of
+                # to four apps (two columns) fit the empty taskbar area right of
                 # Start at the normal font; compact values before clipping.
                 used = self._extra_columns[:len(cells)]
                 icon_paths = [((provider_states.get(pid) or {}).get("install_path"), pid) for pid in cell_ids] \

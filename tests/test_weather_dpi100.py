@@ -56,25 +56,27 @@ class Dpi100(unittest.TestCase):
         layout._load = lambda: True
         layout._read = lambda handle: dict(RAW)
         placer = us.PlacementDebouncer(confirm=3, switch_confirm=5)
+        anchor = us.start_cluster_right(RAW) + MARGIN
         self.run_strip(screen, 6, clock, layout, placer, own)
         settled = own[0][0]
-        self.assertEqual(settled, 110 + MARGIN)
-        screen.text_end = 112                         # '26°C' -> '27°C': 2 px wider
+        self.assertEqual(settled, anchor)
+        screen.text_end = 112
         positions = self.run_strip(screen, 30, clock, layout, placer, own)
-        self.assertLessEqual(max(positions), settled + 2, positions)
-        self.assertGreaterEqual(own[0][0] - screen.text_end, MARGIN - 2)
+        self.assertEqual(positions, [anchor] * len(positions))
 
-    def test_real_growth_under_strip_still_steps(self):
+
+    def test_real_growth_under_weather_leaves_start_right_put(self):
         screen, clock, own = Screen(110), [0.0], [None]
         layout = us.TaskbarLayout(interval=0.0, retry=0.0, trim=lambda f, o: us.trim_widgets(f, o, screen.capture),
                                   locked=lambda: False)
         layout._load = lambda: True
         layout._read = lambda handle: dict(RAW)
         placer = us.PlacementDebouncer(confirm=3, switch_confirm=5)
+        anchor = us.start_cluster_right(RAW) + MARGIN
         self.run_strip(screen, 6, clock, layout, placer, own)
-        screen.text_end = 170                         # far under the strip
+        screen.text_end = 170
         self.run_strip(screen, 12, clock, layout, placer, own)
-        self.assertEqual(own[0][0] - screen.text_end, MARGIN)
+        self.assertEqual(own[0][0], anchor)
 
 
 if __name__ == "__main__":

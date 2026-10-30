@@ -19,13 +19,13 @@ class EnvironmentMatrixTests(unittest.TestCase):
     def test_centered_with_weather(self):
         bar = (0, 1528, 2560, 1600)
         slot, (x, _), m = place(bar, {"WidgetsButton": (9, 1528, 113, 1600), "StartButton": (623, 1528, 691, 1600)}, (219, 51))
-        self.assertEqual((slot, x, m), ("left", 131, 18))
-        self.assertClear(x, 219, 113, 623, m)
+        self.assertEqual((slot, x, m), ("left", 691 + 18, 18))
+        self.assertGreaterEqual(x, 691 + m)  # clear of Start
 
-    def test_weather_widget_off_starts_from_bar_edge(self):
+    def test_weather_widget_off_docks_right_of_start(self):
         bar = (0, 1528, 2560, 1600)
         slot, (x, _), m = place(bar, {"StartButton": (623, 1528, 691, 1600)}, (219, 51))
-        self.assertEqual((slot, x), ("left", 18))
+        self.assertEqual((slot, x), ("left", 691 + 18))
 
     def test_left_aligned_taskbar_uses_tray_side(self):
         bar = (0, 1528, 2560, 1600)
@@ -40,7 +40,7 @@ class EnvironmentMatrixTests(unittest.TestCase):
         elements = {"WidgetsButton": (-1912, 1032, -1840, 1080), "StartButton": (-1180, 1032, -1132, 1080)}
         slot, (x, _), m = place(bar, elements, (155, 34), display=1.0)
         self.assertEqual((slot, m), ("left", 12))
-        self.assertClear(x, 155, -1840, -1180, m)
+        self.assertEqual(x, -1132 + m)  # right of Start on this bar
 
     def test_small_taskbar_scales_strip_down(self):
         bar_h = 32                                   # small taskbar buttons, 100 %
@@ -49,7 +49,7 @@ class EnvironmentMatrixTests(unittest.TestCase):
         slot, (x, _), m = place((0, 1048, 1920, 1080), {"WidgetsButton": (8, 1048, 80, 1080),
                                                          "StartButton": (700, 1048, 732, 1080)}, (150, round(40 * s)), display=1.0)
         self.assertEqual(slot, "left")
-        self.assertClear(x, 150, 80, 700, m)
+        self.assertEqual(x, 732 + m)
 
 
 if __name__ == "__main__":
