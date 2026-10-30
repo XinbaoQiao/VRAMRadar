@@ -226,6 +226,10 @@ let serverNavigationFrame = null;
 let serverNavSpyObserver = null;
 const serverNavSpyIntersecting = new Set();
 let serverNavigationSyncPausedUntil = 0;
+// While set, live card reconcile must not cancel navigate follow-ups or snap
+// scroll back to the pre-click anchor (often the bottom H100 ACP card).
+let sidebarJumpServerId = '';
+let sidebarJumpUntil = 0;
 let stuckChromeFrame = null;
 let cachedTitlebarHeightPx = 62;
 let lastStuckServerId = '';
@@ -3690,6 +3694,8 @@ function scheduleServerNavigatorSearchRender() {
 }
 
 function navigateToServer(serverId) {
+  serverId = String(serverId || '').trim();
+  if (!serverId) return;
   const serverIndex = currentSnapshot?.servers?.findIndex(item => item.server_id === serverId) ?? -1;
   if (serverIndex >= 0 && currentSnapshot.servers.length > LARGE_SERVER_FLEET_THRESHOLD) {
     const targetOffset = Math.floor(serverIndex / SERVER_FLEET_PAGE_SIZE) * SERVER_FLEET_PAGE_SIZE;
@@ -3703,13 +3709,20 @@ function navigateToServer(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId))
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
-  pauseServerNavigationSync(1200);
+  // Hold the jump target across live ACP/SSH card reconciles: those used to
+  // bump viewportScrollGeneration (cancelling rAF centering) and restore the
+  // pre-click anchor — which at the page bottom is always H100.
+  sidebarJumpServerId = serverId;
+  sidebarJumpUntil = Date.now() + 1800;
+  lastStuckServerId = '';
+  pauseServerNavigationSync(1800);
   setActiveServer(serverId);
   restoreServerLeavePosition(serverId);
   // Sidebar clicks must land near visual center. Leave-restore / under-titlebar
   // alone often only nudges a little while the card stays at the top edge.
   const finishSidebarJump = () => {
     if (generation !== viewportScrollGeneration) return;
+    if (sidebarJumpServerId && sidebarJumpServerId !== serverId) return;
     scrollServerIntoVisualCenter(serverId);
     if (serverCardOutsideViewport(serverId)) {
       scrollServerIntoVisualCenter(serverId);
@@ -3725,12 +3738,16 @@ function navigateToServer(serverId) {
     // Re-assert after the page settles so a tall previous card cannot steal the
     // rail marker once the scroll-spy pause ends.
     setActiveServer(serverId);
-    pauseServerNavigationSync(900);
+    lastStuckServerId = '';
+    pauseServerNavigationSync(1200);
+    sidebarJumpUntil = Math.max(sidebarJumpUntil, Date.now() + 1200);
   };
   finishSidebarJump();
   // Leave-restore schedules its own rAF; run after it so centering wins the race.
   requestAnimationFrame(finishSidebarJump);
   requestAnimationFrame(() => requestAnimationFrame(finishSidebarJump));
+  window.setTimeout(finishSidebarJump, 120);
+  window.setTimeout(finishSidebarJump, 320);
   const server = currentSnapshot?.servers?.find(item => item.server_id === serverId);
   ui.serverNavigatorStatus.textContent = server
     ? `已定位到服务器 ${server.display_name}`
@@ -3792,9 +3809,11 @@ function renderAcpPlatform(server) {
     const cls = taskStateClass(state);
     const titleSource = rawName || id || '未命名任务';
     let title = titleSource;
+    // Keep a trailing YYYYMMDD run off the label when present, but do not hard-cap
+    // length — the row grid gives the name the middle space toward the state badge;
+    // CSS ellipsis handles overflow inside that column.
     const stamp = titleSource.search(/-\d{8}[-_]/);
     if (stamp > 8) title = titleSource.slice(0, stamp);
-    if (title.length > 40) title = `${title.slice(0, 38)}…`;
     const idShow = (id && id !== title)
       ? (id.length > 28 ? `${id.slice(0, 12)}…${id.slice(-8)}` : id)
       : '';
@@ -3949,7 +3968,10 @@ function reconcileServerCards(entries) {
   const anchorId = anchorCard?.dataset.serverId;
   const anchorTop = anchorCard?.getBoundingClientRect().top;
   let mutated = false;
-  const restoreGeneration = bumpViewportScrollGeneration();
+  const jumpTarget = (Date.now() < sidebarJumpUntil && sidebarJumpServerId) ? sidebarJumpServerId : '';
+  // During an explicit sidebar jump, keep the navigate generation alive so its
+  // centering rAFs are not cancelled, and do not snap back to the old anchor.
+  const restoreGeneration = jumpTarget ? viewportScrollGeneration : bumpViewportScrollGeneration();
   suppressExpandFollowScroll += 1;
   try {
     const existing = new Map(
@@ -3994,6 +4016,15 @@ function reconcileServerCards(entries) {
     suppressExpandFollowScroll = Math.max(0, suppressExpandFollowScroll - 1);
   }
   const restoreScroll = () => {
+    const liveJump = (Date.now() < sidebarJumpUntil && sidebarJumpServerId) ? sidebarJumpServerId : jumpTarget;
+    if (liveJump) {
+      // Re-assert the clicked server after DOM churn instead of the pre-jump anchor.
+      scrollServerIntoVisualCenter(liveJump);
+      if (serverCardOutsideViewport(liveJump)) scrollServerIntoVisualCenter(liveJump);
+      setActiveServer(liveJump);
+      pauseServerNavigationSync(900);
+      return;
+    }
     // Drop restore if a newer user navigate/expand claimed the viewport.
     if (!mutated || restoreGeneration !== viewportScrollGeneration) return;
     const anchor = anchorId ? document.getElementById(serverCardAnchor(anchorId)) : null;
@@ -7029,11 +7060,18 @@ document.addEventListener('click', event => {
       renderServerNavigator(currentSnapshot.servers);
       renderFavoritesSummaryStrip(currentSnapshot);
     }
-  }
-  const serverNavigatorItem = event.target.closest('.server-navigator-item');
-  if (serverNavigatorItem) {
-    navigateToServer(serverNavigatorItem.dataset.serverId);
     return;
+  }
+  if (event.target.closest('.server-navigator-favorite, .favorite-server')) {
+    // Favorites are siblings of the item button; let the favorite handler run.
+  } else {
+    const serverNavigatorItem = event.target.closest('.server-navigator-item');
+    const serverNavigatorEntry = event.target.closest('.server-navigator-entry');
+    const jumpId = serverNavigatorItem?.dataset?.serverId || serverNavigatorEntry?.dataset?.serverId;
+    if (jumpId) {
+      navigateToServer(jumpId);
+      return;
+    }
   }
   const locationHome = event.target.closest('.server-location-home');
   if (locationHome) {

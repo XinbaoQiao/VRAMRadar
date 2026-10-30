@@ -211,6 +211,40 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("finishSidebarJump", navigate)
         # Always center after leave-restore — not only when fully outside viewport.
         self.assertIn("requestAnimationFrame(finishSidebarJump)", navigate)
+        # Live ACP/SSH reconcile must not cancel a sidebar jump or snap back to
+        # the pre-click anchor (often the bottom H100 card).
+        self.assertIn("sidebarJumpServerId = serverId", navigate)
+        self.assertIn("sidebarJumpUntil", navigate)
+        self.assertIn("lastStuckServerId = ''", navigate)
+        reconcile = self.javascript[
+            self.javascript.index("function reconcileServerCards(entries)"):
+            self.javascript.index("function snapshotRevision")
+        ]
+        self.assertIn("jumpTarget", reconcile)
+        self.assertIn("jumpTarget ? viewportScrollGeneration : bumpViewportScrollGeneration()", reconcile)
+        self.assertIn("scrollServerIntoVisualCenter(liveJump)", reconcile)
+        # Entry fallback so clicks on the rail row still resolve a server id.
+        self.assertIn("serverNavigatorEntry?.dataset?.serverId", self.javascript)
+
+    def test_acp_job_rows_are_compact_single_line(self):
+        """ACP task cards must use horizontal space for the name, not tall empty padding."""
+        self.assertIn(".acp-job-card {", self.styles)
+        card = self.styles[
+            self.styles.index(".acp-job-card {"):
+            self.styles.index(".acp-job-card:hover")
+        ]
+        self.assertIn("grid-template-columns: minmax(0, 1fr) auto", card)
+        self.assertIn("padding: 5px 10px 5px 12px", card)
+        self.assertNotIn("padding: 11px 14px 11px 16px", card)
+        name = self.styles[
+            self.styles.index(".acp-job-name {"):
+            self.styles.index(".acp-job-meta {")
+        ]
+        self.assertIn("white-space: nowrap", name)
+        self.assertIn("text-overflow: ellipsis", name)
+        # Do not hard-truncate titles in JS — CSS ellipsis uses the middle column.
+        self.assertNotIn("title.slice(0, 38)", self.javascript)
+        self.assertNotIn("title.length > 40", self.javascript)
 
     def test_sidebar_navigate_centers_server_in_viewport(self):
         """Sidebar jump must land near visual center under sticky titlebar, not nearest-edge."""
