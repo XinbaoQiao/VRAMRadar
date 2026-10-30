@@ -157,6 +157,10 @@ LEFT_BOUND_IDS = ("WidgetsButton",)
 # Minimum clear gap (px at 100 %) between the strip and the weather text on
 # its left / Start (or Search) on its right.
 STRIP_MARGIN = 12
+# Clear gap to the blue Start button only (px at 100 %).  Smaller than
+# STRIP_MARGIN so the quota strip sits flush-left of Start without hugging
+# the weather widget as tightly.  ~6 px physical at 150 %, ~4 px at 100 %.
+START_SIDE_MARGIN = 4
 # The strip draws at 85 % of the taskbar's DPI scale (``taskbar_scale``).
 STRIP_DENSITY = 0.85
 
@@ -164,6 +168,11 @@ STRIP_DENSITY = 0.85
 def strip_margin(strip_scale: float) -> int:
     """STRIP_MARGIN in physical px at the real display scale (18 px at 150 %)."""
     return max(1, round(STRIP_MARGIN * strip_scale / STRIP_DENSITY))
+
+
+def start_side_margin(strip_scale: float) -> int:
+    """Gap between strip right edge and Start.left (6 px at 150 %)."""
+    return max(1, round(START_SIDE_MARGIN * strip_scale / STRIP_DENSITY))
 RIGHT_BOUND_IDS = ("StartButton", "SearchButton", "TaskViewButton")
 
 
@@ -948,7 +957,7 @@ def usable_layout(elements) -> bool:
     return bool(elements) and any(elements.get(k) for k in (*RIGHT_BOUND_IDS, "first_app"))
 
 
-def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
+def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4, start_margin=None):
     """``(slot, anchor_x, y)`` for a docked strip.
 
     ``slot`` is "left" (anchor = left edge of the strip), "start" (anchor =
@@ -960,7 +969,8 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     Portable rule (any DPI / bar origin / width):
     * Widgets on the right half -> tray side (left-aligned icons);
     * Start readable and not glued to the far left -> ``start`` slot with
-      anchor ``Start.left - margin`` (strip sticks to the left of the blue
+      anchor ``Start.left - flush`` where ``flush`` is ``start_margin``
+      when given, else ``margin`` (strip sticks to the left of the blue
       Windows Start icon; Search/TaskView stay to Start's right);
     * otherwise (empty UIA, left-aligned Start, no Start) -> tray.
     Callers that already committed a left/start anchor must hold it across
@@ -986,7 +996,8 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     )
     if start and start[2] > start[0] and not left_glued:
         # Stick the strip to the left of the blue Start button.
-        return ("start", int(start[0]) - margin, y)
+        flush = margin if start_margin is None else int(start_margin)
+        return ("start", int(start[0]) - flush, y)
     # Empty UIA or left-aligned without a center Start: tray.
     return ("tray", tray[0], y)
 
@@ -2159,7 +2170,10 @@ class CodexUsageSurface:
                 elements = self._layout.elements(bar_handle, bar, own)
                 committed = self._placer.current
                 margin = strip_margin(self._scale)
-                proposed = docked_target(bar, tray, elements, size, margin, scale(4))
+                proposed = docked_target(
+                    bar, tray, elements, size, margin, scale(4),
+                    start_margin=start_side_margin(self._scale),
+                )
                 # Hold a committed left/start anchor across brief empty / tray
                 # proposals unless Widgets is clearly on the right half
                 # (genuine left-aligned layout).  Refresh Y/clamp X to the

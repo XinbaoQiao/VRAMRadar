@@ -8,7 +8,7 @@ BAR, TRAY = (0, 1528, 2560, 1600), (1905, 1528, 2560, 1600)
 # Explorer's rect stays at 237 px even when the text is drawn past it (10-02).
 RAW = {"WidgetsButton": (9, 1528, 237, 1600), "StartButton": (491, 1528, 559, 1600),
        "SearchButton": (562, 1540, 891, 1588), "TaskViewButton": (895, 1528, 961, 1600)}
-SIZE, MARGIN = (200, 51), 18
+SIZE, MARGIN = (200, 51), 6
 
 
 class Screen:

@@ -10,7 +10,7 @@ from vram_radar import usage_surface as us
 BAR, TRAY = (0, 1032, 1920, 1080), (1500, 1032, 1920, 1080)
 RAW = {"WidgetsButton": (6, 1032, 160, 1080), "StartButton": (700, 1032, 748, 1080),
        "SearchButton": (750, 1036, 980, 1076)}
-SIZE, MARGIN = (90, 34), us.strip_margin(0.85)
+SIZE, MARGIN = (90, 34), us.start_side_margin(0.85)
 
 
 class Screen:
@@ -49,7 +49,7 @@ class Dpi100(unittest.TestCase):
         return positions
 
     def test_small_growth_does_not_jump(self):
-        self.assertEqual(MARGIN, 12)
+        self.assertEqual(MARGIN, 4)
         screen, clock, own = Screen(110), [0.0], [None]
         layout = us.TaskbarLayout(interval=0.0, retry=0.0, trim=lambda f, o: us.trim_widgets(f, o, screen.capture),
                                   locked=lambda: False)

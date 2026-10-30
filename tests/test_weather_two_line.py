@@ -16,7 +16,7 @@ from vram_radar import usage_surface as us
 BAR, TRAY = (0, 1528, 2560, 1600), (1905, 1528, 2560, 1600)
 RAW = {"WidgetsButton": (9, 1528, 237, 1600), "StartButton": (491, 1528, 559, 1600),
        "SearchButton": (562, 1540, 891, 1588), "TaskViewButton": (895, 1528, 961, 1600)}
-SIZE, MARGIN = (120, 51), 18      # live strip is ~110 px wide at 150 %
+SIZE, MARGIN = (120, 51), 6      # live strip is ~110 px wide at 150 %
 BG = (239, 228, 207)            # light taskbar (live 10-03 capture)
 BOLD = (30, 30, 30)
 GREY = (205, 196, 178)          # low contrast: sum |dRGB| = 95 at full ink, ~50 anti-aliased

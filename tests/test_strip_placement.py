@@ -28,6 +28,10 @@ class StripPlacementTests(unittest.TestCase):
         self.assertEqual(target[0], "start")
         self.assertEqual(target[1], GOOD["StartButton"][0] - 6)
         self.assertEqual(docked_point(BAR, target, 200), (GOOD["StartButton"][0] - 6 - 200 - 1, 1039))
+        # Live path: start_margin tighter than strip_margin; left_glued still uses margin.
+        tight = docked_target(BAR, TRAY, GOOD, (200, 42), 18, 4, start_margin=6)
+        self.assertEqual(tight[0], "start")
+        self.assertEqual(tight[1], GOOD["StartButton"][0] - 6)
 
     def test_start_left_ignores_search_and_task_view(self):
         # Search/TaskView stay to Start's right; strip sticks to Start's left.
@@ -266,6 +270,14 @@ class StripMarginTests(unittest.TestCase):
         from vram_radar.usage_surface import strip_margin, taskbar_scale
         self.assertEqual(strip_margin(taskbar_scale(144, None)), 18)   # 150 %
         self.assertEqual(strip_margin(taskbar_scale(96, None)), 12)    # 100 %
+
+    def test_start_side_margin_is_tighter_than_strip_margin(self):
+        from vram_radar.usage_surface import start_side_margin, strip_margin, taskbar_scale
+        for dpi, want_strip, want_start in ((144, 18, 6), (96, 12, 4)):
+            scale = taskbar_scale(dpi, None)
+            self.assertEqual(strip_margin(scale), want_strip)
+            self.assertEqual(start_side_margin(scale), want_start)
+            self.assertLess(want_start, want_strip)
 
 
 class ContentClusterTests(unittest.TestCase):
