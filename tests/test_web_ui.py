@@ -958,6 +958,10 @@ class WebUiContractTests(unittest.TestCase):
             self.assertIn(selector, self.styles)
         self.assertIn(".server-navigator { position: relative; z-index: 15; top:", self.styles)
         self.assertNotIn(".server-navigator { position: sticky", self.styles)
+        self.assertNotIn(".server-navigator { position: fixed", self.styles)
+        self.assertIn("max-height: none; margin-right: var(--navigator-gutter)", self.styles)
+        self.assertNotIn("max-height: min(72vh, 560px)", self.styles)
+        self.assertIn(".server-navigator-list { width: 100%; box-sizing: border-box; max-height: none; overflow-x: hidden; overflow-y: visible; }", self.styles)
         self.assertIn("grid-row: 2; grid-column: 2", self.styles)
         self.assertIn("main { grid-row: 2; grid-column: 1", self.styles)
         search_index = self.javascript[
