@@ -223,6 +223,8 @@ function updateRetryDelay(failures, code) {
 let recommendationRequested = false;
 let activeServerId = '';
 let serverNavigationFrame = null;
+let serverNavSpyObserver = null;
+const serverNavSpyIntersecting = new Set();
 let serverNavigationSyncPausedUntil = 0;
 let stuckChromeFrame = null;
 let cachedTitlebarHeightPx = 62;
@@ -1398,9 +1400,8 @@ function layoutPxFromViewportRect(size) {
 
 function navigationFocusMetrics() {
   // WebView2 CSS zoom: getBoundingClientRect and window.scrollBy share one viewport
-  // pixel space (scrollBy(dx) moves a rect by dx). window.innerHeight is NOT scaled
-  // by html { zoom }. Dividing GBR by --ui-zoom before scrollBy undershoots centering
-  // so the scroll-spy hands .server-navigator-item.active back to a tall prior card.
+  // pixel space (scrollBy(dx) moves a rect by dx). Prefer visualViewport.height when
+  // present so the focus line stays in that same space; fall back to innerHeight.
   const zoom = Number(uiZoom) > 0 ? Number(uiZoom) : 1;
   const titlebarEl = document.querySelector('.titlebar');
   const titlebar = titlebarEl
@@ -1410,14 +1411,19 @@ function navigationFocusMetrics() {
       || 62) * zoom;
   const viewportHeight = Math.max(
     1,
-    window.innerHeight || document.documentElement.clientHeight || 0,
+    (window.visualViewport && window.visualViewport.height)
+      || window.innerHeight
+      || document.documentElement.clientHeight
+      || 0,
   );
   const availableHeight = Math.max(160, viewportHeight - titlebar);
   return {
     titlebar,
     viewportHeight,
     availableHeight,
-    focusLine: titlebar + availableHeight * 0.32,
+    // Slightly above the old 0.32 line so a tall prior card releases the rail
+    // marker once the next server head enters the upper reading band.
+    focusLine: titlebar + availableHeight * 0.22,
   };
 }
 
@@ -1692,6 +1698,11 @@ function updateStuckChrome() {
   let bestScore = Number.POSITIVE_INFINITY;
   const moduleCandidates = [];
 
+  const titlebarEl = document.querySelector('.titlebar');
+  const titlebarBottom = titlebarEl
+    ? titlebarEl.getBoundingClientRect().bottom
+    : titlebar * (Number(uiZoom) > 0 ? Number(uiZoom) : 1);
+
   for (const card of cards) {
     const cardRect = card.getBoundingClientRect();
     if (!cardIntersectsViewportBand(cardRect)) continue;
@@ -1700,7 +1711,9 @@ function updateStuckChrome() {
     const head = card.querySelector('.server-head');
     if (!head) continue;
 
-    const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebar + 1 : false;
+    // Compare sentinel GBR to titlebar GBR.bottom (same space). Layout-px titlebar
+    // under CSS zoom falsely kept isStuck=false, so the rail never followed.
+    const isStuck = sentinel ? sentinel.getBoundingClientRect().top < titlebarBottom + 1 : false;
     reserveServerHeadSpace(card, head, isStuck);
     const headHeight = setServerHeadHeight(card, head);
     if (isStuck) stuckServerId = card.dataset.serverId || stuckServerId;
@@ -1721,6 +1734,9 @@ function updateStuckChrome() {
     clearStuckServerHead(lastStuckServerId);
   }
   lastStuckServerId = stuckServerId;
+  if (stuckServerId && Date.now() >= serverNavigationSyncPausedUntil) {
+    setActiveServer(stuckServerId);
+  }
 
   for (const { module, stickLine } of moduleCandidates) {
     const rect = module.getBoundingClientRect();
@@ -3415,16 +3431,17 @@ function renderServerNavigatorItem(server, index) {
 function ensureActiveNavigatorItemVisible(item) {
   // Scroll only the rail list — never the page — so the cyan active marker
   // stays in view when a lower server becomes current.
+  // WebView2: list.scrollTop and getBoundingClientRect share one space under
+  // CSS zoom (same as window.scrollBy). Do NOT divide gaps by --ui-zoom.
   const list = ui.serverNavigatorList;
   if (!list || !item?.isConnected) return;
   const entry = item.closest('.server-navigator-entry') || item;
   const listRect = list.getBoundingClientRect();
   const itemRect = entry.getBoundingClientRect();
   if (listRect.height <= 0 || itemRect.height <= 0) return;
-  const listHeight = layoutPxFromViewportRect(listRect.height);
-  const pad = Math.min(24, listHeight * 0.12);
-  const topGap = layoutPxFromViewportRect(itemRect.top - listRect.top);
-  const bottomGap = layoutPxFromViewportRect(itemRect.bottom - listRect.bottom);
+  const pad = Math.min(24, listRect.height * 0.12);
+  const topGap = itemRect.top - listRect.top;
+  const bottomGap = itemRect.bottom - listRect.bottom;
   if (topGap < pad) list.scrollTop += topGap - pad;
   else if (bottomGap > -pad) list.scrollTop += bottomGap + pad;
 }
@@ -3491,6 +3508,27 @@ function syncActiveServerFromScroll() {
   if (ui.serverNavigator.hidden) return;
   if (!serverNavigationCards.length) return;
   if (Date.now() < serverNavigationSyncPausedUntil) return;
+
+  // Prefer the server whose sticky head is pinned under the titlebar — that is
+  // the card the user is actually reading while a tall prior card scrolls by.
+  if (lastStuckServerId && serverNavigationCardsById.has(lastStuckServerId)) {
+    setActiveServer(lastStuckServerId);
+    return;
+  }
+
+  // IntersectionObserver focus-band hit (in-flow sentinel) when nothing stuck yet.
+  if (serverNavSpyIntersecting.size) {
+    let chosen = '';
+    for (const card of serverNavigationCards) {
+      const id = card.dataset.serverId;
+      if (id && serverNavSpyIntersecting.has(id)) chosen = id;
+    }
+    if (chosen) {
+      setActiveServer(chosen);
+      return;
+    }
+  }
+
   const { focusLine } = navigationFocusMetrics();
   // Match scrollServerIntoVisualCenter. Spy the flow-position sentinel (not the
   // sticky .server-head box) in window.scrollBy/GBR space so UI zoom cannot
@@ -3518,6 +3556,41 @@ function scheduleServerNavigationSync() {
   if (Date.now() < serverNavigationSyncPausedUntil) return;
   if (serverNavigationFrame != null) return;
   serverNavigationFrame = window.requestAnimationFrame(syncActiveServerFromScroll);
+}
+
+function rebuildServerNavSpyObserver() {
+  if (serverNavSpyObserver) {
+    serverNavSpyObserver.disconnect();
+    serverNavSpyObserver = null;
+  }
+  serverNavSpyIntersecting.clear();
+  if (typeof IntersectionObserver !== 'function') return;
+  if (ui.serverNavigator?.hidden || !serverNavigationCards.length) return;
+
+  const { titlebar, viewportHeight, focusLine } = navigationFocusMetrics();
+  const topCut = Math.max(0, Math.round(focusLine));
+  const bottomCut = Math.max(0, Math.round(viewportHeight - focusLine - 2));
+  serverNavSpyObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const card = entry.target.closest?.('.server-card');
+      const id = card?.dataset?.serverId;
+      if (!id) continue;
+      if (entry.isIntersecting) serverNavSpyIntersecting.add(id);
+      else serverNavSpyIntersecting.delete(id);
+    }
+    scheduleServerNavigationSync();
+  }, {
+    root: null,
+    // Collapse the root to a thin band at the reading focus line.
+    rootMargin: `-${topCut}px 0px -${bottomCut}px 0px`,
+    threshold: 0,
+  });
+  for (const card of serverNavigationCards) {
+    const probe = serverScrollProbe(card);
+    if (probe) serverNavSpyObserver.observe(probe);
+  }
+  // titlebar captured so rootMargin stays coherent if callers rebuild after zoom.
+  void titlebar;
 }
 
 function renderServerNavigator(servers) {

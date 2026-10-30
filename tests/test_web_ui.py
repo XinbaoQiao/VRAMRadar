@@ -1171,13 +1171,16 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("priorScrollTop", render_nav)
 
 
+
     def test_server_navigator_follow_uses_layout_px_sentinel_against_tall_prior_card(self):
         """Tall prior sticky head + UI zoom must not pin the rail marker on server 0.
 
         WebView2 CSS zoom keeps window.scrollBy 1:1 with getBoundingClientRect, while
         innerHeight is unscaled. Centering must use raw GBR deltas (not GBR/zoom) or
-        jumps undershoot and the spy snaps .active back to the tall prior card.
+        jumps undershoot and the spy snaps .active back to a tall prior card.
         Spy the non-sticky sentinel in that same viewport/scrollBy space.
+        Prefer lastStuckServerId when a sticky head is pinned; keep the rail list
+        scrolled so .server-navigator-item.active stays visible.
         """
         def pick_active(probe_tops, focus_line):
             active_index = 0
@@ -1194,10 +1197,10 @@ class WebUiContractTests(unittest.TestCase):
         zoom = 1.25
         titlebar_layout = 68
         titlebar_viewport = titlebar_layout * zoom  # sticky top in GBR space
-        inner_height = 900  # NOT multiplied by html { zoom } in WebView2
-        focus_line = titlebar_viewport + max(160, inner_height - titlebar_viewport) * 0.32
+        inner_height = 900  # NOT scaled by html { zoom } in WebView2
+        focus_line = titlebar_viewport + max(160, inner_height - titlebar_viewport) * 0.22
 
-        # Wrong pre-fix: divide GBR by zoom then scrollBy that delta → undershoot.
+        # Wrong pre-fix: divide GBR by zoom then scrollBy that delta — undershoot.
         gbr_top = 500.0
         visual_error = gbr_top - focus_line
         wrong_scroll_by = visual_error / zoom
@@ -1223,11 +1226,15 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertIn("serverScrollProbe", sync)
         self.assertIn("viewportTopLayoutPx", sync)
+        self.assertIn("lastStuckServerId", sync)
+        self.assertIn("serverNavSpyIntersecting", sync)
         metrics = self.javascript[
             self.javascript.index("function navigationFocusMetrics()"):self.javascript.index("function serverScrollProbe")
         ]
         self.assertIn("window.innerHeight", metrics)
+        self.assertIn("visualViewport", metrics)
         self.assertNotIn("layoutPxFromViewportRect(window.innerHeight", metrics)
+        self.assertIn("0.22", metrics)
         center = self.javascript[
             self.javascript.index("function scrollServerIntoVisualCenter"):self.javascript.index("function scrollServerKeepingGpuVisible")
         ]
@@ -1239,6 +1246,42 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertIn("getBoundingClientRect().top", top_helper)
         self.assertNotIn("layoutPxFromViewportRect", top_helper)
+        self.assertIn("function rebuildServerNavSpyObserver", self.javascript)
+        self.assertIn("IntersectionObserver", self.javascript[
+            self.javascript.index("function rebuildServerNavSpyObserver"):self.javascript.index("function renderServerNavigator(servers)")
+        ])
+        ensure = self.javascript[
+            self.javascript.index("function ensureActiveNavigatorItemVisible"):self.javascript.index("function pauseServerNavigationSync")
+        ]
+        self.assertIn("itemRect.top - listRect.top", ensure)
+        self.assertNotIn("layoutPxFromViewportRect(itemRect", ensure)
+        self.assertNotIn("layoutPxFromViewportRect(listRect", ensure)
+        # Tall prior + scroll: active id changes, and list scroll uses raw GBR gap.
+        list_height = 200.0
+        item_top = 260.0  # below list viewport
+        list_top = 80.0
+        list_bottom = list_top + list_height
+        item_bottom = item_top + 64.0
+        pad = min(24.0, list_height * 0.12)
+        bottom_gap = item_bottom - list_bottom
+        self.assertGreater(bottom_gap, -pad)
+        scroll_delta = bottom_gap + pad
+        self.assertGreater(scroll_delta, 30)
+        wrong_list_scroll = scroll_delta / zoom
+        self.assertLess(wrong_list_scroll, scroll_delta - 5)
+        self.assertIn("height: 1px", self.styles[
+            self.styles.index(".server-head-sentinel"):self.styles.index(".server-head-sentinel") + 120
+        ])
+
+    def test_server_navigator_stuck_head_drives_active_marker(self):
+        """Stuck server head under the titlebar must move .server-navigator-item.active."""
+        stuck = self.javascript[
+            self.javascript.index("function updateStuckChrome"):self.javascript.index("function updateLocationStrip")
+        ]
+        self.assertIn("titlebarBottom", stuck)
+        self.assertIn("getBoundingClientRect().bottom", stuck)
+        self.assertIn("setActiveServer(stuckServerId)", stuck)
+        self.assertIn("serverNavigationSyncPausedUntil", stuck)
 
     def test_empty_profile_uses_a_dedicated_progressive_onboarding(self):
 
