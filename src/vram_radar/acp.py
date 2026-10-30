@@ -17,7 +17,7 @@ from .connectors import (
     redact_command_preview,
 )
 
-PAGE_SIZE = 100
+PAGE_SIZE = 60
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 TERMINAL_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "CANCELED", "STOPPED", "SUSPENDED"})
 

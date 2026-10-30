@@ -97,6 +97,14 @@ class AcpTransportTests(unittest.TestCase):
         with patch("vram_radar.acp._run_bounded_process",return_value=SimpleNamespace(returncode=0,stdout=b'[]',stderr=b'',stdout_truncated=False)):
             with transport_scope(self.server,transport):
                 self.assertEqual(query_sensecore_acp(self.server)["platform"]["page_size"],10)
+        # 60 is the stealth-safe sco page under the ~4MiB gRPC cap (70+ fails).
+        self.binding["page_size"]=60
+        self.write()
+        transport=HostAcpTransport(self.path,"default")(self.server)
+        self.assertEqual(json.loads(transport.request(self.server))["page_size"],60)
+        with patch("vram_radar.acp._run_bounded_process",return_value=SimpleNamespace(returncode=0,stdout=b'[]',stderr=b'',stdout_truncated=False)):
+            with transport_scope(self.server,transport):
+                self.assertEqual(query_sensecore_acp(self.server)["platform"]["page_size"],60)
 
     def test_scope_only_binds_exact_connection_and_resets(self):
         transport=HostAcpTransport(self.path,"default")(self.server)

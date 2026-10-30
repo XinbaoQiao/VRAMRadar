@@ -107,7 +107,7 @@ class HostAcpTransport:
             }:
                 raise ValueError("unsupported binding")
             page_size = binding.get("page_size", 100)
-            if type(page_size) is not int or page_size not in (10, 100):
+            if type(page_size) is not int or page_size not in (10, 60, 100):
                 raise ValueError("unsupported page size")
             fingerprint = connection_fingerprint(server)
             if binding["connection_fingerprint"] != fingerprint:
