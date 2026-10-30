@@ -1,4 +1,4 @@
-"""Codex-only strip: compacted, then clipped, to the empty taskbar gap right of Start."""
+"""Codex-only strip: compacted, then clipped, to the empty taskbar gap left of Start."""
 import sys
 import types
 import unittest
@@ -67,13 +67,13 @@ class SingleStripFitTests(unittest.TestCase):
         self.assertEqual(SINGLE_FIT_FACTORS[0], 1.0)
         self.assertGreaterEqual(min(SINGLE_FIT_FACTORS), 0.9)
 
-    def test_docked_strip_starts_right_of_start(self):
+    def test_docked_strip_ends_left_of_start(self):
         bar = (0, 1528, 2560, 1600)
         elements = {"WidgetsButton": (9, 1528, 422, 1600), "StartButton": (509, 1528, 577, 1600)}
         width, _, _ = layout(["82%", "6d 7h"], 200)
         x, _ = docked_point(bar, docked_target(bar, (2200, 1528, 2560, 1600), elements, (width, 51), 18), width)
-        self.assertEqual(x, elements["StartButton"][2] + 18)
-        self.assertGreaterEqual(x, elements["StartButton"][2])
+        self.assertEqual(x, elements["StartButton"][0] - 18 - width - 1)
+        self.assertLessEqual(x + width, elements["StartButton"][0])
 
 
 if __name__ == "__main__":

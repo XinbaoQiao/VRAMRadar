@@ -48,13 +48,14 @@ class StripFitTests(unittest.TestCase):
     def test_trim_failure_keeps_reading(self):
         self.assertEqual(trim_widgets(REAL, None, lambda rect: None), REAL)
 
-    def test_too_wide_stays_left_on_centered_taskbar(self):
-        # Anchor is right of TaskView (961) + margin, independent of strip width.
-        anchor = REAL["TaskViewButton"][2] + 9
+    def test_too_wide_stays_flush_left_of_start(self):
+        # Right-edge anchor is Start.left - margin; left edge moves with width.
+        right = REAL["StartButton"][0] - 9
         for width in (200, 238, 400, 900):
             target = docked_target(BAR, TRAY, REAL, (width, 60), 9, 6)
-            self.assertEqual(target[0], "left")
-            self.assertEqual(docked_point(BAR, target, width)[0], anchor)
+            self.assertEqual(target[0], "start")
+            self.assertEqual(target[1], right)
+            self.assertEqual(docked_point(BAR, target, width)[0], max(BAR[0], right - width - 1))
 
     def test_left_aligned_taskbar_uses_tray_side(self):
         left_aligned = {"StartButton": (0, 1528, 68, 1600), "WidgetsButton": (1700, 1528, 1900, 1600)}

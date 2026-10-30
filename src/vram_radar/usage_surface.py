@@ -944,66 +944,29 @@ def exclude_rect(elements, own):
 
 
 def usable_layout(elements) -> bool:
-    """A reading that can bound Start-right docking (Start/Search/first app)."""
+    """A reading that can bound Start-left docking (Start/Search/first app)."""
     return bool(elements) and any(elements.get(k) for k in (*RIGHT_BOUND_IDS, "first_app"))
-
-
-def start_cluster_right(elements):
-    """Right edge of the contiguous Start → Search → TaskView cluster.
-
-    Returns None when Start is missing.  Search/TaskView extend the cluster
-    only when they abut the running right edge (within one Start height), so
-    the strip sits immediately right of the Windows Start group without
-    covering the Search box on Windows 11.
-    """
-    if not elements:
-        return None
-    start = elements.get("StartButton")
-    if not start or start[2] <= start[0]:
-        return None
-    right = int(start[2])
-    height = max(1, int(start[3] - start[1]))
-    for key in ("SearchButton", "TaskViewButton"):
-        rect = elements.get(key)
-        if not rect or rect[2] <= rect[0]:
-            continue
-        if int(rect[0]) <= right + height:
-            right = max(right, int(rect[2]))
-    return right
-
-
-def start_right_gap(bar, elements, tray, margin=6):
-    """(left, right) of the area used when the strip docks right of Start."""
-    cluster = start_cluster_right(elements)
-    if cluster is None or not tray:
-        return None
-    left_edge = cluster + margin
-    right_edge = int(tray[0]) - margin
-    widgets = elements.get("WidgetsButton") if elements else None
-    mid = (bar[0] + bar[2]) / 2
-    if widgets and widgets[0] > mid and widgets[0] < right_edge + margin:
-        right_edge = min(right_edge, int(widgets[0]) - margin)
-    if right_edge <= left_edge:
-        return None
-    return left_edge, right_edge
 
 
 def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
     """``(slot, anchor_x, y)`` for a docked strip.
 
-    ``slot`` is "left" (anchor = left edge of the strip) or "tray"
-    (anchor = right edge the strip must stay left of).  Anchors rather than
-    final x keep a width change from looking like a side switch.
+    ``slot`` is "left" (anchor = left edge of the strip), "start" (anchor =
+    exclusive right edge flush against the blue Start button's left), or
+    "tray" (anchor = exclusive right edge toward the notification area).
+    Anchors rather than final x keep a width change from looking like a side
+    switch.
 
     Portable rule (any DPI / bar origin / width):
     * Widgets on the right half -> tray side (left-aligned icons);
-    * Start readable and not glued to the far left -> left-anchored at
-      ``start_cluster_right(Start/Search/TaskView) + margin`` (right of the
-      Windows Start group);
+    * Start readable and not glued to the far left -> ``start`` slot with
+      anchor ``Start.left - margin`` (strip sticks to the left of the blue
+      Windows Start icon; Search/TaskView stay to Start's right);
     * otherwise (empty UIA, left-aligned Start, no Start) -> tray.
-    Callers that already committed a left anchor must hold it across brief
-    empty readings (see ``refresh_left_anchor``) so a flicker cannot jump
-    the strip to the notification area on a centered taskbar.
+    Callers that already committed a left/start anchor must hold it across
+    brief empty readings (see ``refresh_left_anchor`` /
+    ``refresh_start_anchor``) so a flicker cannot jump the strip to the
+    notification area on a centered taskbar.
     """
     width, height = size
     y = bar[1] + (bar[3] - bar[1] - height) // 2
@@ -1015,16 +978,16 @@ def docked_target(bar, tray, elements, size, margin=6, widgets_gap=4):
         if widgets[0] < tray[0]:
             right = widgets[0] - widgets_gap
         return ("tray", right, y)
-    cluster = start_cluster_right(elements) if elements else None
     start = elements.get("StartButton") if elements else None
     # Start glued to the bar's far left => left-aligned shell; tray default.
     left_glued = bool(
         start and start[2] > start[0]
         and start[0] <= bar[0] + max(margin * 2, (start[3] - start[1]))
     )
-    if cluster is not None and not left_glued:
-        return ("left", cluster + margin, y)
-    # Empty UIA or left-aligned without a center Start cluster: tray.
+    if start and start[2] > start[0] and not left_glued:
+        # Stick the strip to the left of the blue Start button.
+        return ("start", int(start[0]) - margin, y)
+    # Empty UIA or left-aligned without a center Start: tray.
     return ("tray", tray[0], y)
 
 
@@ -1049,9 +1012,33 @@ def refresh_left_anchor(bar, committed, size, margin=6):
     return ("left", anchor, y)
 
 
+def refresh_start_anchor(bar, committed, size, margin=6):
+    """Re-apply a committed Start-left (right-edge) anchor on the current bar.
+
+    Holds the strip flush left of Start across brief UIA failures: Y is
+    re-centered, and the exclusive right-edge anchor is clamped into this
+    bar.  If the old anchor is off this monitor, snap to ``bar[0] + width +
+    margin`` so the strip stays on the left half rather than the tray.
+    """
+    if not committed or committed[0] != "start" or not bar or not size:
+        return None
+    width = size[0]
+    height = size[1]
+    y = bar[1] + (bar[3] - bar[1] - height) // 2
+    anchor = int(committed[1])
+    if not (bar[0] < anchor <= bar[2]):
+        anchor = bar[0] + width + margin
+    else:
+        anchor = min(max(anchor, bar[0] + width), bar[2])
+    return ("start", anchor, y)
+
+
 def docked_point(bar, target, width):
     slot, anchor, y = target
-    return (anchor, y) if slot == "left" else (max(bar[0], anchor - width - 1), y)
+    if slot == "left":
+        return (anchor, y)
+    # "start" and "tray": anchor is the exclusive right edge of the strip.
+    return (max(bar[0], anchor - width - 1), y)
 
 
 class PlacementDebouncer:
@@ -1086,6 +1073,8 @@ class PlacementDebouncer:
             needed = self.switch_confirm if target[0] != self.current[0] else self.confirm
             if target[0] == self.current[0] == "left" and target[1] > self.current[1]:
                 needed = 1   # weather grew toward/under the strip: step clear at once
+            if target[0] == self.current[0] == "start" and target[1] < self.current[1]:
+                needed = 1   # Start moved left: keep flush without waiting
             if self._count >= needed:
                 self.current, self._pending, self._count = target, None, 0
         return self.current
@@ -2171,16 +2160,18 @@ class CodexUsageSurface:
                 committed = self._placer.current
                 margin = strip_margin(self._scale)
                 proposed = docked_target(bar, tray, elements, size, margin, scale(4))
-                # Hold a committed left anchor across brief empty / tray
+                # Hold a committed left/start anchor across brief empty / tray
                 # proposals unless Widgets is clearly on the right half
                 # (genuine left-aligned layout).  Refresh Y/clamp X to the
                 # current bar so monitor or DPI changes stay portable.
                 widgets = elements.get("WidgetsButton") if elements else None
                 mid = (bar[0] + bar[2]) / 2
                 allow_tray = bool(widgets and widgets[0] > mid)
-                if (committed is not None and committed[0] == "left" and not allow_tray
+                if (committed is not None and committed[0] in ("left", "start") and not allow_tray
                         and (not usable_layout(elements) or proposed[0] == "tray")):
-                    held = refresh_left_anchor(bar, committed, size, margin)
+                    held = (refresh_left_anchor(bar, committed, size, margin)
+                            if committed[0] == "left"
+                            else refresh_start_anchor(bar, committed, size, margin))
                     if held is not None:
                         self._slot = held[0]
                         x, y = docked_point(bar, held, size[0])
@@ -3102,15 +3093,13 @@ class CodexUsageSurface:
                 reset_label.Visible = bool(reset_label.Text)
             for name_label, value_label, reset_label in self._extra_columns[len(cells):]:
                 name_label.Visible = value_label.Visible = reset_label.Visible = False
-            # Width of the area right of the Start cluster to the tray (None:
-            # free placement or tray side). Compact type to fit; known resets
-            # may grow right toward the notification area.
+            # Width of the empty area left of Start (weather → Start). Compact
+            # type to fit; strip right-edge stays flush against Start.
             available = None
             if self._placement == "taskbar" and geometry:
                 elements = self._layout.elements(int(user32.FindWindowW("Shell_TrayWnd", None) or 0), geometry[0],
                                                  (form.Left, form.Top, form.Right, form.Bottom) if form.Visible else None)
-                gap_area = (start_right_gap(geometry[0], elements, geometry[1], strip_margin(self._scale))
-                            if elements else None)
+                gap_area = left_gap(geometry[0], elements, strip_margin(self._scale)) if elements else None
                 available = gap_area[1] - gap_area[0] if gap_area else None
             if not multi:
                 self._fit_key = None

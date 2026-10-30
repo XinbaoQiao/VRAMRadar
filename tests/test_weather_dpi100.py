@@ -56,7 +56,7 @@ class Dpi100(unittest.TestCase):
         layout._load = lambda: True
         layout._read = lambda handle: dict(RAW)
         placer = us.PlacementDebouncer(confirm=3, switch_confirm=5)
-        anchor = us.start_cluster_right(RAW) + MARGIN
+        anchor = RAW["StartButton"][0] - MARGIN - SIZE[0] - 1
         self.run_strip(screen, 6, clock, layout, placer, own)
         settled = own[0][0]
         self.assertEqual(settled, anchor)
@@ -65,14 +65,14 @@ class Dpi100(unittest.TestCase):
         self.assertEqual(positions, [anchor] * len(positions))
 
 
-    def test_real_growth_under_weather_leaves_start_right_put(self):
+    def test_real_growth_under_weather_leaves_start_left_put(self):
         screen, clock, own = Screen(110), [0.0], [None]
         layout = us.TaskbarLayout(interval=0.0, retry=0.0, trim=lambda f, o: us.trim_widgets(f, o, screen.capture),
                                   locked=lambda: False)
         layout._load = lambda: True
         layout._read = lambda handle: dict(RAW)
         placer = us.PlacementDebouncer(confirm=3, switch_confirm=5)
-        anchor = us.start_cluster_right(RAW) + MARGIN
+        anchor = RAW["StartButton"][0] - MARGIN - SIZE[0] - 1
         self.run_strip(screen, 6, clock, layout, placer, own)
         screen.text_end = 170
         self.run_strip(screen, 12, clock, layout, placer, own)

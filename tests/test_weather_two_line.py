@@ -86,7 +86,7 @@ class Running:
         x, y = us.docked_point(BAR, target, SIZE[0])
         self.own = (x, y, x + SIZE[0], y + SIZE[1])
         self.screen.own = self.own
-        assert self.own[0] >= RAW["StartButton"][2], self.own      # docked right of Start
+        assert self.own[2] <= RAW["StartButton"][0], self.own      # flush left of Start
         return self.own
 
     def gap(self):
@@ -121,12 +121,12 @@ class TwoLineWidget(unittest.TestCase):
         settled = layout.widest_weather(out, RAW["WidgetsButton"], own, now=0.0)
         self.assertGreater(settled["WidgetsButton"][2], own[0])          # steps right of the strip
 
-    def test_strip_stays_right_of_start_when_line2_appears(self):
+    def test_strip_stays_left_of_start_when_line2_appears(self):
         # Strip docks right of Start; weather line 2 no longer moves it.
         r = Running(Screen(line2=[]))
         for _ in range(6):
             r.tick()
-        anchor = us.start_cluster_right(RAW) + MARGIN
+        anchor = RAW["StartButton"][0] - MARGIN - SIZE[0] - 1
         self.assertEqual(r.own[0], anchor)
         r.screen.line2 = list(LINE2_LONG)
         for second in range(1, 31):
@@ -137,14 +137,14 @@ class TwoLineWidget(unittest.TestCase):
         r = Running(Screen(line2=LINE2_SHORT))
         for _ in range(6):
             r.tick()
-        anchor = us.start_cluster_right(RAW) + MARGIN
+        anchor = RAW["StartButton"][0] - MARGIN - SIZE[0] - 1
         self.assertEqual(r.own[0], anchor)
         r.screen.line2 = list(LINE2_LONG)
         for second in range(1, 21):
             r.tick()
         self.assertEqual(r.own[0], anchor)
 
-    def test_shrink_leaves_start_right_put(self):
+    def test_shrink_leaves_start_left_put(self):
         r = Running(Screen(line2=LINE2_LONG))
         for _ in range(6):
             r.tick()

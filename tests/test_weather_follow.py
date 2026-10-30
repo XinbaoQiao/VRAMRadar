@@ -1,4 +1,4 @@
-"""Weather measurement while the strip docks right of the Start cluster."""
+"""Weather measurement while the strip docks flush left of the Start button."""
 import unittest
 from unittest import mock
 
@@ -53,7 +53,8 @@ class Running:
         return self.own
 
     def anchor(self):
-        return us.start_cluster_right(RAW) + MARGIN
+        # Exclusive right-edge bound; docked_point left = anchor - width - 1.
+        return RAW["StartButton"][0] - MARGIN
 
     def gap(self):
         return self.own[0] - self.screen.text_end
@@ -67,22 +68,22 @@ class Running:
         return moves
 
     def assertion(self):
-        # Docked immediately right of Start/Search/TaskView (never left of Start).
-        assert self.own[0] >= RAW["StartButton"][2], self.own
+        # Flush left of blue Start: strip right edge stays left of Start.left.
+        assert self.own[2] <= RAW["StartButton"][0], self.own
 
 
 class WeatherFollow(unittest.TestCase):
-    def test_settles_right_of_start_cluster(self):
+    def test_settles_flush_left_of_start(self):
         r = Running(150)
         r.run(6)
-        self.assertEqual(r.own[0], r.anchor())
+        self.assertEqual(r.own[0], r.anchor() - SIZE[0] - 1)
 
-    def test_weather_growth_does_not_move_start_right_strip(self):
+    def test_weather_growth_does_not_move_start_left_strip(self):
         r = Running(150)
         r.run(6)
         r.screen.text_end = 270           # wider than the 237 px rect
         moves = r.run(30)
-        self.assertEqual((moves, r.own[0]), (0, r.anchor()))
+        self.assertEqual((moves, r.own[0]), (0, r.anchor() - SIZE[0] - 1))
         r.screen.text_end = 245
         self.assertEqual(r.run(8), 0)
 
@@ -92,13 +93,13 @@ class WeatherFollow(unittest.TestCase):
         r.screen.text_end = 160
         for second in range(1, 6):
             r.tick()
-        self.assertEqual(r.own[0], r.anchor())
+        self.assertEqual(r.own[0], r.anchor() - SIZE[0] - 1)
 
     def test_shrink_leaves_strip_put(self):
         r = Running(200)
         r.run(6)
         r.screen.text_end = 150
-        self.assertEqual((r.run(35), r.own[0]), (0, r.anchor()))
+        self.assertEqual((r.run(35), r.own[0]), (0, r.anchor() - SIZE[0] - 1))
 
     def test_steady_text_never_moves(self):
         r = Running(150)
@@ -115,10 +116,10 @@ class WeatherFollow(unittest.TestCase):
         r.screen.photo, r.is_locked = False, False
         r.screen.text_end = 170                        # weather changed meanwhile
         r.run(5)
-        self.assertEqual(r.own[0], r.anchor())
+        self.assertEqual(r.own[0], r.anchor() - SIZE[0] - 1)
 
     def test_implausible_capture_is_ignored(self):
-        # Overlay/glitch not detected as lock: placement still stays on Start-right.
+        # Overlay/glitch not detected as lock: placement still stays flush left of Start.
         r = Running(150)
         r.run(6)
         before = r.own
