@@ -956,12 +956,12 @@ class WebUiContractTests(unittest.TestCase):
             ".server-navigator-position",
         ):
             self.assertIn(selector, self.styles)
-        self.assertIn(".server-navigator { position: relative; z-index: 15; top:", self.styles)
-        self.assertNotIn(".server-navigator { position: sticky", self.styles)
+        self.assertIn(".server-navigator { position: sticky; z-index: 15; top:", self.styles)
+        self.assertNotIn(".server-navigator { position: relative; z-index: 15; top:", self.styles)
         self.assertNotIn(".server-navigator { position: fixed", self.styles)
-        self.assertIn("max-height: none; margin-right: var(--navigator-gutter)", self.styles)
-        self.assertNotIn("max-height: min(72vh, 560px)", self.styles)
-        self.assertIn(".server-navigator-list { width: 100%; box-sizing: border-box; max-height: none; overflow-x: hidden; overflow-y: visible; }", self.styles)
+        self.assertIn("top: clamp(78px, 14vh, 160px)", self.styles)
+        self.assertIn("max-height: min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px))", self.styles)
+        self.assertIn(".server-navigator-list { width: 100%; box-sizing: border-box; max-height: calc(min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px)) - 42px); overflow-x: hidden; overflow-y: auto; }", self.styles)
         self.assertIn("grid-row: 2; grid-column: 2", self.styles)
         self.assertIn("main { grid-row: 2; grid-column: 1", self.styles)
         search_index = self.javascript[
