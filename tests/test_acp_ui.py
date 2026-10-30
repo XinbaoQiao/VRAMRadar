@@ -60,13 +60,19 @@ acpProfileFromDraft({id:'new'})]));
         result = self.run_js(["renderAcpPlatform"], """
 const escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 const number = value => String(value);
-const icon = () => '';
+const icon = (name, cls='') => `<i class="${cls||name}"></i>`;
 const moduleOpen = () => '';
+const taskGroupOpen = (_serverId, _module, group, defaultOpen=false) => defaultOpen ? ' open' : '';
 const taskStateLabel = state => ({PENDING:'排队', QUEUEING:'排队', WAIT_QUOTA:'待配额', STARTING:'启动', RUNNING:'运行', SUCCEEDED:'完成', FAILED:'失败', UNKNOWN:'未知'})[state] || state;
-const taskStateClass = state => 'pending';
+const taskStateClass = state => ({RUNNING:'running', PENDING:'pending', SUCCEEDED:'completed', FAILED:'failed'}[state] || 'pending');
 const taskStateIcon = () => 'clock';
-console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',cluster:'c',zone:'z'},
- jobs:[{job_id:'j',name:'<img onerror=x>',state:'PENDING',requested_gpus:4,reason:'<script>'}]})));
+console.log(JSON.stringify(renderAcpPlatform({server_id:'h100', platform:{workspace:'<script>',cluster:'c',zone:'z'},
+ jobs:[
+  {job_id:'r1',name:'run-a',state:'RUNNING',requested_gpus:1},
+  {job_id:'j',name:'<img onerror=x>',state:'PENDING',requested_gpus:4,reason:'<script>'},
+  {job_id:'d1',name:'done-a',state:'SUCCEEDED',requested_gpus:1},
+  {job_id:'d2',name:'done-b',state:'FAILED',requested_gpus:2},
+ ]})));
 """)
         self.assertNotIn("<script>", result)
         self.assertNotIn("<img onerror", result)
@@ -78,7 +84,15 @@ console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',clu
         self.assertIn("acp-state", result)
         self.assertIn("&lt;script&gt;", result)
         self.assertIn("排队", result)
-
+        self.assertIn('data-task-module="acp-jobs"', result)
+        self.assertIn('data-task-group="acp-running"', result)
+        self.assertIn('data-task-group="acp-pending"', result)
+        self.assertIn('data-task-group="acp-done"', result)
+        self.assertIn("task-group-chevron", result)
+        # Active buckets default open; finished stays collapsed.
+        self.assertRegex(result, r'data-task-group="acp-running"[^>]* open')
+        self.assertRegex(result, r'data-task-group="acp-pending"[^>]* open')
+        self.assertNotRegex(result, r'data-task-group="acp-done"[^>]* open')
         self.assertNotIn("acp-page-note", result)
 
 

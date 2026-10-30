@@ -3751,19 +3751,25 @@ function renderAcpPlatform(server) {
     </article>`;
   };
 
-  const renderPeriod = (title, list) => {
+  const serverId = server.server_id || '';
+  const renderPeriod = (title, list, groupKey, defaultOpen) => {
     if (!list.length) return '';
     const cards = list.map(renderJobCard).join('');
-    return `<section class="task-period acp-period">
-      <header class="task-period-head"><h6>${escapeHtml(title)}</h6><span>${number(list.length)} 条</span></header>
+    const openAttr = taskGroupOpen(serverId, 'acp-jobs', groupKey, defaultOpen);
+    return `<details class="task-group acp-period" data-task-group="${escapeHtml(groupKey)}" data-task-module="acp-jobs" data-server-id="${escapeHtml(serverId)}"${openAttr}>
+      <summary>
+        <span class="acp-period-heading"><h5>${escapeHtml(title)}</h5></span>
+        <span class="task-group-meta">${number(list.length)} 条 ${icon('chevron', 'task-group-chevron')}</span>
+      </summary>
       <div class="acp-job-stack" role="list">${cards}</div>
-    </section>`;
+    </details>`;
   };
 
+  // Keep active work visible; collapse finished jobs by default so ~60 rows stay compact.
   const periods = [
-    renderPeriod('运行中', buckets.running),
-    renderPeriod('排队与启动', buckets.pending),
-    renderPeriod('已结束', buckets.done),
+    renderPeriod('运行中', buckets.running, 'acp-running', true),
+    renderPeriod('排队与启动', buckets.pending, 'acp-pending', true),
+    renderPeriod('已结束', buckets.done, 'acp-done', false),
   ].join('');
 
   const empty = '<div class="module-empty acp-job-empty">暂无云任务</div>';

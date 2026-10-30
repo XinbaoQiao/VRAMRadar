@@ -2375,21 +2375,55 @@ html::-webkit-scrollbar-button, .dialog-content::-webkit-scrollbar-button, .serv
 
 .server-card.is-acp .acp-period {
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm, 8px);
+  border-radius: var(--radius-sm, 6px);
   background: var(--surface);
   overflow: hidden;
 }
 
-.server-card.is-acp .acp-period .task-period-head {
-  padding: 10px 12px;
+.server-card.is-acp .acp-period > summary {
+  min-height: 42px;
+  padding: 8px 12px;
   background: var(--surface-3);
   gap: 10px;
+  cursor: pointer;
+}
+
+.server-card.is-acp .acp-period > summary:hover {
+  background: color-mix(in srgb, var(--cyan) 6%, var(--surface-3));
+}
+
+.server-card.is-acp .acp-period > summary:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -3px;
+}
+
+.server-card.is-acp .acp-period-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-card.is-acp .acp-period-heading h5 {
+  margin: 0;
+  font-family: var(--display-font);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.server-card.is-acp .acp-period[open] > summary {
+  border-bottom: 1px solid var(--border);
 }
 
 .server-card.is-acp .acp-period .acp-job-stack {
   padding: 10px;
   gap: 9px;
   background: var(--surface-2);
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .acp-job-stack {
