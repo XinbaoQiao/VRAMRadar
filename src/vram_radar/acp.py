@@ -142,6 +142,9 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
     counts: dict[str, int] = {}
     for job in jobs:
         counts[job["state"]] = counts.get(job["state"], 0) + 1
+    page_size = transport.page_size if transport is not None else PAGE_SIZE
+    # One bounded page only: a full page means more workspace jobs may exist.
+    list_complete = len(jobs) < page_size
     return {
         "server_id": server.id, "display_name": server.display_name,
         "backend": "sensecore_acp", "view_kind": "platform",
@@ -150,7 +153,7 @@ def query_sensecore_acp(server: ServerProfile) -> dict[str, Any]:
         "nodes": [], "gpus": [], "jobs": jobs,
         "platform": {"workspace": server.acp_workspace, "cluster": server.acp_cluster,
                      "zone": server.acp_zone, "job_scope": "workspace_visible",
-                     "page_size": transport.page_size if transport is not None else PAGE_SIZE, "list_complete": False,
+                     "page_size": page_size, "list_complete": list_complete,
                      "live_vram_supported": False},
         "tasks": {"current_user": "", "active": [j for j in jobs if j["state"] not in TERMINAL_STATES],
                   "recent": [j for j in jobs if j["state"] in TERMINAL_STATES],

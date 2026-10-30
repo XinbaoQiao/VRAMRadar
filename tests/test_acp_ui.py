@@ -61,6 +61,7 @@ acpProfileFromDraft({id:'new'})]));
 const escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 const number = value => String(value);
 const icon = () => '';
+const moduleOpen = () => '';
 const taskStateLabel = state => ({PENDING:'排队', QUEUEING:'排队', WAIT_QUOTA:'待配额', STARTING:'启动', RUNNING:'运行', SUCCEEDED:'完成', FAILED:'失败', UNKNOWN:'未知'})[state] || state;
 const taskStateClass = state => 'pending';
 const taskStateIcon = () => 'clock';
@@ -77,6 +78,9 @@ console.log(JSON.stringify(renderAcpPlatform({platform:{workspace:'<script>',clu
         self.assertIn("acp-state", result)
         self.assertIn("&lt;script&gt;", result)
         self.assertIn("排队", result)
+
+        self.assertNotIn("acp-page-note", result)
+
 
     def test_acp_has_no_directory_module_or_account_ssh_summary(self):
         result = self.run_js(["renderDirectoryModule", "renderAccountOverview"], """

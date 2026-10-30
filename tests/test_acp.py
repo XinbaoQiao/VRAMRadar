@@ -61,12 +61,32 @@ class ACPTests(unittest.TestCase):
         self.assertIsNone(result["free_vram_gib"])
         self.assertIsNone(result["total_gpus"])
         self.assertEqual(result["gpus"], [])
-        self.assertFalse(result["platform"]["list_complete"])
+        self.assertTrue(result["platform"]["list_complete"])  # one job < page_size 100
         self.assertFalse(result["tasks"]["history_supported"])
         self.assertEqual(run.call_args.kwargs["env"]["SCO_ZONE"], "cn-sh-01z")
         self.assertNotIn("SCO_ACCESS_KEY_ID", run.call_args.kwargs["env"])
         self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
         self.assertLessEqual(run.call_args.kwargs["timeout"], 60)
+
+
+
+    @patch("vram_radar.acp.shutil.which", return_value="/usr/bin/sco")
+    @patch("vram_radar.acp._run_bounded_process")
+    def test_full_page_marks_list_incomplete_without_extra_probes(self, run, which):
+        # Host transport may pin page_size=100; a full page must not claim completeness
+        # or invent a second sco call. Truncation is why H100 looked "missing" jobs.
+        rows = [{"name": f"pt-{i}", "state": "RUNNING"} for i in range(100)]
+        run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(rows).encode(),
+            stderr=b"",
+            stdout_truncated=False,
+        )
+        result = query_sensecore_acp(profile())
+        self.assertEqual(len(result["jobs"]), 100)
+        self.assertEqual(result["platform"]["page_size"], 100)
+        self.assertFalse(result["platform"]["list_complete"])
+        self.assertEqual(run.call_count, 1)
 
     @patch("vram_radar.acp.shutil.which", return_value="/usr/bin/sco")
     @patch("vram_radar.acp._run_bounded_process")

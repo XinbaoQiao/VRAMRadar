@@ -3767,6 +3767,13 @@ function renderAcpPlatform(server) {
   ].join('');
 
   const empty = '<div class="module-empty acp-job-empty">暂无云任务</div>';
+
+  const pageSize = Number(platform.page_size) || 0;
+  const truncated = platform.list_complete === false && pageSize > 0 && jobs.length >= pageSize;
+  const truncateNote = truncated
+    ? `<p class="acp-page-note" role="note">当前只显示一页（最多 ${number(pageSize)} 条）。若任务不在这一页，并不代表平台没有该任务。</p>`
+    : '';
+
   const place = metaBits.length ? escapeHtml(metaBits.join(' · ')) : 'SenseCore / SLAI';
   return `<details class="cluster-module acp-module" data-module="acp-jobs" data-server-id="${escapeHtml(server.server_id || '')}"${moduleOpen(server.server_id, 'acp-jobs', true)} aria-label="云任务">
     <summary>
@@ -3778,7 +3785,7 @@ function renderAcpPlatform(server) {
       <span class="details-chevron">${icon('chevron')}</span>
     </summary>
     <div class="cluster-content">
-      ${periods || empty}
+      ${truncateNote}${periods || empty}
       <details class="module-context" data-context-note="acp-scope">
         <summary>说明</summary>
         <p>只读查看云平台任务列表，不提供 SSH、目录浏览或实时显存。名称过长时会自动缩短，完整标识可在悬停时查看。</p>
