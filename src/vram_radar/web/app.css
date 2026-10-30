@@ -360,8 +360,9 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px; margin: 0 au
 .status-dot.connecting { background: var(--cyan); }
 .status-dot.stale { background: var(--amber); }
 .status-dot.offline, .status-dot.auth_required, .status-dot.security_blocked, .status-dot.misconfigured { background: var(--red); }
-.server-navigator { position: sticky; z-index: 15; top: clamp(78px, 14vh, 160px); grid-row: 2; grid-column: 2; align-self: start; justify-self: end; width: var(--navigator-rail-width); max-width: var(--navigator-rail-width); min-width: 0; max-height: min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px)); margin-right: var(--navigator-gutter); overflow: hidden; }
-.server-navigator[data-side="left"] { grid-column: 1; justify-self: start; margin-right: 0; margin-left: var(--navigator-gutter); }
+/* Desktop: fixed docks to the viewport. sticky fails under html/body overflow-x:hidden and html { zoom } in WebView2/Chromium. Grid gutters still reserve rail space so main is not covered. */
+.server-navigator { position: fixed; z-index: 15; top: clamp(78px, 14vh, 160px); right: var(--navigator-gutter); left: auto; width: var(--navigator-rail-width); max-width: var(--navigator-rail-width); min-width: 0; max-height: min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px)); overflow: hidden; }
+.server-navigator[data-side="left"] { left: var(--navigator-gutter); right: auto; }
 .server-navigator:hover, .server-navigator:focus-within, .server-navigator.dragging { overflow: visible; }
 .server-navigator-panel { position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px)); overflow: hidden; contain: layout paint style; will-change: transform; transform: translate3d(0, 0, 0); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, #00100b 6%, transparent); transition: transform .24s var(--motion-ease); }
 .server-navigator:is(:hover, :focus-within, .dragging, .resizing) .server-navigator-panel { width: min(var(--navigator-panel-width), 420px, calc(100vw - 360px), 42vw); max-width: min(420px, calc(100vw - 360px), 42vw); }
@@ -1741,7 +1742,7 @@ dialog[open], .notification-center:not([hidden]) { animation: surface-enter .24s
   .app-shell:has(.server-navigator:not([hidden])), .app-shell:has(.server-navigator[data-side="left"]:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
   .app-shell:has(.server-navigator:not([hidden])) main, .app-shell:has(.server-navigator[data-side="left"]:not([hidden])) main { grid-row: 3; grid-column: 1; }
   main { padding: 14px max(12px, env(safe-area-inset-right)) calc(28px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
-  .server-navigator, .server-navigator[data-side="left"] { position: relative; top: auto; grid-row: 2; grid-column: 1; align-self: start; justify-self: stretch; width: 100%; max-width: none; max-height: 42px; margin: 0; overflow: hidden; }
+  .server-navigator, .server-navigator[data-side="left"] { position: relative; top: auto; left: auto; right: auto; grid-row: 2; grid-column: 1; align-self: start; justify-self: stretch; width: 100%; max-width: none; max-height: 42px; margin: 0; overflow: hidden; }
   .server-navigator:hover, .server-navigator:focus-within, .server-navigator.dragging { max-height: min(58dvh, 520px); overflow: hidden; }
   .server-navigator-panel, .server-navigator[data-side="right"]:hover .server-navigator-panel, .server-navigator[data-side="right"]:focus-within .server-navigator-panel, .server-navigator[data-side="right"].dragging .server-navigator-panel { width: 100%; transform: none; }
   .server-navigator-head, .server-navigator-controls, .server-navigator-list, .server-navigator-entry, .server-navigator-empty, .server-navigator-footer, .navigator-task-watches, .navigator-watch-empty { width: 100%; }

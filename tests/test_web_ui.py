@@ -956,13 +956,14 @@ class WebUiContractTests(unittest.TestCase):
             ".server-navigator-position",
         ):
             self.assertIn(selector, self.styles)
-        self.assertIn(".server-navigator { position: sticky; z-index: 15; top:", self.styles)
+        self.assertIn(".server-navigator { position: fixed; z-index: 15; top:", self.styles)
+        self.assertNotIn(".server-navigator { position: sticky; z-index: 15; top:", self.styles)
         self.assertNotIn(".server-navigator { position: relative; z-index: 15; top:", self.styles)
-        self.assertNotIn(".server-navigator { position: fixed", self.styles)
+        self.assertIn("right: var(--navigator-gutter); left: auto;", self.styles)
+        self.assertIn('.server-navigator[data-side="left"] { left: var(--navigator-gutter); right: auto; }', self.styles)
         self.assertIn("top: clamp(78px, 14vh, 160px)", self.styles)
         self.assertIn("max-height: min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px))", self.styles)
         self.assertIn(".server-navigator-list { width: 100%; box-sizing: border-box; max-height: calc(min(72vh, calc(100dvh - clamp(78px, 14vh, 160px) - 24px)) - 42px); overflow-x: hidden; overflow-y: auto; }", self.styles)
-        self.assertIn("grid-row: 2; grid-column: 2", self.styles)
         self.assertIn("main { grid-row: 2; grid-column: 1", self.styles)
         search_index = self.javascript[
             self.javascript.index("function serverNavigatorSearchText"):self.javascript.index("function serverMatchesNavigator")
@@ -1007,7 +1008,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-rail-width)", self.styles)
         self.assertNotIn("grid-template-columns: minmax(0, 1fr) calc(var(--navigator-panel-width)", self.styles)
         self.assertIn("position: sticky", self.styles)
-        self.assertNotIn(".server-navigator { position: fixed", self.styles)
+        self.assertIn(".server-navigator { position: fixed", self.styles)
+        self.assertIn("left: auto; right: auto;", self.styles)  # narrow @media 720px restores flow
 
     def test_server_navigator_task_filter_shows_only_my_current_activity(self):
         navigator = self.javascript[
