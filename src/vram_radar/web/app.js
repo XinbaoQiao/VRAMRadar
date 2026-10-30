@@ -1397,14 +1397,20 @@ function layoutPxFromViewportRect(size) {
 
 
 function navigationFocusMetrics() {
-  // Titlebar cache and scrollY are layout px; getBoundingClientRect / innerHeight
-  // are viewport px under html { zoom }. Convert before comparing or scrolling.
-  const titlebar = cachedTitlebarHeightPx
-    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
-    || 62;
+  // WebView2 CSS zoom: getBoundingClientRect and window.scrollBy share one viewport
+  // pixel space (scrollBy(dx) moves a rect by dx). window.innerHeight is NOT scaled
+  // by html { zoom }. Dividing GBR by --ui-zoom before scrollBy undershoots centering
+  // so the scroll-spy hands .server-navigator-item.active back to a tall prior card.
+  const zoom = Number(uiZoom) > 0 ? Number(uiZoom) : 1;
+  const titlebarEl = document.querySelector('.titlebar');
+  const titlebar = titlebarEl
+    ? titlebarEl.getBoundingClientRect().bottom
+    : (cachedTitlebarHeightPx
+      || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
+      || 62) * zoom;
   const viewportHeight = Math.max(
     1,
-    layoutPxFromViewportRect(window.innerHeight || document.documentElement.clientHeight || 0),
+    window.innerHeight || document.documentElement.clientHeight || 0,
   );
   const availableHeight = Math.max(160, viewportHeight - titlebar);
   return {
@@ -1425,8 +1431,9 @@ function serverScrollProbe(card) {
 }
 
 function viewportTopLayoutPx(element) {
+  // Viewport/GBR top in the same space as window.scrollBy (not GBR/zoom).
   if (!element) return Number.POSITIVE_INFINITY;
-  return layoutPxFromViewportRect(element.getBoundingClientRect().top);
+  return element.getBoundingClientRect().top;
 }
 
 
@@ -1602,16 +1609,14 @@ function scrollServerIntoVisualCenter(serverId) {
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
   setActiveServer(serverId);
-  const { titlebar, availableHeight, focusLine } = navigationFocusMetrics();
+  const { availableHeight, focusLine } = navigationFocusMetrics();
   const focus = cardPrimaryGpuBand(card)
     || card.querySelector('.server-head')
     || card;
   const rect = focus.getBoundingClientRect();
-  const rectTop = layoutPxFromViewportRect(rect.top);
-  const rectHeight = layoutPxFromViewportRect(rect.height);
-  // Upper-third of the usable band reads as visual center under sticky chrome.
-  const focusSpan = Math.min(Math.max(rectHeight, 48), availableHeight * 0.5);
-  const focusY = rectTop + focusSpan * 0.45;
+  // Use raw GBR vs focusLine: window.scrollBy moves GBR 1:1 under CSS zoom.
+  const focusSpan = Math.min(Math.max(rect.height, 48), availableHeight * 0.5);
+  const focusY = rect.top + focusSpan * 0.45;
   const delta = focusY - focusLine;
   if (Math.abs(delta) > 2) {
     window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
@@ -1627,12 +1632,10 @@ function scrollServerKeepingGpuVisible(serverId) {
     || serverNavigationCardsById.get(serverId);
   const band = cardPrimaryGpuBand(card);
   if (!band) return;
-  const { titlebar, availableHeight, focusLine, viewportHeight } = navigationFocusMetrics();
+  const { titlebar, focusLine, viewportHeight } = navigationFocusMetrics();
   const rect = band.getBoundingClientRect();
-  const top = layoutPxFromViewportRect(rect.top);
-  const bottom = layoutPxFromViewportRect(rect.bottom);
-  if (bottom > titlebar + 8 && top < viewportHeight - 8) return;
-  const focusY = top + Math.min(Math.max(layoutPxFromViewportRect(rect.height), 48), 120) * 0.45;
+  if (rect.bottom > titlebar + 8 && rect.top < viewportHeight - 8) return;
+  const focusY = rect.top + Math.min(Math.max(rect.height, 48), 120) * 0.45;
   window.scrollBy({ top: focusY - focusLine, left: 0, behavior: 'auto' });
   updateLocationStrip();
 }
@@ -1868,11 +1871,9 @@ function serverCardOutsideViewport(serverId) {
   if (!card) return true;
   const rect = card.getBoundingClientRect();
   const { titlebar, viewportHeight } = navigationFocusMetrics();
-  const top = layoutPxFromViewportRect(rect.top);
-  const bottom = layoutPxFromViewportRect(rect.bottom);
   // Fully above the titlebar, or fully below the viewport -- sidebar jumps must not no-op.
-  if (bottom <= titlebar + 8) return true;
-  if (top >= viewportHeight - 8) return true;
+  if (rect.bottom <= titlebar + 8) return true;
+  if (rect.top >= viewportHeight - 8) return true;
   return false;
 }
 
@@ -3492,8 +3493,8 @@ function syncActiveServerFromScroll() {
   if (Date.now() < serverNavigationSyncPausedUntil) return;
   const { focusLine } = navigationFocusMetrics();
   // Match scrollServerIntoVisualCenter. Spy the flow-position sentinel (not the
-  // sticky .server-head box) in layout px so UI zoom and tall prior cards cannot
-  // leave the cyan .server-navigator-item.active marker stuck on the top server.
+  // sticky .server-head box) in window.scrollBy/GBR space so UI zoom cannot
+  // undershoot a jump and leave .server-navigator-item.active on the top server.
   let low = 0;
   let high = serverNavigationCards.length - 1;
   let activeIndex = 0;
