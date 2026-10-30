@@ -360,7 +360,7 @@ main { grid-row: 2; grid-column: 1; width: 100%; max-width: 1360px; margin: 0 au
 .status-dot.connecting { background: var(--cyan); }
 .status-dot.stale { background: var(--amber); }
 .status-dot.offline, .status-dot.auth_required, .status-dot.security_blocked, .status-dot.misconfigured { background: var(--red); }
-.server-navigator { position: sticky; z-index: 15; top: clamp(78px, 14vh, 160px); grid-row: 2; grid-column: 2; align-self: start; justify-self: end; width: var(--navigator-rail-width); max-width: var(--navigator-rail-width); min-width: 0; max-height: min(72vh, 560px); margin-right: var(--navigator-gutter); overflow: hidden; }
+.server-navigator { position: relative; z-index: 15; top: auto; grid-row: 2; grid-column: 2; align-self: start; justify-self: end; width: var(--navigator-rail-width); max-width: var(--navigator-rail-width); min-width: 0; max-height: min(72vh, 560px); margin-right: var(--navigator-gutter); overflow: hidden; }
 .server-navigator[data-side="left"] { grid-column: 1; justify-self: start; margin-right: 0; margin-left: var(--navigator-gutter); }
 .server-navigator:hover, .server-navigator:focus-within, .server-navigator.dragging { overflow: visible; }
 .server-navigator-panel { position: relative; box-sizing: border-box; width: 100%; max-width: none; max-height: min(72vh, 560px); overflow: hidden; contain: layout paint style; will-change: transform; transform: translate3d(0, 0, 0); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: 0 4px 16px color-mix(in srgb, #00100b 6%, transparent); transition: transform .24s var(--motion-ease); }
