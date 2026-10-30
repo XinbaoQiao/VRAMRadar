@@ -1119,13 +1119,22 @@ class WebUiContractTests(unittest.TestCase):
         self.assertNotIn("cards.reduce", scroll_sync)
         self.assertNotIn("behavior: reducedMotion ? 'auto' : 'smooth'", self.javascript)
         self.assertNotIn("window.matchMedia?.('(max-width: 900px)').matches", scroll_sync)
-        # Spy sticky .server-head against the sidebar focus line so the rail marker follows lower servers.
-        self.assertIn("availableHeight * 0.32", scroll_sync)
+        # Spy flow-position sentinel in layout px so UI zoom + tall prior sticky heads
+        # cannot leave the cyan rail marker stuck on the top server.
+        self.assertIn("navigationFocusMetrics()", scroll_sync)
+        self.assertIn("serverScrollProbe", scroll_sync)
+        self.assertIn("viewportTopLayoutPx", scroll_sync)
         self.assertIn("serverNavigationSyncPausedUntil", scroll_sync)
-        self.assertIn("querySelector('.server-head')", scroll_sync)
         self.assertIn("activeIndex", scroll_sync)
         self.assertNotIn("activeRect.bottom", scroll_sync)
         self.assertNotIn("owns the focus line even when the next heading is nearer", scroll_sync)
+        self.assertIn("function navigationFocusMetrics()", self.javascript)
+        self.assertIn("server-head-sentinel", self.javascript[
+            self.javascript.index("function serverScrollProbe"):self.javascript.index("function viewportTopLayoutPx")
+        ])
+        self.assertIn("layoutPxFromViewportRect", self.javascript[
+            self.javascript.index("function navigationFocusMetrics()"):self.javascript.index("function serverScrollProbe")
+        ])
         self.assertIn("contain: layout paint style", self.styles)
         self.assertIn("will-change: transform", self.styles)
         self.assertIn("transition: transform .24s var(--motion-ease)", self.styles)
@@ -1138,8 +1147,9 @@ class WebUiContractTests(unittest.TestCase):
         navigate = self.javascript[
             self.javascript.index("function navigateToServer"):self.javascript.index("function navigateRelativeServer")
         ]
+        self.assertIn("pauseServerNavigationSync(1200)", navigate)
         self.assertIn("pauseServerNavigationSync(900)", navigate)
-        self.assertIn("pauseServerNavigationSync(720)", navigate)
+        self.assertIn("focusLine + 48", navigate)
         set_active = self.javascript[
             self.javascript.index("function setActiveServer"):self.javascript.index("function visibleServerNavigatorIds")
         ]
@@ -1152,7 +1162,70 @@ class WebUiContractTests(unittest.TestCase):
         ]
         self.assertIn("priorScrollTop", render_nav)
 
+
+    def test_server_navigator_follow_uses_layout_px_sentinel_against_tall_prior_card(self):
+        """Tall prior sticky head + UI zoom must not pin the rail marker on server 0.
+
+        Simulates the scroll-spy decision after navigating to a lower server: the
+        previous card's sticky head would still report titlebar-top, but the
+        non-sticky sentinel for the lower server has crossed the focus line.
+        """
+        # Mirror syncActiveServerFromScroll / navigationFocusMetrics math.
+        def layout_px(size, zoom):
+            return size / zoom
+
+        def pick_active(probe_tops_layout, focus_line):
+            active_index = 0
+            low, high = 0, len(probe_tops_layout) - 1
+            while low <= high:
+                middle = (low + high) >> 1
+                if probe_tops_layout[middle] <= focus_line:
+                    active_index = middle
+                    low = middle + 1
+                else:
+                    high = middle - 1
+            return active_index
+
+        zoom = 1.25
+        titlebar_layout = 68
+        inner_height_viewport = 900 * zoom  # html zoom scales rect/innerHeight in this WebView
+        viewport_height = layout_px(inner_height_viewport, zoom)
+        focus_line = titlebar_layout + max(160, viewport_height - titlebar_layout) * 0.32
+
+        # Sticky heads: prior stuck at titlebar*zoom, target head also near sticky —
+        # using sticky tops would be ambiguous; sentinels encode flow position.
+        sticky_tops_layout = [
+            layout_px(titlebar_layout * zoom, zoom),  # server0 stuck
+            layout_px(titlebar_layout * zoom, zoom),  # server1 also reports stuck-ish
+            layout_px(800 * zoom, zoom),
+        ]
+        # With identical sticky tops, binary search still lands on the last <= focus
+        # only if both count; ensure sentinel path selects the lower server.
+        sentinel_tops_layout = [
+            layout_px(-1200 * zoom, zoom),  # tall prior fully above
+            layout_px(220 * zoom, zoom),    # lower server crossed focus line
+            layout_px(980 * zoom, zoom),
+        ]
+        self.assertLess(sentinel_tops_layout[1], focus_line)
+        self.assertEqual(pick_active(sentinel_tops_layout, focus_line), 1)
+        # Contract: production spy must use sentinel helper + layout conversion.
+        probe = self.javascript[
+            self.javascript.index("function serverScrollProbe"):self.javascript.index("function viewportTopLayoutPx")
+        ]
+        self.assertIn(".server-head-sentinel", probe)
+        sync = self.javascript[
+            self.javascript.index("function syncActiveServerFromScroll"):self.javascript.index("function scheduleServerNavigationSync")
+        ]
+        self.assertIn("serverScrollProbe", sync)
+        self.assertIn("viewportTopLayoutPx", sync)
+        center = self.javascript[
+            self.javascript.index("function scrollServerIntoVisualCenter"):self.javascript.index("function scrollServerKeepingGpuVisible")
+        ]
+        self.assertIn("navigationFocusMetrics()", center)
+        self.assertIn("layoutPxFromViewportRect(rect.top)", center)
+
     def test_empty_profile_uses_a_dedicated_progressive_onboarding(self):
+
         for selector in (
             'id="first-run-home"',
             'id="dashboard-content"',

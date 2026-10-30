@@ -1395,6 +1395,41 @@ function layoutPxFromViewportRect(size) {
   return size / zoom;
 }
 
+
+function navigationFocusMetrics() {
+  // Titlebar cache and scrollY are layout px; getBoundingClientRect / innerHeight
+  // are viewport px under html { zoom }. Convert before comparing or scrolling.
+  const titlebar = cachedTitlebarHeightPx
+    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
+    || 62;
+  const viewportHeight = Math.max(
+    1,
+    layoutPxFromViewportRect(window.innerHeight || document.documentElement.clientHeight || 0),
+  );
+  const availableHeight = Math.max(160, viewportHeight - titlebar);
+  return {
+    titlebar,
+    viewportHeight,
+    availableHeight,
+    focusLine: titlebar + availableHeight * 0.32,
+  };
+}
+
+function serverScrollProbe(card) {
+  // Prefer the non-sticky sentinel so a tall previous card's stuck .server-head
+  // cannot keep reporting titlebar-top and pin the cyan rail marker up top.
+  if (!card) return null;
+  return card.querySelector('.server-head-sentinel')
+    || card.querySelector('.server-head')
+    || card;
+}
+
+function viewportTopLayoutPx(element) {
+  if (!element) return Number.POSITIVE_INFINITY;
+  return layoutPxFromViewportRect(element.getBoundingClientRect().top);
+}
+
+
 function refreshCachedTitlebarHeight() {
   const cssVal = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'));
   if (Number.isFinite(cssVal) && cssVal > 0) {
@@ -1567,20 +1602,17 @@ function scrollServerIntoVisualCenter(serverId) {
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
   setActiveServer(serverId);
-  const titlebar = cachedTitlebarHeightPx
-    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
-    || 62;
+  const { titlebar, availableHeight, focusLine } = navigationFocusMetrics();
   const focus = cardPrimaryGpuBand(card)
     || card.querySelector('.server-head')
     || card;
   const rect = focus.getBoundingClientRect();
-  const availableTop = titlebar;
-  const availableHeight = Math.max(160, window.innerHeight - availableTop);
+  const rectTop = layoutPxFromViewportRect(rect.top);
+  const rectHeight = layoutPxFromViewportRect(rect.height);
   // Upper-third of the usable band reads as visual center under sticky chrome.
-  const anchorY = availableTop + availableHeight * 0.32;
-  const focusSpan = Math.min(Math.max(rect.height, 48), availableHeight * 0.5);
-  const focusY = rect.top + focusSpan * 0.45;
-  const delta = focusY - anchorY;
+  const focusSpan = Math.min(Math.max(rectHeight, 48), availableHeight * 0.5);
+  const focusY = rectTop + focusSpan * 0.45;
+  const delta = focusY - focusLine;
   if (Math.abs(delta) > 2) {
     window.scrollBy({ top: delta, left: 0, behavior: 'auto' });
   }
@@ -1595,14 +1627,13 @@ function scrollServerKeepingGpuVisible(serverId) {
     || serverNavigationCardsById.get(serverId);
   const band = cardPrimaryGpuBand(card);
   if (!band) return;
-  const titlebar = cachedTitlebarHeightPx || 62;
+  const { titlebar, availableHeight, focusLine, viewportHeight } = navigationFocusMetrics();
   const rect = band.getBoundingClientRect();
-  if (rect.bottom > titlebar + 8 && rect.top < window.innerHeight - 8) return;
-  const availableTop = titlebar;
-  const availableHeight = Math.max(160, window.innerHeight - availableTop);
-  const anchorY = availableTop + availableHeight * 0.32;
-  const focusY = rect.top + Math.min(Math.max(rect.height, 48), 120) * 0.45;
-  window.scrollBy({ top: focusY - anchorY, left: 0, behavior: 'auto' });
+  const top = layoutPxFromViewportRect(rect.top);
+  const bottom = layoutPxFromViewportRect(rect.bottom);
+  if (bottom > titlebar + 8 && top < viewportHeight - 8) return;
+  const focusY = top + Math.min(Math.max(layoutPxFromViewportRect(rect.height), 48), 120) * 0.45;
+  window.scrollBy({ top: focusY - focusLine, left: 0, behavior: 'auto' });
   updateLocationStrip();
 }
 
@@ -1836,12 +1867,12 @@ function serverCardOutsideViewport(serverId) {
     || serverNavigationCardsById.get(serverId);
   if (!card) return true;
   const rect = card.getBoundingClientRect();
-  const titlebar = cachedTitlebarHeightPx
-    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
-    || 62;
+  const { titlebar, viewportHeight } = navigationFocusMetrics();
+  const top = layoutPxFromViewportRect(rect.top);
+  const bottom = layoutPxFromViewportRect(rect.bottom);
   // Fully above the titlebar, or fully below the viewport -- sidebar jumps must not no-op.
-  if (rect.bottom <= titlebar + 8) return true;
-  if (rect.top >= window.innerHeight - 8) return true;
+  if (bottom <= titlebar + 8) return true;
+  if (top >= viewportHeight - 8) return true;
   return false;
 }
 
@@ -3389,9 +3420,12 @@ function ensureActiveNavigatorItemVisible(item) {
   const listRect = list.getBoundingClientRect();
   const itemRect = entry.getBoundingClientRect();
   if (listRect.height <= 0 || itemRect.height <= 0) return;
-  const pad = Math.min(24, listRect.height * 0.12);
-  if (itemRect.top < listRect.top + pad) list.scrollTop += itemRect.top - listRect.top - pad;
-  else if (itemRect.bottom > listRect.bottom - pad) list.scrollTop += itemRect.bottom - listRect.bottom + pad;
+  const listHeight = layoutPxFromViewportRect(listRect.height);
+  const pad = Math.min(24, listHeight * 0.12);
+  const topGap = layoutPxFromViewportRect(itemRect.top - listRect.top);
+  const bottomGap = layoutPxFromViewportRect(itemRect.bottom - listRect.bottom);
+  if (topGap < pad) list.scrollTop += topGap - pad;
+  else if (bottomGap > -pad) list.scrollTop += bottomGap + pad;
 }
 
 function pauseServerNavigationSync(ms = 520) {
@@ -3456,21 +3490,18 @@ function syncActiveServerFromScroll() {
   if (ui.serverNavigator.hidden) return;
   if (!serverNavigationCards.length) return;
   if (Date.now() < serverNavigationSyncPausedUntil) return;
-  const titlebar = cachedTitlebarHeightPx
-    || Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--titlebar-height'))
-    || 62;
-  const availableHeight = Math.max(160, window.innerHeight - titlebar);
-  // Match scrollServerIntoVisualCenter. Spy the sticky .server-head, not the tall
-  // card box — otherwise a long previous card keeps the cyan rail marker stuck up top.
-  const focusLine = titlebar + availableHeight * 0.32;
+  const { focusLine } = navigationFocusMetrics();
+  // Match scrollServerIntoVisualCenter. Spy the flow-position sentinel (not the
+  // sticky .server-head box) in layout px so UI zoom and tall prior cards cannot
+  // leave the cyan .server-navigator-item.active marker stuck on the top server.
   let low = 0;
   let high = serverNavigationCards.length - 1;
   let activeIndex = 0;
   while (low <= high) {
     const middle = (low + high) >> 1;
     const card = serverNavigationCards[middle];
-    const head = card.querySelector('.server-head') || card;
-    if (head.getBoundingClientRect().top <= focusLine) {
+    const probe = serverScrollProbe(card);
+    if (viewportTopLayoutPx(probe) <= focusLine) {
       activeIndex = middle;
       low = middle + 1;
     } else {
@@ -3598,7 +3629,7 @@ function navigateToServer(serverId) {
   const card = document.getElementById(serverCardAnchor(serverId))
     || serverNavigationCardsById.get(serverId);
   if (!card) return;
-  pauseServerNavigationSync(900);
+  pauseServerNavigationSync(1200);
   setActiveServer(serverId);
   restoreServerLeavePosition(serverId);
   // Sidebar clicks must land near visual center. Leave-restore / under-titlebar
@@ -3609,10 +3640,18 @@ function navigateToServer(serverId) {
     if (serverCardOutsideViewport(serverId)) {
       scrollServerIntoVisualCenter(serverId);
     }
+    // If zoom/layout left the probe below the focus line, the scroll-spy would
+    // hand the rail marker back to a tall prior card — nudge once more.
+    const targetCard = document.getElementById(serverCardAnchor(serverId))
+      || serverNavigationCardsById.get(serverId);
+    const { focusLine } = navigationFocusMetrics();
+    if (targetCard && viewportTopLayoutPx(serverScrollProbe(targetCard)) > focusLine + 48) {
+      scrollServerIntoVisualCenter(serverId);
+    }
     // Re-assert after the page settles so a tall previous card cannot steal the
     // rail marker once the scroll-spy pause ends.
     setActiveServer(serverId);
-    pauseServerNavigationSync(720);
+    pauseServerNavigationSync(900);
   };
   finishSidebarJump();
   // Leave-restore schedules its own rAF; run after it so centering wins the race.
